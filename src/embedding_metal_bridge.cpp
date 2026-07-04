@@ -102,7 +102,7 @@ List transform_tsne_metal_impl(NumericMatrix reference_layout,
                                int exact_repulsion_threshold,
                                int seed);
 List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
-                                  NumericMatrix distances,
+                                  SEXP distances,
                                   NumericMatrix y_init,
                                   bool init,
                                   int n_components,
@@ -119,7 +119,9 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
                                   double max_step_norm,
                                   std::string negative_gradient_method,
                                   int seed,
-                                  bool record_costs);
+                                  bool record_costs,
+                                  bool auto_config,
+                                  double auto_iter_end);
 // [[Rcpp::export]]
 bool embedding_metal_available_cpp() {
   return embedding_metal_available_impl();
@@ -348,7 +350,7 @@ List transform_tsne_metal_cpp(NumericMatrix reference_layout,
 
 // [[Rcpp::export]]
 List knn_tsne_opentsne_metal_cpp(IntegerMatrix indices,
-                                 NumericMatrix distances,
+                                 SEXP distances,
                                  NumericMatrix y_init,
                                  bool init,
                                  int n_components,
@@ -365,7 +367,9 @@ List knn_tsne_opentsne_metal_cpp(IntegerMatrix indices,
                                  double max_step_norm,
                                  std::string negative_gradient_method,
                                  int seed,
-                                 bool record_costs) {
+                                 bool record_costs,
+                                 bool auto_config,
+                                 double auto_iter_end) {
   return knn_tsne_opentsne_metal_impl(
     indices,
     distances,
@@ -385,6 +389,8 @@ List knn_tsne_opentsne_metal_cpp(IntegerMatrix indices,
     max_step_norm,
     negative_gradient_method,
     seed,
-    record_costs
+    record_costs,
+    auto_config,
+    auto_iter_end
   );
 }

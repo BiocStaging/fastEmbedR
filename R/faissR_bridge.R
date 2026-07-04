@@ -80,7 +80,6 @@ fastembedr_nn_without_self <- function(data,
   args <- list(
     data = data,
     k = if (use_exclude_self) k else k + 1L,
-    exclude_self = TRUE,
     backend = backend,
     method = method,
     metric = metric,
@@ -88,6 +87,9 @@ fastembedr_nn_without_self <- function(data,
     output = output,
     n_threads = n_threads
   )
+  if (use_exclude_self) {
+    args$exclude_self <- TRUE
+  }
   if (!is.null(target_recall)) {
     args$target_recall <- target_recall
   }

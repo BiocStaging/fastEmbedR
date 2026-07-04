@@ -1903,12 +1903,7 @@ List tsne_auto_parameters_cpp(const int n,
 
   const double early_exaggeration = 12.0;
   const int needed_k = std::max(1, std::min(n - 1, static_cast<int>(std::ceil(resolved_perplexity))));
-  const int early_max = n >= 10000 ? 750 : 500;
-  const int normal_max = n >= 10000 ? 750 : 500;
-
-  const bool cpu_backend = backend == "cpu" || backend == "auto";
-  const bool exact_or_small = negative_gradient_method == "exact" || n <= 5000;
-  const bool kld_auto_stop = cpu_backend && exact_or_small;
+  const bool kld_auto_stop = false;
 
   return List::create(
     Rcpp::Named("perplexity") = resolved_perplexity,
@@ -1916,8 +1911,8 @@ List tsne_auto_parameters_cpp(const int n,
     Rcpp::Named("early_exaggeration") = early_exaggeration,
     Rcpp::Named("exaggeration") = 1.0,
     Rcpp::Named("learning_rate") = static_cast<double>(n) / early_exaggeration,
-    Rcpp::Named("early_exaggeration_iter") = kld_auto_stop ? early_max : 250,
-    Rcpp::Named("n_iter") = kld_auto_stop ? normal_max : 500,
+    Rcpp::Named("early_exaggeration_iter") = 250,
+    Rcpp::Named("n_iter") = 500,
     Rcpp::Named("auto_kld_stop") = kld_auto_stop,
     Rcpp::Named("auto_iter_end") = 5000.0,
     Rcpp::Named("auto_iter_buffer_ee") = 15L,

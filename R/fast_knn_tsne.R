@@ -349,20 +349,142 @@ make_opentsne_default_init <- function(indices,
   )
 }
 
-make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
+opentsne_dense_numeric_matrix <- function(x) {
+  if (is_float32_matrix(x)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to use float32 input.", call. = FALSE)
+    }
+    x <- float::dbl(x)
+  } else {
+    x <- as.matrix(x)
+  }
+  storage.mode(x) <- "double"
+  x
+}
+
+opentsne_pca_input_matrix <- function(x) {
+  if (is_float32_matrix(x)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to use float32 input.", call. = FALSE)
+    }
+    return(x)
+  }
   x <- as.matrix(x)
   storage.mode(x) <- "double"
+  x
+}
+
+opentsne_pca_has_nonfinite <- function(x) {
+  if (is_float32_matrix(x)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to use float32 input.", call. = FALSE)
+    }
+    return(any(!is.finite(float::dbl(x))))
+  }
+  any(!is.finite(x))
+}
+
+fastpls_package_pca_scores <- function(x,
+                                       rank,
+                                       seed,
+                                       backend = "cpu") {
+  if (!requireNamespace("fastPLS", quietly = TRUE)) {
+    return(NULL)
+  }
+  pca_fun <- tryCatch(
+    getExportedValue("fastPLS", "pca"),
+    error = function(e) NULL
+  )
+  if (is.null(pca_fun)) {
+    return(NULL)
+  }
+  seed <- suppressWarnings(as.integer(seed))
+  if (length(seed) != 1L || is.na(seed)) seed <- 4L
+  set.seed(seed)
+  fit <- pca_fun(
+    x,
+    ncomp = as.integer(rank),
+    center = TRUE,
+    scale = FALSE,
+    backend = backend,
+    method = "rsvd"
+  )
+  scores <- fit$scores
+  if (is.null(scores)) {
+    stop("fastPLS::pca() did not return PCA scores.", call. = FALSE)
+  }
+  scores <- if (is_float32_matrix(scores)) {
+    float::dbl(scores)
+  } else {
+    as.matrix(scores)
+  }
+  storage.mode(scores) <- "double"
+  rank <- as.integer(rank)
+  usable <- min(rank, ncol(scores))
+  if (usable < rank) {
+    stop("fastPLS::pca() returned fewer components than requested.", call. = FALSE)
+  }
+  scores <- scores[, seq_len(rank), drop = FALSE]
+
+  loadings <- fit$loadings
+  if (!is.null(loadings)) {
+    loadings <- if (is_float32_matrix(loadings)) {
+      float::dbl(loadings)
+    } else {
+      as.matrix(loadings)
+    }
+    if (ncol(loadings) >= rank) {
+      storage.mode(loadings) <- "double"
+      scores <- orient_pca_scores(scores, loadings[, seq_len(rank), drop = FALSE])
+    }
+  }
+  colnames(scores) <- paste0("PC", seq_len(ncol(scores)))
+  list(
+    scores = scores,
+    loadings = attr(scores, "loadings"),
+    singular_values = NULL,
+    backend = paste0("fastPLS_", backend, "_rsvd"),
+    method = "fastPLS_rsvd",
+    oversample = NA_integer_,
+    power = NA_integer_,
+    backend_reason = NA_character_,
+    package = "fastPLS",
+    package_version = as.character(utils::packageVersion("fastPLS"))
+  )
+}
+
+make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
+  x <- opentsne_pca_input_matrix(x)
   n_components <- as.integer(n_components)
   if (length(n_components) != 1L || is.na(n_components) || n_components < 1L) {
     stop("`n_components` must be a positive integer.", call. = FALSE)
   }
-  centered <- sweep(x, 2L, colMeans(x), check.margin = FALSE)
-  pca <- fastpls_rsvd_pca_scores(
-    centered,
-    rank = n_components,
-    seed = seed,
-    backend = backend
+  fastpls_reason <- NA_character_
+  pca <- tryCatch(
+    fastpls_package_pca_scores(
+      x,
+      rank = n_components,
+      seed = seed,
+      backend = backend
+    ),
+    error = function(e) {
+      fastpls_reason <<- conditionMessage(e)
+      NULL
+    }
   )
+  if (is.null(pca)) {
+    x_numeric <- opentsne_dense_numeric_matrix(x)
+    centered <- sweep(x_numeric, 2L, colMeans(x_numeric), check.margin = FALSE)
+    pca <- fastpls_rsvd_pca_scores(
+      centered,
+      rank = n_components,
+      seed = seed,
+      backend = backend
+    )
+    if (!is.na(fastpls_reason)) {
+      pca$backend_reason <- paste0("fastPLS_package_unavailable_or_failed: ", fastpls_reason)
+    }
+  }
   init <- as.matrix(pca$scores[, seq_len(n_components), drop = FALSE])
   init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
   scale <- max(apply(init, 2L, stats::sd))
@@ -371,6 +493,11 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
   }
   attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
   attr(init, "fastEmbedR_init_backend") <- pca$backend
+  attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
+  if (!is.null(pca$package)) {
+    attr(init, "fastEmbedR_init_package") <- pca$package
+    attr(init, "fastEmbedR_init_package_version") <- pca$package_version
+  }
   init
 }
 
@@ -380,7 +507,10 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
 #' [opentsne()] and [opentsne_knn()]. Supplying `cache_file` stores the result
 #' as an RDS file; later calls with the same path reuse the saved matrix instead
 #' of recomputing PCA. This is useful when comparing several KNN backends with
-#' exactly the same initialization.
+#' exactly the same initialization. If the optional `fastPLS` package is
+#' installed, its RSVD PCA implementation is preferred for the requested
+#' backend, including native Metal PCA on macOS; otherwise fastEmbedR falls
+#' back to its internal RSVD helper.
 #'
 #' @param data Numeric matrix/data frame with observations in rows.
 #' @param n_components Output dimensionality, usually `2`.
@@ -404,12 +534,11 @@ opentsne_pca_init <- function(data,
   if (length(n_components) != 1L || is.na(n_components) || n_components < 1L) {
     stop("`n_components` must be a positive integer.", call. = FALSE)
   }
-  x <- as.matrix(data)
-  storage.mode(x) <- "double"
+  x <- opentsne_pca_input_matrix(data)
   if (nrow(x) < 2L || ncol(x) < 1L) {
     stop("`data` must have at least two rows and one column.", call. = FALSE)
   }
-  if (any(!is.finite(x))) {
+  if (opentsne_pca_has_nonfinite(x)) {
     stop("`data` must contain only finite values.", call. = FALSE)
   }
   if (!is.null(cache_file)) {
@@ -452,8 +581,7 @@ resolve_opentsne_y_init <- function(Y_init, n, n_components) {
     attr(Y_init, "fastEmbedR_init_cache_file") <- path
     attr(Y_init, "fastEmbedR_init_cache_hit") <- TRUE
   }
-  Y_init <- as.matrix(Y_init)
-  storage.mode(Y_init) <- "double"
+  Y_init <- opentsne_dense_numeric_matrix(Y_init)
   if (nrow(Y_init) != n || ncol(Y_init) != n_components) {
     stop(
       "`Y_init` must have ", n, " rows and ", n_components,
@@ -472,8 +600,7 @@ make_opentsne_pca_init_from_data <- function(init_data,
                                              n_components,
                                              seed,
                                              backend = "cpu") {
-  x <- as.matrix(init_data)
-  storage.mode(x) <- "double"
+  x <- opentsne_pca_input_matrix(init_data)
   if (nrow(x) != n) {
     stop("`init_data` must have one row per KNN row.", call. = FALSE)
   }
@@ -601,14 +728,14 @@ fast_knn_opentsne_materialized <- function(indices,
   }
   if (identical(optimizer_backend, "metal")) {
     if (identical(negative_gradient_method, "auto")) {
-      negative_gradient_method <- "fft"
+      negative_gradient_method <- if (n <= 3000L) "exact" else "fft"
     }
   } else if (identical(optimizer_backend, "cuda")) {
     if (identical(negative_gradient_method, "auto")) {
       negative_gradient_method <- "fft"
     }
   } else if (identical(negative_gradient_method, "auto")) {
-    negative_gradient_method <- "fft"
+    negative_gradient_method <- if (n <= 3000L) "exact" else "fft"
   }
   if (identical(optimizer_backend, "cpu") && identical(negative_gradient_method, "fft")) {
     if (n_components != 2L) {
@@ -681,18 +808,33 @@ fast_knn_opentsne_materialized <- function(indices,
   }
 
   out <- if (identical(optimizer_backend, "metal")) {
-    gpu_distances <- if (is_float32_matrix(distances)) {
-      matrix(
-        as.numeric(distances),
-        nrow = nrow(indices),
-        ncol = ncol(indices)
-      )
-    } else {
-      distances
-    }
     knn_tsne_opentsne_metal_cpp(
       indices,
-      gpu_distances,
+      distances,
+      args$Y_init,
+      args$init,
+      args$n_components,
+      args$perplexity,
+      early_exaggeration_iter,
+      n_iter,
+      ex$early,
+      ex$normal,
+      lr$value,
+      lr$auto,
+      args$momentum,
+      args$final_momentum,
+      min_gain,
+      max_step_norm,
+      negative_gradient_method,
+      as.integer(seed),
+      record_costs,
+      isTRUE(auto_params$auto_kld_stop),
+      auto_params$auto_iter_end
+    )
+  } else if (identical(optimizer_backend, "cuda")) {
+    knn_tsne_opentsne_cuda_float_cpp(
+      indices,
+      distances,
       args$Y_init,
       args$init,
       args$n_components,
@@ -711,108 +853,33 @@ fast_knn_opentsne_materialized <- function(indices,
       as.integer(seed),
       record_costs
     )
-  } else if (identical(optimizer_backend, "cuda")) {
-    if (is_float32_matrix(distances)) {
-      knn_tsne_opentsne_cuda_float_cpp(
-        indices,
-        distances,
-        args$Y_init,
-        args$init,
-        args$n_components,
-        args$perplexity,
-        early_exaggeration_iter,
-        n_iter,
-        ex$early,
-        ex$normal,
-        lr$value,
-        lr$auto,
-        args$momentum,
-        args$final_momentum,
-        min_gain,
-        max_step_norm,
-        negative_gradient_method,
-        as.integer(seed),
-        record_costs
-      )
-    } else {
-      knn_tsne_opentsne_cuda_cpp(
-        indices,
-        distances,
-        args$Y_init,
-        args$init,
-        args$n_components,
-        args$perplexity,
-        early_exaggeration_iter,
-        n_iter,
-        ex$early,
-        ex$normal,
-        lr$value,
-        lr$auto,
-        args$momentum,
-        args$final_momentum,
-        min_gain,
-        max_step_norm,
-        negative_gradient_method,
-        as.integer(seed),
-        record_costs
-      )
-    }
   } else {
-    if (is_float32_matrix(distances)) {
-      knn_tsne_opentsne_float_cpp(
-        indices,
-        distances,
-        args$Y_init,
-        args$init,
-        args$n_components,
-        args$perplexity,
-        args$theta,
-        early_exaggeration_iter,
-        n_iter,
-        ex$early,
-        ex$normal,
-        lr$value,
-        lr$auto,
-        args$momentum,
-        args$final_momentum,
-        min_gain,
-        max_step_norm,
-        negative_gradient_method,
-        as.integer(n_threads),
-        as.integer(seed),
-        args$verbose,
-        record_costs,
-        isTRUE(auto_params$auto_kld_stop),
-        auto_params$auto_iter_end
-      )
-    } else {
-      knn_tsne_opentsne_cpp(
-        indices,
-        distances,
-        args$Y_init,
-        args$init,
-        args$n_components,
-        args$perplexity,
-        args$theta,
-        early_exaggeration_iter,
-        n_iter,
-        ex$early,
-        ex$normal,
-        lr$value,
-        lr$auto,
-        args$momentum,
-        args$final_momentum,
-        min_gain,
-        max_step_norm,
-        negative_gradient_method,
-        as.integer(n_threads),
-        as.integer(seed),
-        args$verbose,
-        record_costs,
-        isTRUE(auto_params$auto_kld_stop),
-        auto_params$auto_iter_end
-      )
-    }
+    knn_tsne_opentsne_float_cpp(
+      indices,
+      distances,
+      args$Y_init,
+      args$init,
+      args$n_components,
+      args$perplexity,
+      args$theta,
+      early_exaggeration_iter,
+      n_iter,
+      ex$early,
+      ex$normal,
+      lr$value,
+      lr$auto,
+      args$momentum,
+      args$final_momentum,
+      min_gain,
+      max_step_norm,
+      negative_gradient_method,
+      as.integer(n_threads),
+      as.integer(seed),
+      args$verbose,
+      record_costs,
+      isTRUE(auto_params$auto_kld_stop),
+      auto_params$auto_iter_end
+    )
   }
   layout <- finalize_embedding_layout(
     out$Y,
@@ -864,7 +931,7 @@ fast_knn_opentsne_materialized <- function(indices,
     record_costs = record_costs,
     optimizer = out$optimizer,
     repulsion = out$repulsion,
-    precision = out$precision %||% if (is_float32_matrix(distances) && identical(optimizer_backend, "cpu")) "float32" else "double",
+    precision = out$precision %||% if (is_float32_matrix(distances)) "float32" else "double",
     probabilities = probabilities,
     n_negatives = n_negatives,
     n_threads = out$n_threads,
@@ -1361,11 +1428,12 @@ opentsne <- function(data,
 
   Y_init <- resolve_opentsne_y_init(Y_init, n, n_components)
   init_info <- list(method = "user", backend = NA_character_)
-  if (is.null(Y_init) && !is.null(init_data)) {
+  if (is.null(Y_init)) {
+    init_source <- if (is.null(init_data)) x else init_data
     init_backend <- if (optimizer_backend %in% c("metal", "cuda")) optimizer_backend else "cpu"
     Y_init <- tryCatch(
       make_opentsne_pca_init_from_data(
-        init_data,
+        init_source,
         n = n,
         n_components = n_components,
         seed = seed,
@@ -1383,9 +1451,6 @@ opentsne <- function(data,
       init_info$method <- "random_fallback_after_pca_error"
       init_info$backend <- "cpu"
     }
-  } else if (is.null(Y_init)) {
-    init_info$method <- "knn_native_default"
-    init_info$backend <- optimizer_backend
   }
 
   embedding_time <- system.time({

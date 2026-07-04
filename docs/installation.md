@@ -80,8 +80,11 @@ After installation:
 ```r
 library(fastEmbedR)
 faissR::backend_info()
-fastEmbedR::metal_available()
 ```
+
+`faissR::backend_info()` reports nearest-neighbour backend availability.
+`fastEmbedR` checks CPU, Metal, and CUDA embedding backends when a function is
+called with `backend = "cpu"`, `"metal"`, or `"cuda"`.
 
 ## Backend Rule
 

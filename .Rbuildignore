@@ -2,6 +2,10 @@
 ^\.github$
 ^\.github/
 ^\.gitignore$
+^\.r-lib$
+^\.r-lib/
+^\.r-lib-test$
+^\.r-lib-test/
 ^LICENSE[.]md$
 ^LICENSE-IMPLICATIONS[.]md$
 ^BENCHMARK_SUMMARY[.]md$
@@ -17,6 +21,12 @@
 ^[A-Za-z0-9_.-]+[.]Rcheck/
 ^fastEmbedR_[0-9.]+[.]tar[.]gz$
 ^faissR_[0-9.]+[.]tar[.]gz$
+^singularity$
+^singularity/
+^tmp_chiamaka_rdata$
+^tmp_chiamaka_rdata/
+^tools/benchmark_embeddings_float32_.*$
+^tools/hpc_embeddings/fastembedr_cuda_multiarch_cugraph[.]def$
 ^Rplots[.]pdf$
 ^results$
 ^results/

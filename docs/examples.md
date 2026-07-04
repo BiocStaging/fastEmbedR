@@ -136,13 +136,11 @@ results[[length(results) + 1L]] <- run_method(
                        n_threads = 4, seed = seed)
 )
 
-if (fastEmbedR::cuda_available()) {
-  results[[length(results) + 1L]] <- run_method(
-    "fastEmbedR openTSNE CUDA", "cuda",
-    fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cuda",
-                         n_threads = 4, seed = seed)
-  )
-}
+results[[length(results) + 1L]] <- run_method(
+  "fastEmbedR openTSNE CUDA", "cuda",
+  fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cuda",
+                       n_threads = 4, seed = seed)
+)
 
 results[[length(results) + 1L]] <- run_method(
   "Rtsne full", "cpu",
@@ -156,13 +154,11 @@ results[[length(results) + 1L]] <- run_method(
                    graph_mode = "fuzzy", n_threads = 4, seed = seed)
 )
 
-if (fastEmbedR::cuda_available()) {
-  results[[length(results) + 1L]] <- run_method(
-    "fastEmbedR UMAP CUDA fuzzy", "cuda",
-    fastEmbedR::umap(x_fast, n_neighbors = k, backend = "cuda",
-                     graph_mode = "fuzzy", n_threads = 4, seed = seed)
-  )
-}
+results[[length(results) + 1L]] <- run_method(
+  "fastEmbedR UMAP CUDA fuzzy", "cuda",
+  fastEmbedR::umap(x_fast, n_neighbors = k, backend = "cuda",
+                   graph_mode = "fuzzy", n_threads = 4, seed = seed)
+)
 
 results[[length(results) + 1L]] <- run_method(
   "uwot UMAP fast_sgd full", "cpu",

@@ -58,7 +58,10 @@ FAISS GPU and RAPIDS cuVS details.
 ```r
 library(fastEmbedR)
 
-fastEmbedR::metal_available()
-fastEmbedR::cuda_available()
 faissR::backend_info()
 ```
+
+`faissR::backend_info()` reports FAISS/cuVS KNN availability. CUDA and Metal
+embedding support is checked by the `backend` argument at run time; if an
+optional embedding backend is unavailable, `fastEmbedR` reports the failure
+instead of silently falling back to CPU.

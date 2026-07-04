@@ -857,10 +857,11 @@ method_specs <- function() {
         if (is.null(info)) {
           stop("No usable fftRtsne/Spectre wrapper and fast_tsne executable found.", call. = FALSE)
         }
+        x <- coerce_matrix(ctx$x)
         fun <- info$fun
         f <- names(formals(fun))
         call_args <- list(
-          X = ctx$x,
+          X = x,
           dims = 2L,
           perplexity = ctx$perplexity,
           max_iter = 1000L,

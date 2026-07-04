@@ -792,29 +792,18 @@ umap_build_csr_graph <- function(indices,
       as.integer(n_threads)
     )
     graph$graph_mode <- "binary"
-    return(umap_graph_keep_float32(graph, distance_is_float32))
+    return(umap_graph_keep_float32(graph, TRUE))
   }
-  graph <- if (distance_is_float32) {
-    umap_graph_csr_float_cpp(
-      indices,
-      distances,
-      as.integer(col_start),
-      as.integer(n_cols),
-      as.integer(edge_budget),
-      as.integer(n_threads)
-    )
-  } else {
-    umap_graph_csr_cpp(
-      indices,
-      distances,
-      as.integer(col_start),
-      as.integer(n_cols),
-      as.integer(edge_budget),
-      as.integer(n_threads)
-    )
-  }
+  graph <- umap_graph_csr_float_cpp(
+    indices,
+    distances,
+    as.integer(col_start),
+    as.integer(n_cols),
+    as.integer(edge_budget),
+    as.integer(n_threads)
+  )
   graph$graph_mode <- "fuzzy"
-  umap_graph_keep_float32(graph, distance_is_float32)
+  umap_graph_keep_float32(graph, TRUE)
 }
 
 umap_graph_keep_float32 <- function(graph, use_float32) {

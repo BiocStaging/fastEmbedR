@@ -261,6 +261,7 @@ fitsne_wrapper <- function() {
 }
 
 run_fitsne <- function(x, y_init = NULL) {
+  x <- as_double_matrix(x)
   wrapper <- fitsne_wrapper()
   exe <- fast_tsne_path()
   if (!nzchar(exe)) stop("fast_tsne executable not found.", call. = FALSE)
@@ -410,9 +411,9 @@ worker_main <- function() {
   standard <- if (is.na(standard_path)) NULL else pick_dataset_object(standard_path)
   labels <- if (is.null(standard)) float_obj$labels else (standard$labels %||% float_obj$labels)
   if (!is.null(labels)) labels <- as.factor(labels)
-  # Reference packages must receive the standard R object loaded from the
-  # dataset .RData file, not the float32 object and not a converted copy.
-  x_ref <- if (is.null(standard)) NULL else standard$data
+  # Reference packages receive the standard R data, not the float32 object.
+  # Some wrappers, including KlugerLab/FIt-SNE, require a strict base matrix.
+  x_ref <- if (is.null(standard)) NULL else as_double_matrix(standard$data)
   x_fast <- as_fastembedr_float_input(float_obj$data)
   if (!is.null(x_ref) && nrow(x_ref) != nrow(x_fast)) {
     stop("Standard and float32 datasets have different number of rows for ", dataset, call. = FALSE)

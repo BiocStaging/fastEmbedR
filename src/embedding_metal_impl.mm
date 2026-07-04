@@ -65,6 +65,24 @@ std::vector<float> metal_copy_float_vector(SEXP values,
   return out;
 }
 
+std::pair<int, int> metal_matrix_dims(SEXP values, const char* name) {
+  if (metal_is_float32_s4(values)) {
+    Rcpp::S4 obj(values);
+    SEXP data = obj.slot("Data");
+    SEXP dims = Rf_getAttrib(data, R_DimSymbol);
+    if (TYPEOF(data) != INTSXP || TYPEOF(dims) != INTSXP || Rf_length(dims) != 2) {
+      Rcpp::stop("%s has an invalid float32 matrix payload", name);
+    }
+    const int* dim_ptr = INTEGER(dims);
+    return std::make_pair(dim_ptr[0], dim_ptr[1]);
+  }
+  if (Rf_isMatrix(values) && Rf_isReal(values)) {
+    NumericMatrix mat(values);
+    return std::make_pair(mat.nrow(), mat.ncol());
+  }
+  Rcpp::stop("%s must be a numeric matrix or float::float32 matrix", name);
+}
+
 struct EmbedParams {
   std::uint32_t n;
   std::uint32_t k;
@@ -797,11 +815,12 @@ void metal_parallel_for(const int n, const int n_threads, Function fn) {
   for (auto& worker : workers) worker.join();
 }
 
-void compute_tsne_row_probabilities_metal(const NumericMatrix& distances,
+void compute_tsne_row_probabilities_metal(const std::vector<float>& distances,
+                                          const int n,
+                                          const int k,
                                           const int row,
                                           const double perplexity,
                                           std::vector<double>& row_p) {
-  const int k = distances.ncol();
   row_p.assign(static_cast<std::size_t>(k), 0.0);
   bool found = false;
   double beta = 1.0;
@@ -814,14 +833,18 @@ void compute_tsne_row_probabilities_metal(const NumericMatrix& distances,
   for (int iter = 0; !found && iter < 200; ++iter) {
     sum_p = std::numeric_limits<double>::min();
     for (int j = 0; j < k; ++j) {
-      const double d = distances(row, j);
+      const double d = static_cast<double>(
+        distances[static_cast<std::size_t>(row) + static_cast<std::size_t>(n) * j]
+      );
       const double p = std::exp(-beta * d * d);
       row_p[static_cast<std::size_t>(j)] = p;
       sum_p += p;
     }
     double entropy = 0.0;
     for (int j = 0; j < k; ++j) {
-      const double d = distances(row, j);
+      const double d = static_cast<double>(
+        distances[static_cast<std::size_t>(row) + static_cast<std::size_t>(n) * j]
+      );
       entropy += beta * d * d * row_p[static_cast<std::size_t>(j)];
     }
     entropy = entropy / sum_p + std::log(sum_p);
@@ -845,13 +868,10 @@ void compute_tsne_row_probabilities_metal(const NumericMatrix& distances,
 }
 
 TsneSparseMetalGraph build_tsne_sparse_graph_metal(const IntegerMatrix& indices,
-                                                   const NumericMatrix& distances,
+                                                   const std::vector<float>& distances,
                                                    const double perplexity) {
   const int n = indices.nrow();
   const int k = indices.ncol();
-  if (distances.nrow() != n || distances.ncol() != k) {
-    Rcpp::stop("KNN `indices` and `distances` must have the same dimensions.");
-  }
   int min_idx = std::numeric_limits<int>::max();
   int max_idx = std::numeric_limits<int>::min();
   for (int i = 0; i < n; ++i) {
@@ -870,11 +890,13 @@ TsneSparseMetalGraph build_tsne_sparse_graph_metal(const IntegerMatrix& indices,
     std::vector<TsnePackedEdge>& edges = local_edges[static_cast<std::size_t>(thread_id)];
     edges.reserve(edges.size() + static_cast<std::size_t>(std::max(0, end - begin)) * k);
     for (int i = begin; i < end; ++i) {
-      compute_tsne_row_probabilities_metal(distances, i, perplexity, row_p);
+      compute_tsne_row_probabilities_metal(distances, n, k, i, perplexity, row_p);
       for (int j = 0; j < k; ++j) {
         const int nb = indices(i, j) - offset;
         if (nb < 0 || nb >= n) Rcpp::stop("KNN indices are out of range.");
-        const double d = distances(i, j);
+        const double d = static_cast<double>(
+          distances[static_cast<std::size_t>(i) + static_cast<std::size_t>(n) * j]
+        );
         if (!std::isfinite(d) || d < 0.0) {
           Rcpp::stop("KNN distances must be finite and non-negative.");
         }
@@ -936,6 +958,59 @@ TsneSparseMetalGraph build_tsne_sparse_graph_metal(const IntegerMatrix& indices,
     graph.val[static_cast<std::size_t>(pos)] = value;
   }
   return graph;
+}
+
+double squared_distance_2d_float_layout(const std::vector<float>& y,
+                                        const int i,
+                                        const int j) {
+  const std::size_t ib = static_cast<std::size_t>(i) * 2u;
+  const std::size_t jb = static_cast<std::size_t>(j) * 2u;
+  const double dx = static_cast<double>(y[ib]) - static_cast<double>(y[jb]);
+  const double dy = static_cast<double>(y[ib + 1u]) - static_cast<double>(y[jb + 1u]);
+  return dx * dx + dy * dy;
+}
+
+double compute_sum_q_metal_layout(const std::vector<float>& y,
+                                  const int n,
+                                  const int n_threads) {
+  std::vector<double> partial(static_cast<std::size_t>(n_threads), 0.0);
+  metal_parallel_for(std::max(0, n - 1), n_threads, [&](const int begin, const int end, const int thread_id) {
+    double local = 0.0;
+    for (int i = begin; i < end; ++i) {
+      for (int j = i + 1; j < n; ++j) {
+        local += 2.0 / (1.0 + squared_distance_2d_float_layout(y, i, j));
+      }
+    }
+    partial[static_cast<std::size_t>(thread_id)] = local;
+  });
+  return std::max(
+    std::accumulate(partial.begin(), partial.end(), 0.0),
+    std::numeric_limits<double>::min()
+  );
+}
+
+double evaluate_kl_metal_graph(const TsneSparseMetalGraph& graph,
+                               const std::vector<float>& y,
+                               const int n,
+                               const int n_threads) {
+  const double sum_q = compute_sum_q_metal_layout(y, n, n_threads);
+  std::vector<double> partial(static_cast<std::size_t>(n_threads), 0.0);
+  metal_parallel_for(n, n_threads, [&](const int begin, const int end, const int thread_id) {
+    double local = 0.0;
+    for (int i = begin; i < end; ++i) {
+      const int row_begin = graph.row_ptr[static_cast<std::size_t>(i)];
+      const int row_end = graph.row_ptr[static_cast<std::size_t>(i + 1)];
+      for (int pos = row_begin; pos < row_end; ++pos) {
+        const int j = graph.col[static_cast<std::size_t>(pos)];
+        const double p_ij = static_cast<double>(graph.val[static_cast<std::size_t>(pos)]);
+        const double q_ij =
+          (1.0 / (1.0 + squared_distance_2d_float_layout(y, i, j))) / sum_q;
+        local += p_ij * std::log((p_ij + 1e-9) / (q_ij + 1e-9));
+      }
+    }
+    partial[static_cast<std::size_t>(thread_id)] = local;
+  });
+  return std::accumulate(partial.begin(), partial.end(), 0.0);
 }
 
 std::vector<float> initialize_opentsne_metal_layout(const NumericMatrix& y_init,
@@ -2045,10 +2120,11 @@ kernel void opentsne_epoch_exact(
   device const int* row_ptr [[buffer(0)]],
   device const int* col_idx [[buffer(1)]],
   device const float* p_val [[buffer(2)]],
-  device float2* current [[buffer(3)]],
-  device float2* gains [[buffer(4)]],
-  device float2* updates [[buffer(5)]],
-  constant OpenTsneMetalParams& p [[buffer(6)]],
+  device const float2* current [[buffer(3)]],
+  device float2* next_current [[buffer(4)]],
+  device float2* gains [[buffer(5)]],
+  device float2* updates [[buffer(6)]],
+  constant OpenTsneMetalParams& p [[buffer(7)]],
   uint row [[thread_position_in_grid]]
 ) {
   if (row >= p.n) return;
@@ -2092,7 +2168,7 @@ kernel void opentsne_epoch_exact(
     update *= p.max_step_norm / (sqrt(step_norm2) + eps);
   }
 
-  current[row] = yi + update;
+  next_current[row] = yi + update;
   gains[row] = gain;
   updates[row] = update;
 }
@@ -3588,6 +3664,60 @@ void wait_for_command(id<MTLCommandBuffer> command_buffer,
   }
 }
 
+id<MTLBuffer> metal_private_buffer_from_bytes(MetalEmbeddingState& state,
+                                              const void* data,
+                                              const std::size_t length,
+                                              const char* label) {
+  if (length == 0u) {
+    return [state.device newBufferWithLength:1u options:MTLResourceStorageModePrivate];
+  }
+  id<MTLBuffer> staging = [state.device newBufferWithBytes:data
+                                                     length:length
+                                                    options:MTLResourceStorageModeShared];
+  id<MTLBuffer> device_buffer = [state.device newBufferWithLength:length
+                                                          options:MTLResourceStorageModePrivate];
+  if (staging == nil || device_buffer == nil) {
+    if (staging != nil) [staging release];
+    if (device_buffer != nil) [device_buffer release];
+    Rcpp::stop("Failed to allocate Metal staging buffer for %s.", label);
+  }
+  id<MTLCommandBuffer> command_buffer = [state.queue commandBuffer];
+  id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
+  [blit copyFromBuffer:staging
+          sourceOffset:0
+              toBuffer:device_buffer
+     destinationOffset:0
+                  size:length];
+  [blit endEncoding];
+  wait_for_command(command_buffer, label);
+  [staging release];
+  return device_buffer;
+}
+
+void metal_copy_buffer_to_host(MetalEmbeddingState& state,
+                               id<MTLBuffer> device_buffer,
+                               void* out,
+                               const std::size_t length,
+                               const char* label) {
+  if (length == 0u) return;
+  id<MTLBuffer> staging = [state.device newBufferWithLength:length
+                                                    options:MTLResourceStorageModeShared];
+  if (staging == nil) {
+    Rcpp::stop("Failed to allocate Metal readback buffer for %s.", label);
+  }
+  id<MTLCommandBuffer> command_buffer = [state.queue commandBuffer];
+  id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
+  [blit copyFromBuffer:device_buffer
+          sourceOffset:0
+              toBuffer:staging
+     destinationOffset:0
+                  size:length];
+  [blit endEncoding];
+  wait_for_command(command_buffer, label);
+  std::memcpy(out, [staging contents], length);
+  [staging release];
+}
+
 struct MetalStageTimingEntry {
   std::string stage;
   int command_count = 0;
@@ -4708,7 +4838,7 @@ List transform_tsne_metal_impl(NumericMatrix reference_layout,
 }
 
 List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
-                                  NumericMatrix distances,
+                                  SEXP distances,
                                   NumericMatrix y_init,
                                   bool init,
                                   int n_components,
@@ -4725,12 +4855,15 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
                                   double max_step_norm,
                                   std::string negative_gradient_method,
                                   int seed,
-                                  bool record_costs) {
+                                  bool record_costs,
+                                  bool auto_config,
+                                  double auto_iter_end) {
   const int n = indices.nrow();
   const int k = indices.ncol();
   if (n < 2 || k < 1) Rcpp::stop("KNN input must have at least two rows and one neighbor column.");
   if (n_components != 2) Rcpp::stop("Metal openTSNE currently supports exactly two output components.");
-  if (distances.nrow() != n || distances.ncol() != k) {
+  const std::pair<int, int> distance_dims = metal_matrix_dims(distances, "KNN distances");
+  if (distance_dims.first != n || distance_dims.second != k) {
     Rcpp::stop("KNN `indices` and `distances` must have the same dimensions.");
   }
   if (perplexity <= 0.0 || !std::isfinite(perplexity) || n - 1 < 3.0 * perplexity) {
@@ -4763,42 +4896,75 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       kMetalOpenTsneExactDenseThreshold
     );
   }
+  const bool use_private_fft_buffers = use_fft_grid && !record_costs;
 
   @autoreleasepool {
     MetalEmbeddingState& state = metal_embedding_state();
-    TsneSparseMetalGraph graph = build_tsne_sparse_graph_metal(indices, distances, perplexity);
+    std::vector<float> distance_values = metal_copy_float_vector(distances, "KNN distances");
+    TsneSparseMetalGraph graph = build_tsne_sparse_graph_metal(indices, distance_values, perplexity);
+    std::vector<float>().swap(distance_values);
     std::vector<float> current = initialize_opentsne_metal_layout(y_init, init, n, seed);
     std::vector<float> gains(current.size(), 1.0f);
     std::vector<float> updates(current.size(), 0.0f);
     std::vector<float> row_sums(static_cast<std::size_t>(n), 0.0f);
     float inv_sum_q_initial = 1.0f;
 
-    id<MTLBuffer> row_ptr_buffer = [state.device newBufferWithBytes:graph.row_ptr.data()
-                                                             length:graph.row_ptr.size() * sizeof(std::int32_t)
-                                                            options:MTLResourceStorageModeShared];
-    id<MTLBuffer> col_buffer = [state.device newBufferWithBytes:graph.col.data()
-                                                         length:graph.col.size() * sizeof(std::int32_t)
-                                                        options:MTLResourceStorageModeShared];
-    id<MTLBuffer> val_buffer = [state.device newBufferWithBytes:graph.val.data()
-                                                         length:graph.val.size() * sizeof(float)
-                                                        options:MTLResourceStorageModeShared];
-    id<MTLBuffer> current_buffer = [state.device newBufferWithBytes:current.data()
-                                                             length:current.size() * sizeof(float)
-                                                            options:MTLResourceStorageModeShared];
-    id<MTLBuffer> next_buffer = [state.device newBufferWithLength:current.size() * sizeof(float)
-                                                          options:MTLResourceStorageModeShared];
-    id<MTLBuffer> gains_buffer = [state.device newBufferWithBytes:gains.data()
-                                                           length:gains.size() * sizeof(float)
-                                                          options:MTLResourceStorageModeShared];
-    id<MTLBuffer> updates_buffer = [state.device newBufferWithBytes:updates.data()
-                                                             length:updates.size() * sizeof(float)
-                                                            options:MTLResourceStorageModeShared];
-    id<MTLBuffer> row_sums_buffer = [state.device newBufferWithBytes:row_sums.data()
-                                                              length:row_sums.size() * sizeof(float)
-                                                             options:MTLResourceStorageModeShared];
-    id<MTLBuffer> inv_sum_q_buffer = [state.device newBufferWithBytes:&inv_sum_q_initial
-                                                               length:sizeof(float)
-                                                              options:MTLResourceStorageModeShared];
+    auto input_buffer = [&](const void* data, const std::size_t length, const char* label) -> id<MTLBuffer> {
+      if (use_private_fft_buffers) {
+        return metal_private_buffer_from_bytes(state, data, length, label);
+      }
+      return [state.device newBufferWithBytes:data
+                                       length:length
+                                      options:MTLResourceStorageModeShared];
+    };
+    auto work_buffer = [&](const std::size_t length) -> id<MTLBuffer> {
+      return [state.device newBufferWithLength:length
+                                       options:(use_private_fft_buffers ?
+                                                MTLResourceStorageModePrivate :
+                                                MTLResourceStorageModeShared)];
+    };
+
+    id<MTLBuffer> row_ptr_buffer = input_buffer(
+      graph.row_ptr.data(),
+      graph.row_ptr.size() * sizeof(std::int32_t),
+      "openTSNE row pointers"
+    );
+    id<MTLBuffer> col_buffer = input_buffer(
+      graph.col.data(),
+      graph.col.size() * sizeof(std::int32_t),
+      "openTSNE column indices"
+    );
+    id<MTLBuffer> val_buffer = input_buffer(
+      graph.val.data(),
+      graph.val.size() * sizeof(float),
+      "openTSNE probabilities"
+    );
+    id<MTLBuffer> current_buffer = input_buffer(
+      current.data(),
+      current.size() * sizeof(float),
+      "openTSNE initial layout"
+    );
+    id<MTLBuffer> next_buffer = work_buffer(current.size() * sizeof(float));
+    id<MTLBuffer> gains_buffer = input_buffer(
+      gains.data(),
+      gains.size() * sizeof(float),
+      "openTSNE gains"
+    );
+    id<MTLBuffer> updates_buffer = input_buffer(
+      updates.data(),
+      updates.size() * sizeof(float),
+      "openTSNE updates"
+    );
+    id<MTLBuffer> row_sums_buffer = use_private_fft_buffers ?
+      work_buffer(row_sums.size() * sizeof(float)) :
+      [state.device newBufferWithBytes:row_sums.data()
+                                length:row_sums.size() * sizeof(float)
+                               options:MTLResourceStorageModeShared];
+    id<MTLBuffer> inv_sum_q_buffer = use_private_fft_buffers ?
+      work_buffer(sizeof(float)) :
+      [state.device newBufferWithBytes:&inv_sum_q_initial
+                                length:sizeof(float)
+                               options:MTLResourceStorageModeShared];
     if (row_ptr_buffer == nil || col_buffer == nil || val_buffer == nil ||
         current_buffer == nil || next_buffer == nil ||
         gains_buffer == nil || updates_buffer == nil ||
@@ -4813,6 +4979,22 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       std::numeric_limits<float>::max();
 
     if (use_fft_grid) {
+      const int requested_early_iter = early_exaggeration_iter;
+      const int requested_normal_iter = n_iter;
+      const int requested_total_iter = total_iter;
+      const bool metal_auto_kld_stop = auto_config && n <= 5000;
+      if (!std::isfinite(auto_iter_end) || auto_iter_end <= 0.0) auto_iter_end = 5000.0;
+      int target_total_iter = requested_total_iter;
+      int actual_early_iter = metal_auto_kld_stop ? 0 : requested_early_iter;
+      int actual_normal_iter = metal_auto_kld_stop ? 0 : requested_normal_iter;
+      double auto_prev_error = std::numeric_limits<double>::infinity();
+      double auto_prev_rc = std::numeric_limits<double>::infinity();
+      bool auto_prev_valid = false;
+      int auto_ee_switch_buffer = 2;
+      std::string auto_stop_reason = metal_auto_kld_stop ?
+        "max_iterations_without_kld_plateau" :
+        "disabled";
+      const int kld_threads = metal_cpu_prep_threads(n);
       const std::uint32_t grid_n = static_cast<std::uint32_t>(metal_tsne_fft_grid_size(n));
       const std::uint32_t fft_n = grid_n << 1u;
       const std::uint32_t log_fft = log2_power_of_two(fft_n);
@@ -4826,7 +5008,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       const std::uint32_t stats_block_count =
         (static_cast<std::uint32_t>(n) + stats_block_size - 1u) / stats_block_size;
       bool use_mpsgraph_convolution = false;
-      if (!record_costs) {
+      if (!record_costs && !metal_auto_kld_stop) {
         if (@available(macOS 14.0, *)) {
           use_mpsgraph_convolution =
             metal_env_flag("FASTEMBEDR_METAL_OPENTSNE_MPSGRAPH", false);
@@ -4941,14 +5123,36 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         (static_cast<std::uint32_t>(n) + sum_block_size - 1u) / sum_block_size;
       const MTLSize sum_blocks = MTLSizeMake(static_cast<NSUInteger>(sum_block_count), 1, 1);
       const MTLSize stats_blocks = MTLSizeMake(static_cast<NSUInteger>(stats_block_count), 1, 1);
-      MetalStageTimer stage_timer(metal_stage_timing_enabled() && !record_costs);
-      NumericVector trace_iter(record_costs ? total_iter : 0);
-      NumericVector trace_sum_q(record_costs ? total_iter : 0);
-      NumericVector trace_repulsive_norm(record_costs ? total_iter : 0);
-      NumericVector trace_attractive_norm(record_costs ? total_iter : 0);
-      NumericVector trace_gradient_norm(record_costs ? total_iter : 0);
-      NumericVector trace_update_norm(record_costs ? total_iter : 0);
-      NumericVector trace_embedding_norm(record_costs ? total_iter : 0);
+      MetalStageTimer stage_timer(metal_stage_timing_enabled() && !record_costs && !metal_auto_kld_stop);
+      NumericVector trace_iter(record_costs ? requested_total_iter : 0);
+      NumericVector trace_sum_q(record_costs ? requested_total_iter : 0);
+      NumericVector trace_repulsive_norm(record_costs ? requested_total_iter : 0);
+      NumericVector trace_attractive_norm(record_costs ? requested_total_iter : 0);
+      NumericVector trace_gradient_norm(record_costs ? requested_total_iter : 0);
+      NumericVector trace_update_norm(record_costs ? requested_total_iter : 0);
+      NumericVector trace_embedding_norm(record_costs ? requested_total_iter : 0);
+      const int fft_sync_interval = std::max(
+        1,
+        metal_env_positive_int("FASTEMBEDR_METAL_OPENTSNE_SYNC_INTERVAL", 32)
+      );
+      std::vector<id<MTLCommandBuffer>> pending_fft_commands;
+      auto flush_pending_fft_commands = [&](const char* context) {
+        for (id<MTLCommandBuffer> command_buffer : pending_fft_commands) {
+          [command_buffer waitUntilCompleted];
+          if (command_buffer.status == MTLCommandBufferStatusError) {
+            std::string message = ns_error_message(command_buffer.error);
+            for (id<MTLCommandBuffer> pending : pending_fft_commands) {
+              if (pending != command_buffer) [pending release];
+            }
+            pending_fft_commands.clear();
+            Rcpp::stop("Metal openTSNE FFT-grid command failed during %s: %s",
+                       context,
+                       message.c_str());
+          }
+          [command_buffer release];
+        }
+        pending_fft_commands.clear();
+      };
 
       MPSGraph* mpsgraph = nil;
       MPSGraphTensorDataDictionary* mpsgraph_feeds = nil;
@@ -5071,8 +5275,10 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         }
       }
 
-      for (int iter = 0; iter < total_iter; ++iter) {
+      for (int iter = 0; iter < requested_total_iter; ++iter) {
+        if (iter >= target_total_iter) break;
         const bool in_early = iter < early_exaggeration_iter;
+        const int phase_iter_index = in_early ? iter : iter - early_exaggeration_iter;
         const double phase_exaggeration = in_early ? early_exaggeration : exaggeration;
         const double phase_lr = learning_rate_auto ?
           static_cast<double>(n) / std::max(phase_exaggeration, std::numeric_limits<double>::min()) :
@@ -5623,11 +5829,70 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
           [center_encoder endEncoding];
         }
         [fft_command commit];
-        [fft_command waitUntilCompleted];
-        if (fft_command.status == MTLCommandBufferStatusError) {
-          Rcpp::stop("Metal openTSNE FFT-grid command failed: %s", ns_error_message(fft_command.error).c_str());
+        const bool defer_fft_sync = !record_costs && !metal_auto_kld_stop;
+        if (defer_fft_sync) {
+          [fft_command retain];
+          pending_fft_commands.push_back(fft_command);
+          if (static_cast<int>(pending_fft_commands.size()) >= fft_sync_interval) {
+            flush_pending_fft_commands("batched synchronization");
+          }
+        } else {
+          [fft_command waitUntilCompleted];
+          if (fft_command.status == MTLCommandBufferStatusError) {
+            Rcpp::stop("Metal openTSNE FFT-grid command failed: %s", ns_error_message(fft_command.error).c_str());
+          }
         }
         std::swap(current_buffer, next_buffer);
+        if (in_early) {
+          actual_early_iter = phase_iter_index + 1;
+        } else {
+          actual_normal_iter = phase_iter_index + 1;
+        }
+
+        bool stop_after_this_iter = false;
+        if (metal_auto_kld_stop) {
+          const int auto_pollrate = in_early ? 3 : 5;
+          const int auto_buffer = 15;
+          if ((phase_iter_index + 1) % auto_pollrate == 0) {
+            if (use_private_fft_buffers) {
+              metal_copy_buffer_to_host(
+                state,
+                current_buffer,
+                current.data(),
+                current.size() * sizeof(float),
+                "openTSNE Metal KLD layout"
+              );
+            } else {
+              std::memcpy(current.data(), [current_buffer contents], current.size() * sizeof(float));
+            }
+            const double kl = evaluate_kl_metal_graph(graph, current, n, kld_threads);
+            const double error_diff = auto_prev_error - kl;
+            const double error_rc = std::isfinite(auto_prev_error) && auto_prev_error > 0.0 ?
+              100.0 * error_diff / auto_prev_error :
+              std::numeric_limits<double>::infinity();
+            if (auto_prev_valid) {
+              if (in_early) {
+                if (error_rc < auto_prev_rc && phase_iter_index + 1 > auto_buffer) {
+                  if (auto_ee_switch_buffer < 1) {
+                    auto_stop_reason = "early_exaggeration_stopped_at_local_max_kld_relative_change";
+                    early_exaggeration_iter = iter + 1;
+                    target_total_iter = early_exaggeration_iter + requested_normal_iter;
+                  } else {
+                    --auto_ee_switch_buffer;
+                  }
+                }
+              } else if (phase_iter_index + 1 > auto_buffer &&
+                         std::fabs(error_diff) / static_cast<double>(auto_pollrate) < kl / auto_iter_end) {
+                auto_stop_reason = "normal_phase_stopped_at_kld_improvement_threshold";
+                target_total_iter = iter + 1;
+                stop_after_this_iter = true;
+              }
+            }
+            auto_prev_error = kl;
+            auto_prev_rc = error_rc;
+            auto_prev_valid = true;
+          }
+        }
         if (record_costs) {
           auto sum_norm_buffer = [&](id<MTLBuffer> buffer) -> double {
             const float* values = static_cast<const float*>([buffer contents]);
@@ -5653,9 +5918,21 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
           trace_update_norm[iter] = sum_norm_buffer(update_norm_buffer);
           trace_embedding_norm[iter] = std::sqrt(std::max(0.0, layout2));
         }
+        if (stop_after_this_iter) break;
       }
 
-      std::memcpy(current.data(), [current_buffer contents], current.size() * sizeof(float));
+      flush_pending_fft_commands("final synchronization");
+      if (use_private_fft_buffers) {
+        metal_copy_buffer_to_host(
+          state,
+          current_buffer,
+          current.data(),
+          current.size() * sizeof(float),
+          "openTSNE FFT final layout"
+        );
+      } else {
+        std::memcpy(current.data(), [current_buffer contents], current.size() * sizeof(float));
+      }
       NumericMatrix layout(n, 2);
       for (int i = 0; i < n; ++i) {
         layout(i, 0) = static_cast<double>(current[static_cast<std::size_t>(i) * 2u]);
@@ -5726,11 +6003,18 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
           "fft_grid_mpsgraph_metal" : "fft_grid_metal",
         Rcpp::Named("probabilities") = "symmetric_sparse_knn_cpu_prepared_for_metal",
         Rcpp::Named("n_threads") = NA_INTEGER,
-        Rcpp::Named("learning_rate") = learning_rate_auto ? NA_REAL : learning_rate,
-        Rcpp::Named("learning_rate_early") = static_cast<double>(n) / std::max(early_exaggeration, std::numeric_limits<double>::min()),
-        Rcpp::Named("learning_rate_normal") = static_cast<double>(n) / std::max(exaggeration, std::numeric_limits<double>::min()),
-        Rcpp::Named("metal_stage_timing") = stage_timer.to_data_frame()
-      );
+	        Rcpp::Named("learning_rate") = learning_rate_auto ? NA_REAL : learning_rate,
+	        Rcpp::Named("learning_rate_early") = static_cast<double>(n) / std::max(early_exaggeration, std::numeric_limits<double>::min()),
+	        Rcpp::Named("learning_rate_normal") = static_cast<double>(n) / std::max(exaggeration, std::numeric_limits<double>::min()),
+	        Rcpp::Named("auto_config") = auto_config,
+	        Rcpp::Named("auto_kld_stop") = metal_auto_kld_stop,
+	        Rcpp::Named("auto_stop_reason") = auto_stop_reason,
+	        Rcpp::Named("early_exaggeration_iter_actual") = actual_early_iter,
+	        Rcpp::Named("n_iter_actual") = actual_normal_iter,
+	        Rcpp::Named("max_iter_actual") = actual_early_iter + actual_normal_iter,
+	        Rcpp::Named("auto_iter_end") = auto_iter_end,
+	        Rcpp::Named("metal_stage_timing") = stage_timer.to_data_frame()
+	      );
     }
 
     const NSUInteger threads_sum = bounded_threads(state.opentsne_sum_q_pipeline);
@@ -5788,9 +6072,10 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       [epoch_encoder setBuffer:col_buffer offset:0 atIndex:1];
       [epoch_encoder setBuffer:val_buffer offset:0 atIndex:2];
       [epoch_encoder setBuffer:current_buffer offset:0 atIndex:3];
-      [epoch_encoder setBuffer:gains_buffer offset:0 atIndex:4];
-      [epoch_encoder setBuffer:updates_buffer offset:0 atIndex:5];
-      [epoch_encoder setBytes:&params length:sizeof(OpenTsneMetalParams) atIndex:6];
+      [epoch_encoder setBuffer:next_buffer offset:0 atIndex:4];
+      [epoch_encoder setBuffer:gains_buffer offset:0 atIndex:5];
+      [epoch_encoder setBuffer:updates_buffer offset:0 atIndex:6];
+      [epoch_encoder setBytes:&params length:sizeof(OpenTsneMetalParams) atIndex:7];
       [epoch_encoder dispatchThreads:grid_size threadsPerThreadgroup:epoch_threadgroup];
       [epoch_encoder endEncoding];
       [epoch_command commit];
@@ -5799,7 +6084,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         Rcpp::stop("Metal openTSNE epoch command failed: %s", ns_error_message(epoch_command.error).c_str());
       }
 
-      std::memcpy(current.data(), [current_buffer contents], current.size() * sizeof(float));
+      std::memcpy(current.data(), [next_buffer contents], current.size() * sizeof(float));
       double mean_x = 0.0;
       double mean_y = 0.0;
       for (int i = 0; i < n; ++i) {
@@ -5812,7 +6097,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       id<MTLCommandBuffer> center_command = [state.queue commandBuffer];
       id<MTLComputeCommandEncoder> center_encoder = [center_command computeCommandEncoder];
       [center_encoder setComputePipelineState:state.opentsne_center_pipeline];
-      [center_encoder setBuffer:current_buffer offset:0 atIndex:0];
+      [center_encoder setBuffer:next_buffer offset:0 atIndex:0];
       [center_encoder setBytes:&center length:sizeof(Center2) atIndex:1];
       [center_encoder setBytes:&n_u length:sizeof(std::uint32_t) atIndex:2];
       [center_encoder dispatchThreads:grid_size threadsPerThreadgroup:center_threadgroup];
@@ -5822,6 +6107,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       if (center_command.status == MTLCommandBufferStatusError) {
         Rcpp::stop("Metal openTSNE centering command failed: %s", ns_error_message(center_command.error).c_str());
       }
+      std::swap(current_buffer, next_buffer);
     }
 
     std::memcpy(current.data(), [current_buffer contents], current.size() * sizeof(float));
@@ -5835,6 +6121,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
     [col_buffer release];
     [val_buffer release];
     [current_buffer release];
+    [next_buffer release];
     [gains_buffer release];
     [updates_buffer release];
     [row_sums_buffer release];

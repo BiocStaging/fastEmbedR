@@ -214,7 +214,7 @@ test_that("one-call CPU and Metal KNN policy uses high-recall faissR HNSW", {
   )
   expect_equal(
     fastembedr_embedding_nn_policy("cuda"),
-    list(backend = "cuda", method = "auto", tuning = "auto", target_recall = NULL)
+    list(backend = "cuda", method = "auto", tuning = "auto", target_recall = 0.99)
   )
 })
 
@@ -335,8 +335,8 @@ test_that("UMAP CSR graph weights stay float32 through prepared optimizer path",
 
 test_that("opentsne convenience wrapper runs the automatic KNN workflow", {
   set.seed(43)
-  x <- rbind(matrix(rnorm(30), 10L, 3L), matrix(rnorm(30, 2), 10L, 3L))
-  labels <- rep(1:2, each = 10L)
+  x <- rbind(matrix(rnorm(500), 25L, 20L), matrix(rnorm(500, 2), 25L, 20L))
+  labels <- rep(1:2, each = 25L)
 
   fit <- opentsne(
     x,
@@ -350,6 +350,20 @@ test_that("opentsne convenience wrapper runs the automatic KNN workflow", {
   expect_equal(fit$parameters$method, "opentsne")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
   expect_equal(colnames(fit$layout), c("openTSNE1", "openTSNE2"))
+  expect_match(fit$parameters$init, "^pca_(fastPLS_)?rsvd$")
+  expect_match(fit$parameters$init_backend, "^(fastPLS_)?cpu_rsvd$")
+})
+
+test_that("opentsne PCA initialization can use fastPLS package backend", {
+  skip_if_not_installed("fastPLS")
+  set.seed(44)
+  x <- matrix(rnorm(160L), 40L, 4L)
+  init <- opentsne_pca_init(x, n_components = 2L, seed = 44L, backend = "cpu")
+
+  expect_equal(dim(init), c(40L, 2L))
+  expect_true(all(is.finite(init)))
+  expect_match(attr(init, "fastEmbedR_init_method"), "^pca_fastPLS_rsvd$")
+  expect_equal(attr(init, "fastEmbedR_init_backend"), "fastPLS_cpu_rsvd")
 })
 
 test_that("high-level embeddings avoid retaining KNN matrices by default", {
