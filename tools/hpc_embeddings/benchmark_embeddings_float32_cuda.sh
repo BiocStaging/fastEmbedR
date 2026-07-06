@@ -76,6 +76,7 @@ else
 fi
 
 RUNNER=()
+RSCRIPT_BIN="${RSCRIPT_BIN:-Rscript}"
 if [[ -n "${SINGULARITY_IMAGE}" && -f "${SINGULARITY_IMAGE}" ]]; then
   CONTAINER_BIN="${CONTAINER_BIN:-$(command -v apptainer || command -v singularity || true)}"
   if [[ -z "${CONTAINER_BIN}" ]]; then
@@ -83,6 +84,7 @@ if [[ -n "${SINGULARITY_IMAGE}" && -f "${SINGULARITY_IMAGE}" ]]; then
     exit 1
   fi
   RUNNER=("${CONTAINER_BIN}" exec --nv --bind "${BASE_DIR}:${BASE_DIR}" --pwd "${BASE_DIR}" "${SINGULARITY_IMAGE}")
+  RSCRIPT_BIN="${CONTAINER_RSCRIPT:-/opt/conda/bin/Rscript}"
 fi
 
 {
@@ -105,9 +107,10 @@ fi
   "${RUNNER[@]}" bash -c '
     nvidia-smi || true
     echo "PATH=${PATH}"
-    RSCRIPT="$(command -v Rscript || true)"
-    if [[ -z "${RSCRIPT}" ]]; then
-      for candidate in /usr/local/bin/Rscript /usr/bin/Rscript /opt/conda/bin/Rscript /opt/R/*/bin/Rscript; do
+    RSCRIPT="${CONTAINER_RSCRIPT:-/opt/conda/bin/Rscript}"
+    if [[ ! -x "${RSCRIPT}" ]]; then
+      RSCRIPT=""
+      for candidate in /opt/conda/bin/Rscript /usr/local/bin/Rscript /opt/R/*/bin/Rscript /usr/bin/Rscript; do
         if [[ -x "${candidate}" ]]; then RSCRIPT="${candidate}"; break; fi
       done
     fi
@@ -116,7 +119,7 @@ fi
       "${RSCRIPT}" -e "cat(\"fastEmbedR diagnostics\\n\"); library(fastEmbedR); print(utils::packageVersion(\"fastEmbedR\")); print(\"cuda_available\" %in% getNamespaceExports(\"fastEmbedR\")); print(\"backend_info\" %in% getNamespaceExports(\"fastEmbedR\")); print(try(fastEmbedR::opentsne_pca_init(matrix(runif(64), nrow = 16), backend = \"cuda\"), silent=TRUE)); cat(\"faissR diagnostics\\n\"); library(faissR); print(try(faissR::backend_info(), silent=TRUE)); print(try(faissR::cuda_available(), silent=TRUE)); print(try(faissR::cuvs_available(), silent=TRUE))"
     fi
   ' || true
-  "${RUNNER[@]}" Rscript "${BENCH_R}" \
+  "${RUNNER[@]}" "${RSCRIPT_BIN}" "${BENCH_R}" \
     --script="${BENCH_R}" \
     --backend_group=cuda \
     --base_dir="${BASE_DIR}" \

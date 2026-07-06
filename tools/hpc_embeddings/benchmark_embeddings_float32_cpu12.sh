@@ -77,6 +77,7 @@ else
 fi
 
 RUNNER=()
+RSCRIPT_BIN="${RSCRIPT_BIN:-Rscript}"
 if [[ -n "${SINGULARITY_IMAGE}" && -f "${SINGULARITY_IMAGE}" ]]; then
   CONTAINER_BIN="${CONTAINER_BIN:-$(command -v apptainer || command -v singularity || true)}"
   if [[ -z "${CONTAINER_BIN}" ]]; then
@@ -84,6 +85,7 @@ if [[ -n "${SINGULARITY_IMAGE}" && -f "${SINGULARITY_IMAGE}" ]]; then
     exit 1
   fi
   RUNNER=("${CONTAINER_BIN}" exec --bind "${BASE_DIR}:${BASE_DIR}" --pwd "${BASE_DIR}" "${SINGULARITY_IMAGE}")
+  RSCRIPT_BIN="${CONTAINER_RSCRIPT:-/opt/conda/bin/Rscript}"
 fi
 
 {
@@ -103,7 +105,7 @@ fi
 	  echo "  ${OUT_DIR}/embedding_quality_table.csv"
 	  echo "  ${OUT_DIR}/embedding_quality_table.md"
 	  echo "  ${OUT_DIR}/embedding_runtime_quality_pareto.png"
-  "${RUNNER[@]}" Rscript "${BENCH_R}" \
+  "${RUNNER[@]}" "${RSCRIPT_BIN}" "${BENCH_R}" \
     --script="${BENCH_R}" \
     --backend_group=cpu \
     --base_dir="${BASE_DIR}" \

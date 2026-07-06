@@ -105,16 +105,31 @@ def run_cuml_umap(x: np.ndarray, args: argparse.Namespace) -> np.ndarray:
 def run_cuml_tsne(x: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     from cuml.manifold import TSNE
 
+    tsne_n_neighbors = max(int(np.ceil(float(args.perplexity) * 3.0)) + 1, 4)
     base = dict(
         n_components=2,
         perplexity=float(args.perplexity),
         random_state=int(args.seed),
         verbose=False,
     )
-    try:
-        model = TSNE(**base, method="fft")
-    except TypeError:
-        model = TSNE(**base)
+    # cuML TSNE requires enough internal neighbors for the requested
+    # perplexity. Some versions expose n_neighbors and method, older versions
+    # do not, so keep this compatible without silently changing perplexity.
+    attempts = [
+        dict(**base, method="fft", n_neighbors=tsne_n_neighbors),
+        dict(**base, n_neighbors=tsne_n_neighbors),
+        dict(**base, method="fft"),
+        base,
+    ]
+    last_error = None
+    for kwargs in attempts:
+        try:
+            model = TSNE(**kwargs)
+            break
+        except TypeError as exc:
+            last_error = exc
+    else:
+        raise last_error
     return to_host_array(model.fit_transform(x))
 
 

@@ -68,6 +68,12 @@ sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cpu12.sh
 sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh
 ```
 
+When `SINGULARITY_IMAGE` points to the benchmark image, both wrappers run
+`/opt/conda/bin/Rscript` inside that image by default. This avoids accidentally
+using the host `/usr/bin/Rscript`, which may not have `fastEmbedR`, `faissR`,
+RAPIDS, or the Python benchmark dependencies installed. Override with
+`CONTAINER_RSCRIPT=/path/to/Rscript` only if a different image layout is used.
+
 Optional overrides:
 
 ```bash

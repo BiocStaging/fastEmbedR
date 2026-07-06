@@ -423,6 +423,7 @@ run_rapids_cuml_tsne <- function(x) {
   ensure_reticulate()
   cuml_tsne <- reticulate::import("cuml.manifold", convert = FALSE)$TSNE
   x_np <- numpy_float32(x)
+  tsne_n_neighbors <- as.integer(max(ceiling(3 * perplexity) + 1L, 4L))
   base_args <- list(
     n_components = 2L,
     perplexity = as.numeric(perplexity),
@@ -430,10 +431,18 @@ run_rapids_cuml_tsne <- function(x) {
     verbose = FALSE
   )
   # RAPIDS/cuML TSNE signatures have changed across releases. Try the modern
-  # full-embedding call first, then fall back to a minimal compatible call.
+  # full-embedding call first with a safe internal neighbor count. cuML warns
+  # and can fail in its exclusive_scan kernel when the internal neighbor count
+  # is below 3 * perplexity on some datasets.
   model <- tryCatch(
-    do.call(cuml_tsne, c(base_args, list(method = "fft"))),
-    error = function(e) do.call(cuml_tsne, base_args)
+    do.call(cuml_tsne, c(base_args, list(method = "fft", n_neighbors = tsne_n_neighbors))),
+    error = function(e1) tryCatch(
+      do.call(cuml_tsne, c(base_args, list(n_neighbors = tsne_n_neighbors))),
+      error = function(e2) tryCatch(
+        do.call(cuml_tsne, c(base_args, list(method = "fft"))),
+        error = function(e3) do.call(cuml_tsne, base_args)
+      )
+    )
   )
   py_array_to_matrix(model$fit_transform(x_np))
 }
@@ -560,6 +569,7 @@ method_parameter_row <- function(method) {
   backend <- method_backend(method)
   tsne_method <- is_tsne_method(method)
   umap_method <- is_umap_method(method)
+  tsne_safe_neighbors <- as.integer(max(ceiling(3 * perplexity) + 1L, 4L))
   base <- list(
     method = method,
     backend = backend,
@@ -724,6 +734,7 @@ method_parameter_row <- function(method) {
     base$knn_exact_or_approximate <- "RAPIDS internal"
     base$notes <- "full RAPIDS cuML UMAP in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
   } else if (method == "rapids_cuml_tsne_full") {
+    base$n_neighbors_k <- paste0("internal >= ", tsne_safe_neighbors)
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "RAPIDS cuML TSNE defaults"
     base$early_exaggeration <- "RAPIDS cuML default"
@@ -731,8 +742,9 @@ method_parameter_row <- function(method) {
     base$initialization <- "RAPIDS cuML default"
     base$knn_source <- "RAPIDS cuML internal GPU affinity construction"
     base$knn_exact_or_approximate <- "RAPIDS internal"
-    base$notes <- "full RAPIDS cuML TSNE through reticulate; total runtime includes Python/R boundary and GPU transfer"
+    base$notes <- "full RAPIDS cuML TSNE through reticulate; total runtime includes Python/R boundary and GPU transfer; n_neighbors is set when supported to avoid cuML perplexity-neighbor underflow"
   } else if (method == "rapids_cuml_tsne_full_direct") {
+    base$n_neighbors_k <- paste0("internal >= ", tsne_safe_neighbors)
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "RAPIDS cuML TSNE defaults"
     base$early_exaggeration <- "RAPIDS cuML default"
@@ -740,7 +752,7 @@ method_parameter_row <- function(method) {
     base$initialization <- "RAPIDS cuML default"
     base$knn_source <- "RAPIDS cuML internal GPU affinity construction"
     base$knn_exact_or_approximate <- "RAPIDS internal"
-    base$notes <- "full RAPIDS cuML TSNE in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
+    base$notes <- "full RAPIDS cuML TSNE in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load; n_neighbors is set when supported to avoid cuML perplexity-neighbor underflow"
   } else {
     base$n_neighbors_k <- if (umap_method) as.character(k) else NA_character_
     base$perplexity <- if (tsne_method) as.character(perplexity) else NA_character_
