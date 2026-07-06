@@ -2,10 +2,12 @@
 
 [Home](../README.md) |
 [Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
 [Implementation](implementation.md) |
 **Examples** |
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
+[Reproducibility](reproducibility.md) |
 [References](references.md)
 
 ## Iris KNN-First Workflow
@@ -43,9 +45,11 @@ fit$metrics
 Use `backend = "metal"` on Apple Silicon or `backend = "cuda"` on a CUDA build.
 Explicit GPU requests fail clearly if the backend is unavailable.
 For matrix input, the KNN search is delegated to faissR through fastEmbedR's internal bridge:
-CPU and Metal use faissR CPU HNSW with `target_recall = 0.99`, while CUDA uses
-faissR CUDA `method = "auto"` with `target_recall = 0.99`. The internal
-non-self KNN width is `ceiling(perplexity)`. Use
+The one-call API delegates KNN to faissR. It currently asks for exact KNN below
+100,000 samples and IVF above that threshold. CUDA openTSNE can use
+GPU-resident KNN when available. CUDA UMAP uses CUDA faissR KNN but materializes
+the KNN result for the validated graph-construction path before CUDA
+optimization. The internal non-self KNN width is `ceiling(perplexity)`. Use
 `opentsne_knn()` with an explicit `faissR::nn()` result when benchmarking alternative
 KNN algorithms.
 

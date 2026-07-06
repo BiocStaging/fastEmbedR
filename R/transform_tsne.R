@@ -114,7 +114,7 @@ transform_tsne <- function(reference_layout,
       k <- min(nrow(reference_data), max(25L, ceiling(3 * perplexity)))
     }
     k <- transform_embedding_k(k, nrow(reference_data))
-    raw_knn <- faissR::nn(
+    raw_knn <- fastembedr_faissr_nn(
       reference_data,
       new_data,
       k = k,
@@ -519,7 +519,7 @@ landmark_projection_knn <- function(x_landmarks,
   if (backend %in% c("cuda", "gpu") &&
       isTRUE(embedding_cuda_available_cpp())) {
     out <- tryCatch(
-      faissR::nn(
+      fastembedr_faissr_nn(
         x_landmarks,
         x_query,
         k = k,
@@ -545,7 +545,7 @@ landmark_projection_knn <- function(x_landmarks,
     k = k
   )) {
     projection_backend <- embedding_knn_backend(backend)
-    result <- faissR::nn(
+    result <- fastembedr_faissr_nn(
       x_landmarks,
       x_query,
       k = k,
@@ -563,7 +563,7 @@ landmark_projection_knn <- function(x_landmarks,
   }
 
   fallback_backend <- if (identical(backend, "metal")) "cpu" else backend
-  faissR::nn(
+  fastembedr_faissr_nn(
     x_landmarks,
     x_query,
     k = k,

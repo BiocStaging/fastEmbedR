@@ -1,13 +1,13 @@
 ---
 title: "Getting started with fastEmbedR"
-output: rmarkdown::html_vignette
+output: BiocStyle::html_document
 vignette: >
   %\VignetteIndexEntry{Getting started with fastEmbedR}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
+```{r getting-started-setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
@@ -43,13 +43,22 @@ FFT-grid implementation when compiled.
 
 ## Direct KNN Input
 
-```{r}
+```{r direct-knn-input}
 library(fastEmbedR)
 
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-knn <- faissR::nn(x, k = 31, exclude_self = TRUE, n_threads = 2)
+make_knn <- function(x, k) {
+  d <- as.matrix(stats::dist(x))
+  diag(d) <- Inf
+  indices <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+  distances <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
+    nrow = nrow(d), byrow = TRUE)
+  list(indices = indices, distances = distances)
+}
+
+knn <- make_knn(x, k = 15)
 layout <- umap_knn(knn, n_threads = 2, seed = 4)
 
 plot(layout, pch = 21, bg = labels)
@@ -57,11 +66,13 @@ plot(layout, pch = 21, bg = labels)
 
 `embed_knn()` dispatches to UMAP by default. Request openTSNE explicitly:
 
-```{r}
+```{r embed-knn-opentsne}
 layout2 <- embed_knn(
   knn,
   method = "opentsne",
-  perplexity = 10,
+  perplexity = 5,
+  early_exaggeration_iter = 10,
+  n_iter = 20,
   seed = 4
 )
 ```
@@ -74,22 +85,28 @@ inside a GPU-labelled benchmark.
 
 ## One-Call Workflow
 
-```{r}
-fit <- umap(
-  x,
-  n_neighbors = 30,
-  n_threads = 2,
-  seed = 4
-)
+```{r one-call-workflow}
+has_optional_package <- function(package) {
+  requireNamespace(package, quietly = TRUE)
+}
 
-fit
-plot(fit)
+if (has_optional_package("faissR")) {
+  fit <- umap(
+    x,
+    n_threads = 2,
+    seed = 4
+  )
+
+  fit
+  plot(fit)
+}
 
 evaluate_embedding(
   x,
-  fit$layout,
+  layout,
   labels = labels,
-  k = 15,
+  k = 5,
+  reference_nn = knn,
   sample_size_for_global_metrics = nrow(x),
   sample_size_for_local_metrics = nrow(x),
   n_threads = 2
@@ -124,7 +141,7 @@ from a supplied KNN graph. The older Barnes-Hut route has been removed.
 Native Metal FFT openTSNE uses Objective-C++/Metal kernels when compiled.
 Native CUDA FFT openTSNE uses package CUDA kernels and cuFFT when compiled.
 
-```{r, eval = FALSE}
+```r
 metal_layout <- umap_knn(
   knn,
   backend = "metal",
@@ -147,7 +164,7 @@ exact multi-threaded projection KNN for small and medium data, and switch
 internally to a projection-specific candidate search only for larger
 projections.
 
-```{r, eval = FALSE}
+```r
 landmark_fit <- landmark_tsne(
   x,
   landmarks = 0.5,
@@ -164,7 +181,7 @@ plot(landmark_fit)
 
 UMAP supports the same landmark pattern:
 
-```{r, eval = FALSE}
+```r
 landmark_umap_fit <- landmark_umap(
   x,
   landmarks = 0.5,
@@ -177,7 +194,7 @@ plot(landmark_umap_fit)
 
 ## Transform New Points
 
-```{r, eval = FALSE}
+```r
 reference <- x[1:100, , drop = FALSE]
 query <- x[101:110, , drop = FALSE]
 
@@ -190,7 +207,8 @@ ref_fit <- opentsne(
   seed = 5
 )
 
-query_knn <- faissR::nn(reference, query, k = 15)
+nn <- getExportedValue("faissR", "nn")
+query_knn <- nn(reference, query, k = 15)
 query_layout <- transform_tsne(
   ref_fit$layout,
   knn = query_knn,
@@ -209,8 +227,11 @@ points(query_layout, pch = 24, bg = labels[101:110], cex = 1.2)
 Requested unavailable GPU/accelerator backends fail clearly rather than being
 silently replaced by CPU and reported as GPU.
 
-```{r}
-faissR::backend_info()
+```{r backend-reporting}
+if (has_optional_package("faissR")) {
+  backend_info <- getExportedValue("faissR", "backend_info")
+  backend_info()
+}
 ```
 
 ## Reproducing the MNIST Benchmark
@@ -218,7 +239,7 @@ faissR::backend_info()
 The benchmark helper can use raw flattened MNIST images. This avoids measuring
 a PCA-preprocessed problem when the goal is to test the full image matrix:
 
-```{sh, eval = FALSE}
+```sh
 Rscript tools/benchmark_mnist70k_current_backends.R \
   --feature-source=raw \
   --n=70000 \
@@ -238,3 +259,7 @@ landmark projection/transform time where the implementations expose those
 stages. Reference packages that do not expose stage timing are reported with
 their total call time in the closest matching column and a note in the saved
 CSV.
+
+```{r sessionInfo}
+sessionInfo()
+```

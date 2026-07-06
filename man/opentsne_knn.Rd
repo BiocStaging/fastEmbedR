@@ -31,11 +31,11 @@ opentsne_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object returned by [faissR::nn()], or an integer KNN index
+\item{indices}{A KNN object from an optional nearest-neighbour package, or an integer KNN index
 matrix.}
 
 \item{distances}{Numeric KNN distance matrix matching `indices`. Leave
-`NULL` when `indices` is a [faissR::nn()] result.}
+`NULL` when `indices` is a KNN object with `indices` and `distances` fields.}
 
 \item{n_neighbors}{Optional number of non-self neighbor columns to use from
 the supplied KNN graph. This lets you compute a wide KNN once and reuse
@@ -108,16 +108,20 @@ A numeric embedding matrix with settings stored in
 }
 \description{
 `opentsne_knn()` is the direct KNN-input entry point for the native
-openTSNE-style optimizer. It accepts either an object returned by
-[faissR::nn()] or
-separate KNN index and distance matrices. No neighbour search, scaling, or
+openTSNE-style optimizer. It accepts either a KNN object or separate KNN index
+and distance matrices. No neighbour search, scaling, or
 PCA is done inside this function.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
-knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
-layout <- opentsne_knn(knn, init_data = x, perplexity = 10,
-  early_exaggeration_iter = 100, n_iter = 250)
+d <- as.matrix(stats::dist(x))
+diag(d) <- Inf
+k <- 15L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+layout <- opentsne_knn(idx, dst, init_data = x, perplexity = 5,
+  early_exaggeration_iter = 10, n_iter = 20)
 if (all(is.finite(layout))) {
   plot(layout, pch = 21, bg = iris$Species)
 }

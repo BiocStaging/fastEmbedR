@@ -36,7 +36,7 @@ auto_embedding_k <- function(x, method = "opentsne", include_self = FALSE) {
 }
 
 resolve_embedding_metric <- function(metric, data = NULL) {
-  match.arg(metric, c("euclidean", "cosine"))
+  match.arg(metric, c("euclidean", "cosine", "correlation", "inner_product"))
 }
 
 prepare_embedding_data <- function(data,
@@ -174,6 +174,123 @@ combine_preprocess_backends <- function(standardize_backend, pca_backend) {
   paste(standardize_backend, pca_backend, sep = "_")
 }
 
+validate_pca_backend <- function(backend) {
+  backend <- as.character(backend)[1L]
+  if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
+    return("cpu")
+  }
+  if (identical(backend, "gpu")) {
+    return(resolve_backend_request(backend, need_embedding = TRUE))
+  }
+  if (!backend %in% c("cpu", "cuda", "metal")) {
+    stop("`backend` must be one of 'cpu', 'cuda', or 'metal'.", call. = FALSE)
+  }
+  backend
+}
+
+prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
+  x <- if (is_float32_matrix(data)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to use float32 input.", call. = FALSE)
+    }
+    float::dbl(data)
+  } else {
+    as.matrix(data)
+  }
+  storage.mode(x) <- "double"
+  if (nrow(x) < 2L || ncol(x) < 1L) {
+    stop("`data` must have at least two rows and one column.", call. = FALSE)
+  }
+  if (any(!is.finite(x))) {
+    stop("`data` must contain only finite values.", call. = FALSE)
+  }
+
+  center_values <- rep(0, ncol(x))
+  scale_values <- rep(1, ncol(x))
+  if (isTRUE(center)) {
+    center_values <- colMeans(x)
+    x <- sweep(x, 2L, center_values, check.margin = FALSE)
+  }
+  if (isTRUE(scale)) {
+    scale_values <- apply(x, 2L, stats::sd)
+    scale_values[!is.finite(scale_values) | scale_values == 0] <- 1
+    x <- sweep(x, 2L, scale_values, "/", check.margin = FALSE)
+  }
+  list(data = x, center = center_values, scale = scale_values)
+}
+
+#' Randomized SVD PCA
+#'
+#' `pca()` computes principal component scores using the fastPLS-style
+#' randomized SVD algorithm used internally by fastEmbedR. The implementation is
+#' intentionally restricted to RSVD: it does not use `irlba`, ARPACK, or a
+#' method-selection menu. The CUDA and Metal backends accelerate the RSVD
+#' matrix-multiply steps when the package was compiled with the corresponding
+#' native backend; otherwise explicit GPU requests fail and the function reports
+#' the fallback reason only when the lower-level backend itself falls back.
+#'
+#' @param data Numeric matrix/data frame with observations in rows.
+#' @param ncomp Number of principal components.
+#' @param center If `TRUE`, mean-center columns before RSVD.
+#' @param scale If `TRUE`, scale centered columns to unit sample standard
+#'   deviation before RSVD.
+#' @param backend PCA backend: `"cpu"`, `"cuda"`, or `"metal"`.
+#' @param seed Random seed for the Gaussian RSVD sketch.
+#' @return A `fastEmbedR_pca` list with `scores`, `loadings`,
+#'   `singular_values`, centering/scaling vectors, backend metadata, and RSVD
+#'   tuning metadata.
+#' @examples
+#' fit <- pca(as.matrix(iris[, 1:4]), ncomp = 2, seed = 1)
+#' plot(fit$scores, pch = 21, bg = iris$Species)
+#' @export
+pca <- function(data,
+                ncomp = 2L,
+                center = TRUE,
+                scale = FALSE,
+                backend = c("cpu", "cuda", "metal"),
+                seed = 4L) {
+  backend <- validate_pca_backend(match.arg(backend))
+  ncomp <- as.integer(ncomp)
+  if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) || ncomp < 1L) {
+    stop("`ncomp` must be a positive integer.", call. = FALSE)
+  }
+  prepared <- prepare_pca_matrix(data, center = center, scale = scale)
+  rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
+  if (rank < 1L) {
+    stop("`data` has no usable PCA rank.", call. = FALSE)
+  }
+  fit <- fastpls_rsvd_pca_scores(
+    prepared$data,
+    rank = rank,
+    seed = seed,
+    backend = backend
+  )
+  if (!identical(backend, "cpu") &&
+      !startsWith(as.character(fit$backend), paste0(backend, "_"))) {
+    reason <- fit$backend_reason
+    if (is.null(reason) || length(reason) != 1L || is.na(reason)) {
+      reason <- paste0(backend, " RSVD backend is unavailable")
+    }
+    stop(reason, call. = FALSE)
+  }
+  out <- list(
+    scores = fit$scores,
+    loadings = fit$loadings,
+    singular_values = fit$singular_values,
+    center = prepared$center,
+    scale = prepared$scale,
+    ncomp = as.integer(ncol(fit$scores)),
+    method = "rsvd",
+    backend = fit$backend,
+    backend_reason = fit$backend_reason,
+    oversample = fit$oversample,
+    power = fit$power,
+    seed = as.integer(seed)
+  )
+  class(out) <- "fastEmbedR_pca"
+  out
+}
+
 fastpls_rsvd_tuning <- function(n, p, rank, backend) {
   backend <- if (is.null(backend)) "cpu" else backend
   if (identical(backend, "cuda")) {
@@ -211,25 +328,6 @@ fastpls_rsvd_pca_scores <- function(x,
   }
   tuning <- fastpls_rsvd_tuning(n, p, rank, backend_requested)
   sketch_rank <- min(max_rank, rank + tuning$oversample)
-
-  if (sketch_rank >= max_rank) {
-    exact <- svd(x, nu = rank, nv = rank)
-    scores <- exact$u[, seq_len(rank), drop = FALSE]
-    scores <- sweep(scores, 2L, exact$d[seq_len(rank)], "*")
-    loadings <- exact$v[, seq_len(rank), drop = FALSE]
-    scores <- orient_pca_scores(scores, loadings)
-    colnames(scores) <- paste0("PC", seq_len(ncol(scores)))
-    return(list(
-      scores = scores,
-      loadings = attr(scores, "loadings"),
-      singular_values = exact$d[seq_len(rank)],
-      backend = "cpu_exact",
-      method = "exact",
-      oversample = as.integer(tuning$oversample),
-      power = as.integer(tuning$power),
-      backend_reason = "sketch_rank_reaches_matrix_rank"
-    ))
-  }
 
   run_backend <- function(selected_backend) {
     fastpls_rsvd_pca_scores_backend(
@@ -681,7 +779,7 @@ sampled_score_indices <- function(x,
     end <- min(length(keep), start + batch_size - 1L)
     rows <- start:end
     batch_keep <- keep[rows]
-    raw <- faissR::nn(
+    raw <- fastembedr_faissr_nn(
       x,
       x[batch_keep, , drop = FALSE],
       k = query_k,

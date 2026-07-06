@@ -56,6 +56,20 @@ NumericMatrix knn_umap_cuda_fused_float_impl(IntegerMatrix,
   Rcpp::stop("CUDA float32 fused UMAP is available only when the package is built with CUDA support.");
 }
 
+NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP,
+                                           int,
+                                           int,
+                                           int,
+                                           double,
+                                           double,
+                                           double,
+                                           int,
+                                           int,
+                                           int,
+                                           bool) {
+  Rcpp::stop("CUDA GPU-resident UMAP is available only when the package is built with CUDA support.");
+}
+
 List umap_cuda_graph_dump_impl(IntegerMatrix,
                                NumericMatrix) {
   Rcpp::stop("CUDA UMAP graph dump is available only when the package is built with CUDA support.");
@@ -135,6 +149,29 @@ List knn_tsne_opentsne_cuda_float_impl(IntegerMatrix,
   Rcpp::stop("CUDA float32 openTSNE FFT-grid is available only when the package is built with the native CUDA openTSNE backend.");
 }
 
+List knn_tsne_opentsne_cuda_gpu_impl(SEXP,
+                                     int,
+                                     NumericMatrix,
+                                     bool,
+                                     SEXP,
+                                     int,
+                                     double,
+                                     int,
+                                     int,
+                                     double,
+                                     double,
+                                     double,
+                                     bool,
+                                     double,
+                                     double,
+                                     double,
+                                     double,
+                                     std::string,
+                                     int,
+                                     bool) {
+  Rcpp::stop("CUDA GPU-resident openTSNE FFT-grid is available only when the package is built with the native CUDA openTSNE backend.");
+}
+
 List standardize_cuda_impl(NumericMatrix) {
   Rcpp::stop("CUDA preprocessing is available only when the package is built with CUDA support.");
 }
@@ -180,4 +217,19 @@ NumericMatrix rsvd_multiply_cuda_impl(NumericMatrix,
                                       NumericMatrix,
                                       bool) {
   Rcpp::stop("CUDA RSVD matrix multiply is available only when the package is built with CUDA support.");
+}
+
+NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix,
+                                      int) {
+  Rcpp::stop("native CUDA PCA initialization is available only when the package is built with CUDA support.");
+}
+
+NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix,
+                                       int) {
+  Rcpp::stop("native cuML TruncatedSVD initialization is available only when the package is built with CUDA and cuML support.");
+}
+
+NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix,
+                                      int) {
+  Rcpp::stop("native cuML PCA initialization is available only when the package is built with CUDA and cuML support.");
 }

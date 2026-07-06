@@ -35,7 +35,7 @@ transform_tsne(
 `fastEmbedR_embedding` object.}
 
 \item{knn}{Optional query-to-reference KNN list with `indices` and
-`distances`, usually returned by `faissR::nn(reference_data, new_data, k)`.}
+`distances`, usually returned by a query-to-reference KNN search.}
 
 \item{reference_data}{Reference observations in the same preprocessing space
 used to fit `reference_layout`. Required only when `knn` is `NULL`.}
@@ -99,4 +99,21 @@ embedding. It follows the openTSNE transform design at the algorithm level:
 query-to-reference affinities are computed from KNN distances, query points
 are initialized from nearby reference points, and optimization moves only the
 query points.
+}
+\examples{
+set.seed(1)
+reference_layout <- matrix(rnorm(40), ncol = 2)
+query_knn <- list(
+  indices = matrix(sample(seq_len(20), 30, replace = TRUE), nrow = 5),
+  distances = matrix(runif(30, min = 0.01), nrow = 5)
+)
+y <- transform_tsne(
+  reference_layout,
+  knn = query_knn,
+  perplexity = 2,
+  n_iter = 5,
+  n_threads = 1,
+  seed = 1
+)
+dim(y)
 }

@@ -8,8 +8,8 @@ These scripts run publication-style embedding benchmarks on the HPC datasets in
 - `benchmark_embeddings_float32_publication.R`
   Main R driver. It runs each dataset/method in an isolated child R process,
   captures elapsed time, captures peak RSS memory through `/usr/bin/time -v`
-  when available, saves layouts, saves per-method plots, and continues after
-  failed/OOM/timeout methods.
+  when available, saves layouts, saves per-method plots, computes embedding
+  quality metrics, and continues after failed/OOM/timeout methods.
 
 - `benchmark_embeddings_float32_cpu12.sh`
   CPU-only Slurm wrapper using 12 CPU cores. It runs:
@@ -72,9 +72,49 @@ sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh
 Each run creates a timestamped output directory containing:
 
 - `embedding_benchmark_results.csv`
+- `embedding_parameter_table.csv`
+- `embedding_parameter_table.md`
+- `embedding_quality_table.csv`
+- `embedding_quality_table.md`
+- `embedding_runtime_quality_pareto.csv`
+- `embedding_runtime_quality_pareto.png`
 - `embedding_time_barplot.png`
 - `embedding_memory_barplot.png`
+- `embedding_parameter_table.csv`
+- `embedding_parameter_table.md`
+- `benchmark_command_lines.txt`
+- `sessionInfo.txt`
+- `reproducibility_manifest.txt`
+- `reproducibility_manifest.json` when `jsonlite` is installed
 - `layouts/*.rds`
 - `plots/*.png`
 - `logs/*.log`
 - `worker_results/*.csv`
+
+The manuscript table is `embedding_quality_table.md`. It reports, for the key
+datasets requested by the reviewer plus the explicit metabolomics benchmark
+(`MNIST`, `FashionMNIST`, `flow18`, `mass41`, `imagenet`,
+`FlowRepository_FR-FCM-ZYRM_files`, and `MetRef`): dataset, method, backend,
+runtime, trustworthiness, nearest-neighbour preservation, silhouette score,
+embedding-space KNN label accuracy, peak RSS memory, and status. The Pareto
+figure plots runtime against trustworthiness for the same key datasets.
+
+`MetRef` is the metabolomics dataset in the embedding benchmark. Simulated
+matrices are used only in the separate nearest-neighbour stress benchmark and
+should not be described as part of the UMAP/t-SNE embedding-quality panel.
+
+The method-parameter table is `embedding_parameter_table.md`. It records the
+settings needed to assess benchmark fairness: `n_neighbors`/`k`, perplexity,
+iterations or epochs, early exaggeration, learning-rate policy, initialization,
+distance metric, thread count, random seed, whether KNN was precomputed, and
+whether the KNN path was approximate, exact, or package-internal. The benchmark
+still compares total elapsed user-level runtime because the reference packages
+do not expose identical KNN/affinity/optimization boundaries.
+
+The reproducibility manifest records the Git commit, release tag field,
+archival DOI field, command lines, random seed, k/perplexity, thread count,
+timeout, R `sessionInfo()`, package versions, hardware information,
+`nvidia-smi` output when available, CUDA environment variables, and faissR
+backend probes for FAISS/cuVS availability. The release tag and DOI are read
+from `FASTEMBEDR_MANUSCRIPT_TAG` and `FASTEMBEDR_ZENODO_DOI` when those
+environment variables are set.

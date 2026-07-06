@@ -807,7 +807,7 @@ materials <- c(
   "",
   "Benchmark #1 measures nearest-neighbour construction speed across faissR native/FAISS backends, optional CUDA/cuVS backends, and external R package implementations.",
   "",
-  paste0("Datasets were read from `", data_root, "`. The manifest datasets were MNIST, FashionMNIST, USPS, COIL20, MetRef, and TabulaMuris. A simulated reference dataset was generated as `matrix(runif(1000000), ncol = 2)` with columns `x` and `y`, giving 500,000 observations and 2 variables."),
+  paste0("Datasets were read from `", data_root, "`. The manifest datasets were MNIST, FashionMNIST, USPS, COIL20, MetRef, and TabulaMuris. A simulated reference dataset was generated as `matrix(runif(1000000), ncol = 2)` with columns `x` and `y`, giving 500,000 observations and 2 variables. This simulated matrix is used only for nearest-neighbour stress testing and is not part of the UMAP/t-SNE embedding-quality benchmark."),
   paste0("All methods were tested over k = ", paste(k_values, collapse = ", "), " and metrics = ", paste(metric_values, collapse = ", "), ". CPU methods were run with n_threads/cores = ", n_threads, " when the package exposed a thread argument. Each dataset-method-parameter combination was executed in a separate R process with GNU `timeout` set to ", timeout_sec, " seconds."),
   paste0("Nearest-neighbour quality was evaluated against an exact subset reference where feasible. The reference subset used at most ", quality_eval_max_n, " rows and was automatically reduced when the estimated operation count exceeded ", format(quality_eval_max_ops, scientific = TRUE), ". Reported quality metrics are recall@k, median recall@k, minimum recall@k, mean relative distance error, and Spearman rank correlation of neighbour ranks."),
   "The faissR CUDA/cuVS NN-descent output was saved for every dataset where the method completed successfully.",
@@ -831,7 +831,7 @@ summary_lines <- c(
   "",
   "## Comments",
   "",
-  "This benchmark separates pure KNN search methods from graph/consumer functions. The fastest method can differ by dataset shape: low-dimensional simulated data favours tree/grid-like methods, while high-dimensional image matrices favour approximate graph or GPU methods. Exact brute-force methods are included as references but are expected to time out or be uncompetitive on the largest datasets. cuVS NN-descent outputs are saved to allow later embedding benchmarks to reuse the same neighbour graph rather than recomputing KNN."
+  "This benchmark separates pure KNN search methods from graph/consumer functions. The fastest method can differ by dataset shape: low-dimensional simulated data favours tree/grid-like methods, while high-dimensional image matrices favour approximate graph or GPU methods. The simulated rows are reported only for KNN stress testing, not as evidence for embedding quality. Exact brute-force methods are included as references but are expected to time out or be uncompetitive on the largest datasets. cuVS NN-descent outputs are saved to allow later embedding benchmarks to reuse the same neighbour graph rather than recomputing KNN."
 )
 writeLines(summary_lines, file.path(out_dir, "BENCHMARK1_RESULTS_SUMMARY.md"))
 

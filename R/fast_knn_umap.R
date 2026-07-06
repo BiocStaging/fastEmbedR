@@ -65,6 +65,25 @@ fast_knn_umap_core <- function(indices,
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
+  if (fastembedr_is_gpu_knn(indices)) {
+    indices <- fastembedr_as_gpu_knn(indices)
+    if (!is.null(distances)) {
+      stop("Do not pass `distances` when `indices` is a faissR_gpu_knn object.", call. = FALSE)
+    }
+    if (!identical(backend, "cuda")) {
+      stop("GPU-resident KNN input is currently supported only with `backend = \"cuda\"`.", call. = FALSE)
+    }
+    return(fast_knn_umap_cuda_gpu_core(
+      indices,
+      n_components = n_components,
+      seed = seed,
+      verbose = verbose,
+      n_threads = n_threads,
+      n_epochs = n_epochs,
+      config_override = config_override,
+      graph_mode = graph_mode
+    ))
+  }
   knn <- coerce_knn_input(indices, distances)
   indices <- knn$indices
   distances <- knn$distances
@@ -508,6 +527,99 @@ fast_knn_umap_core <- function(indices,
     "UMAP",
     return_float32 = is_float32_matrix(distances)
   )
+  attr(layout, "fastEmbedR_config") <- cfg
+  layout
+}
+
+fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
+                                        n_components = 2L,
+                                        seed = 42L,
+                                        verbose = FALSE,
+                                        n_threads = NULL,
+                                        n_epochs = NULL,
+                                        config_override = NULL,
+                                        graph_mode = c("binary", "fuzzy")) {
+  graph_mode <- match.arg(graph_mode)
+  if (n_components != 2L) {
+    stop("Native CUDA UMAP currently supports only `n_components = 2`.", call. = FALSE)
+  }
+  gpu_info <- fastembedr_gpu_knn_info(gpu_knn)
+  if (isTRUE(gpu_info$has_self)) {
+    stop(
+      "CUDA GPU-resident UMAP requires non-self KNN. ",
+      "Use `faissR::nn_gpu(..., exclude_self = TRUE).",
+      call. = FALSE
+    )
+  }
+  cfg <- fast_knn_umap_config(
+    n = gpu_info$n,
+    k = gpu_info$k,
+    backend = "cuda"
+  )
+  cfg$auto_parameter_backend <- "r_size_rule_gpu_resident_knn"
+  cfg$auto_parameter_reason <- "KNN distances stay on the CUDA device; host distance profiling is skipped."
+  if (!is.null(n_threads)) {
+    n_threads <- as.integer(n_threads)
+    if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
+      stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
+    }
+    cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
+  }
+  if (!is.null(n_epochs)) {
+    cfg$n_epochs <- validate_epoch_count(n_epochs)
+    cfg$preset <- "internal_epoch_override"
+    cfg$epoch_source <- "internal_override"
+  }
+  cfg <- apply_fast_knn_umap_config_override(cfg, config_override)
+  cfg$input_had_self <- FALSE
+  cfg$knn_col_start <- 0L
+  cfg$knn_n_neighbors <- as.integer(gpu_info$k)
+  cfg$knn_materialized <- FALSE
+  cfg$knn_materialized_for_gpu <- FALSE
+  cfg$knn_backend <- gpu_info$input_backend
+  cfg$knn_distance_type <- gpu_info$distance_type
+  cfg$knn_residency <- "cuda_device"
+  cfg$graph_mode <- graph_mode
+  cfg$graph_prep_backend <- if (identical(graph_mode, "binary")) {
+    "cuda_binary_union_device"
+  } else {
+    "cuda_fuzzy_union_device"
+  }
+  cfg$graph_storage <- "native_cuda_device_coo_fused"
+  cfg$sgd_loop <- "cuda_fused_device_knn_to_coo_atomic"
+  cfg$gpu_transfer_policy <- "faissR_gpu_knn_device_pointers_no_knn_host_copy"
+  cfg$gpu_optimizer_mode <- "atomic_coo"
+  cfg$gpu_optimizer_update_rule <- "native_cuda_atomic_coo_umap_schedule"
+  cfg$gpu_optimizer_schedule <- "coo_epochs_per_sample_device"
+  cfg$gpu_initial_backend <- "cuda"
+  cfg$optimizer_backend <- "cuda"
+  cfg$init_backend <- "cuda_fused_diffusion"
+  cfg$init_backend_reason <- "CUDA UMAP consumes faissR GPU KNN pointers, builds the graph/schedule, initializes, and optimizes on device."
+  cfg$gpu_umap_path <- if (identical(graph_mode, "binary")) {
+    "cuda_gpu_knn_binary_float32_atomic"
+  } else {
+    "cuda_gpu_knn_fuzzy_float32_atomic"
+  }
+  cfg$gpu_initial_epochs <- as.integer(cfg$n_epochs)
+  cfg$verbose <- isTRUE(verbose)
+
+  if (!embedding_cuda_available_cpp()) {
+    stop("Native CUDA UMAP optimizer was requested, but it is not available in this build.", call. = FALSE)
+  }
+  layout <- knn_umap_cuda_fused_gpu_cpp(
+    gpu_knn,
+    as.integer(gpu_info$k),
+    as.integer(cfg$n_epochs),
+    as.integer(cfg$negative_sample_rate),
+    cfg$learning_rate,
+    cfg$min_dist,
+    cfg$repulsion_strength,
+    as.integer(cfg$spectral_n_iter),
+    as.integer(seed),
+    0L,
+    identical(graph_mode, "binary")
+  )
+  layout <- finalize_embedding_layout(layout, "UMAP", return_float32 = TRUE)
   attr(layout, "fastEmbedR_config") <- cfg
   layout
 }

@@ -11,7 +11,7 @@ prepare_umap_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object returned by \code{faissR::nn()}, or an integer KNN index matrix.}
+\item{indices}{A KNN object, or an integer KNN index matrix.}
 \item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave \code{NULL} when \code{indices} is a KNN object.}
 \item{backend}{Execution backend used to resolve size-aware defaults: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
 \item{n_threads}{Number of CPU worker threads used during graph construction.}
@@ -25,8 +25,13 @@ A prepared UMAP object containing normalized KNN data, a CSR graph, graph weight
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
-knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-prep <- prepare_umap_knn(knn)
+d <- as.matrix(stats::dist(x))
+diag(d) <- Inf
+k <- 10L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+prep <- prepare_umap_knn(idx, dst)
 y <- umap_knn(prep, seed = 1)
 plot(y, pch = 21, bg = iris$Species)
 }

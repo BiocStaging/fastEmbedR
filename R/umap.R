@@ -12,14 +12,18 @@
 #'   matrix. Defaults to `FALSE` so one-call results match a KNN object computed
 #'   from the supplied matrix.
 #' @param pca_dims Optional PCA dimension before KNN.
-#' @param metric KNN distance metric for one-call matrix input.
+#' @param metric KNN distance metric for one-call matrix input: `"euclidean"`,
+#'   `"cosine"`, `"correlation"`, or `"inner_product"`.
 #' @param nn Optional precomputed KNN result when `data` is a matrix.
 #' @param seed Random seed.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. KNN is
-#'   delegated to faissR with automatic method/tuning selection through an
-#'   internal bridge: CPU and Metal request faissR CPU HNSW with
-#'   `target_recall = 0.99`, while CUDA requests faissR CUDA
-#'   `method = "auto"` with `target_recall = 0.99`.
+#'   delegated to faissR through an internal bridge. The current default asks
+#'   for exact KNN below 100,000 samples and IVF above that threshold. CUDA
+#'   requests CUDA faissR KNN, then materializes the KNN result for the
+#'   validated host-prepared graph path before native CUDA UMAP optimization.
+#'   This preserves the visually validated binary/fuzzy graph behaviour while
+#'   the fully GPU-resident UMAP graph path remains available only for explicit
+#'   `umap_knn()` experiments.
 #'   GPU requests must resolve to a real native backend; the package does not
 #'   relabel CPU work as GPU.
 #' @param n_threads Number of CPU worker threads for KNN and CPU UMAP.
@@ -38,7 +42,7 @@ umap <- function(data,
                  n_components = 2L,
                  standardize = FALSE,
                  pca_dims = NULL,
-                 metric = c("euclidean", "cosine"),
+                 metric = c("euclidean", "cosine", "correlation", "inner_product"),
                  nn = NULL,
                  seed = 4L,
                  backend = c("cpu", "cuda", "metal"),
@@ -53,6 +57,9 @@ umap <- function(data,
   input_is_float32 <- is_float32_matrix(data)
 
   if (is_knn_input(data)) {
+    if (fastembedr_is_gpu_knn(data)) {
+      data <- fastembedr_as_gpu_knn(data)
+    }
     if (!is.null(nn)) {
       stop("When `data` is a KNN object, do not also pass `nn`.", call. = FALSE)
     }
@@ -73,7 +80,11 @@ umap <- function(data,
       resolved_k <- cfg$n_neighbors
     }
     if (is.null(resolved_k) || length(resolved_k) == 0L || is.na(resolved_k)) {
-      resolved_k <- ncol(coerce_knn_input(data)$indices)
+      resolved_k <- if (fastembedr_is_gpu_knn(data)) {
+        fastembedr_gpu_knn_info(data)$k
+      } else {
+        ncol(coerce_knn_input(data)$indices)
+      }
     }
     metrics <- data.frame(
       method = "umap",
@@ -119,9 +130,12 @@ umap <- function(data,
     n_neighbors <- auto_embedding_k(n, method = "umap", include_self = FALSE)
   }
 
+  knn_engine <- "supplied"
   knn_time <- system.time({
     knn_result <- if (is.null(nn)) {
-      knn_policy <- fastembedr_embedding_nn_policy(backend)
+      knn_policy <- fastembedr_embedding_nn_policy(backend, n = n)
+      keep_gpu_knn <- FALSE
+      knn_engine <- fastembedr_nn_policy_engine(knn_policy, keep_gpu = keep_gpu_knn)
       fastembedr_nn_without_self(
         x,
         k = as.integer(n_neighbors),
@@ -131,10 +145,23 @@ umap <- function(data,
         output = fastembedr_faiss_float_output(x, knn_policy$backend),
         n_threads = n_threads,
         tuning = knn_policy$tuning,
-        target_recall = knn_policy$target_recall
+        target_recall = knn_policy$target_recall,
+        keep_gpu = keep_gpu_knn
       )
     } else {
-      coerce_knn_input(nn)
+      if (fastembedr_is_gpu_knn(nn)) {
+        nn <- fastembedr_as_gpu_knn(nn)
+        if (!identical(backend, "cuda")) {
+          stop("A GPU-resident KNN object can only be used with `backend = \"cuda\"`.", call. = FALSE)
+        }
+        gpu_info <- fastembedr_gpu_knn_info(nn)
+        if (gpu_info$n != n || isTRUE(gpu_info$has_self)) {
+          stop("Supplied faissR GPU KNN output is incompatible with UMAP input.", call. = FALSE)
+        }
+        nn
+      } else {
+        coerce_knn_input(nn)
+      }
     }
   })
 
@@ -175,7 +202,10 @@ umap <- function(data,
       preprocess = prepared$preprocess,
       graph_mode = graph_mode,
       metric = metric,
-      nn_backend = if (is.null(attr(knn_result, "backend"))) "supplied" else attr(knn_result, "backend")
+      nn_engine = knn_engine,
+      nn_backend = knn_result$backend_used %||%
+        attr(knn_result, "backend") %||%
+        "supplied"
     )
   )
   out <- list(

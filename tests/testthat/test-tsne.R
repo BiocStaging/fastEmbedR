@@ -1,3 +1,5 @@
+if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
+
 test_that("embed_knn runs native openTSNE from supplied neighbours", {
   set.seed(321)
   x <- matrix(rnorm(50L * 5L), 50L, 5L)
@@ -19,7 +21,7 @@ test_that("embed_knn runs native openTSNE from supplied neighbours", {
   expect_true(all(is.finite(layout)))
   cfg <- attr(layout, "fastEmbedR_config")
   expect_equal(cfg$method, "opentsne")
-  expect_equal(cfg$optimizer, "opentsne_fitsne_fft_grid_sparse_knn")
+  expect_match(cfg$optimizer, "^opentsne_fitsne_fft_grid_sparse_knn")
   expect_equal(cfg$repulsion, "fft_grid")
   expect_equal(cfg$early_exaggeration_iter, 3L)
   expect_equal(cfg$n_iter, 4L)
@@ -39,8 +41,9 @@ test_that("openTSNE auto configuration exposes opt-SNE policy metadata", {
   )
   expect_equal(policy$perplexity, 10)
   expect_equal(policy$learning_rate, 150 / policy$early_exaggeration)
-  expect_true(policy$auto_kld_stop)
+  expect_false(policy$auto_kld_stop)
   expect_equal(policy$auto_iter_end, 5000)
+  expect_equal(policy$rule, "opt_sne_learning_rate_fixed_iterations_no_expensive_kld_polling")
 
   large_fft <- fastEmbedR:::tsne_auto_parameters_cpp(
     70000L,
@@ -118,7 +121,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
     seed = 312L
   )
   expect_equal(attr(fft, "fastEmbedR_config")$repulsion, "fft_grid")
-  expect_equal(attr(fft, "fastEmbedR_config")$optimizer, "opentsne_fitsne_fft_grid_sparse_knn")
+  expect_match(attr(fft, "fastEmbedR_config")$optimizer, "^opentsne_fitsne_fft_grid_sparse_knn")
 })
 
 test_that("opentsne has direct KNN input functions", {

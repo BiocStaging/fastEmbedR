@@ -14,7 +14,7 @@ umap_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object returned by \code{\link{nn}}, or an integer KNN
+\item{indices}{A KNN object, or an integer KNN
 index matrix. A self-neighbour first column is removed automatically.}
 
 \item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave
@@ -47,7 +47,12 @@ point used by \code{\link{embed_knn}} with \code{method = "umap"}.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
-knn <- faissR::nn(x, k = 16, exclude_self = TRUE)
-layout <- umap_knn(knn, seed = 1)
+d <- as.matrix(stats::dist(x))
+diag(d) <- Inf
+k <- 10L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+layout <- umap_knn(idx, dst, seed = 1)
 plot(layout, pch = 21, bg = iris$Species)
 }

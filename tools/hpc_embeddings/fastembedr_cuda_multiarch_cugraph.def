@@ -1,0 +1,344 @@
+Bootstrap: docker
+From: mambaorg/micromamba:2.3.3
+
+%files
+    faissR_0.1.0.tar.gz /opt/src/faissR_0.1.0.tar.gz
+    fastEmbedR_0.1.0.tar.gz /opt/src/fastEmbedR_0.1.0.tar.gz
+    /mnt/sata_ssd/cuvs_nndescent_shmem_patch_20260625_175420/cuvs/cpp/build/libcuvs.so /opt/rapids/lib/libcuvs.so
+    /mnt/sata_ssd/cuvs_nndescent_shmem_patch_20260625_175420/cuvs/cpp/build/c/libcuvs_c.so /opt/rapids/lib/libcuvs_c.so
+    patched_libs/libnvrtc.so.11.2 /opt/rapids/lib/libnvrtc.so.11.2
+
+%labels
+    Author tkcaccia
+    Project fastEmbedR
+    CUDAArchitectures 80-86-89-90-120
+    cuVSPatch nndescent-dynamic-shared-memory
+    Description R + FAISS/cuVS/cuGraph + RAPIDS cuML + Python UMAP/openTSNE container for fastEmbedR benchmarks
+
+%environment
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/opt/conda/bin:/opt/fit-sne/bin:$PATH
+    export CONDA_PREFIX=/opt/conda
+    export RETICULATE_PYTHON=/opt/conda/bin/python
+    export R_LIBS=/opt/conda/lib/R/library
+    export R_LIBS_USER=/opt/conda/lib/R/library
+    export R_LIBS_SITE=/opt/conda/lib/R/library
+    export R_PROFILE_USER=/opt/conda/lib/R/etc/Rprofile.user
+    export R_ENVIRON_USER=/opt/conda/lib/R/etc/Renviron.user
+    export CUDA_HOME=/usr/local/cuda
+    export FAISS_HOME=/opt/faiss
+    export CUVS_HOME=/opt/rapids
+    export CUGRAPH_HOME=/opt/rapids
+    export CUML_HOME=/opt/conda
+    export RAPIDS_HOME=/opt/conda
+    export RAFT_HOME=/opt/conda
+    export RMM_HOME=/opt/conda
+    export FASTEMBEDR_USE_CUDA=1
+    export FASTEMBEDR_USE_CUML=1
+    export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
+    export FAISSR_USE_FAISS=1
+    export FAISSR_USE_CUDA=1
+    export FAISSR_USE_CUVS=1
+    export FAISSR_USE_CUGRAPH=1
+    export FAISSR_CUDA_ARCHITECTURES=80,86,89,90,120
+    export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
+    export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}
+    export LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
+    export PKG_CPPFLAGS="-I/opt/faiss/include -I/opt/rapids/include -I/opt/conda/include -I/opt/conda/targets/x86_64-linux/include ${PKG_CPPFLAGS:-}"
+    export PKG_LIBS="-L/opt/rapids/lib -L/opt/faiss/lib -L/usr/local/cuda/lib64 -L/opt/conda/lib -L/opt/conda/targets/x86_64-linux/lib ${PKG_LIBS:-}"
+    export CUDAHOSTCXX=/opt/conda/bin/g++
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+    export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
+    export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+
+%post
+    set -eux
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/opt/conda/bin:$PATH
+    export RETICULATE_PYTHON=/opt/conda/bin/python
+
+    micromamba install -y -n base \
+      -c rapidsai -c pytorch -c nvidia -c conda-forge \
+      cuda-version=13.2 \
+      cuda-nvcc \
+      cuda-cudart-dev \
+      cuda-nvrtc \
+      libcufft \
+      libcufft-dev \
+      faiss-gpu-cuvs=1.14.3 \
+      libcuvs=26.06 \
+      libcuvs-headers=26.06 \
+      libcugraph=26.06 \
+      pylibcugraph=26.06 \
+      cugraph=26.06 \
+      cuml=26.06 \
+      python \
+      numpy \
+      scipy \
+      pandas \
+      matplotlib-base \
+      scikit-learn \
+      numba \
+      cupy \
+      pynndescent \
+      umap-learn \
+      opentsne \
+      librmm=26.06 \
+      libraft-headers=26.06 \
+      r-base \
+      r-remotes \
+      r-rcpp \
+      r-jsonlite \
+      r-data.table \
+      r-codetools \
+      r-matrix \
+      r-igraph \
+      r-leidenbase \
+      r-ggplot2 \
+      r-uwot \
+      r-rtsne \
+      r-umap \
+      r-tsne \
+      r-rcppannoy \
+      r-irlba \
+      r-rspectra \
+      r-fnn \
+      r-rann \
+      r-r.utils \
+      r-reticulate \
+      r-devtools \
+      git \
+      make \
+      cmake \
+      pkg-config \
+      fftw \
+      gcc_linux-64 \
+      gxx_linux-64 \
+      gfortran_linux-64
+
+    micromamba clean -a -y
+
+    export CONDA_PREFIX=/opt/conda
+    mkdir -p /usr/local /opt/faiss/lib /opt/faiss/include /opt/rapids/lib /opt/rapids/include
+    ln -sfn /opt/conda /usr/local/cuda
+    ln -sfn /opt/conda/include/faiss /opt/faiss/include/faiss
+    ln -sfn /opt/conda/include/cuvs /opt/rapids/include/cuvs
+    ln -sfn /opt/conda/include/cugraph /opt/rapids/include/cugraph || true
+    ln -sfn /opt/conda/include/cugraph_c /opt/rapids/include/cugraph_c || true
+    ln -sfn /opt/conda/include/raft /opt/rapids/include/raft
+    ln -sfn /opt/conda/include/rmm /opt/rapids/include/rmm
+    ln -sf /opt/conda/lib/libfaiss* /opt/faiss/lib/ || true
+    ln -sf /opt/conda/lib/libcugraph* /opt/rapids/lib/ || true
+    test -s /opt/rapids/lib/libcuvs.so
+    test -s /opt/rapids/lib/libcuvs_c.so
+    test -e /opt/rapids/lib/libcugraph.so || test -e /opt/conda/lib/libcugraph.so
+    test -e /opt/rapids/lib/libcugraph_c.so || test -e /opt/conda/lib/libcugraph_c.so
+    cp -f /opt/rapids/lib/libcuvs.so /opt/conda/lib/libcuvs.so
+    cp -f /opt/rapids/lib/libcuvs_c.so /opt/conda/lib/libcuvs_c.so
+    cp -f /opt/rapids/lib/libnvrtc.so.11.2 /opt/conda/lib/libnvrtc.so.11.2
+    test "$(stat -c %s /opt/conda/lib/libcuvs.so)" = "$(stat -c %s /opt/rapids/lib/libcuvs.so)"
+    test "$(stat -c %s /opt/conda/lib/libcuvs_c.so)" = "$(stat -c %s /opt/rapids/lib/libcuvs_c.so)"
+    export CUDA_HOME=/usr/local/cuda
+    export FAISS_HOME=/opt/faiss
+    export CUVS_HOME=/opt/rapids
+    export CUGRAPH_HOME=/opt/rapids
+    export CUML_HOME=/opt/conda
+    export RAPIDS_HOME=/opt/conda
+    export RAFT_HOME=/opt/conda
+    export RMM_HOME=/opt/conda
+    export FASTEMBEDR_USE_CUDA=1
+    export FASTEMBEDR_USE_CUML=1
+    export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
+    export FAISSR_USE_FAISS=1
+    export FAISSR_USE_CUDA=1
+    export FAISSR_USE_CUVS=1
+    export FAISSR_USE_CUGRAPH=1
+    export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
+    export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}
+    export LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
+    export PKG_CPPFLAGS="-I/opt/faiss/include -I/opt/rapids/include -I/opt/conda/include -I/opt/conda/targets/x86_64-linux/include ${PKG_CPPFLAGS:-}"
+    export PKG_LIBS="-L/opt/rapids/lib -L/opt/faiss/lib -L/usr/local/cuda/lib64 -L/opt/conda/lib -L/opt/conda/targets/x86_64-linux/lib ${PKG_LIBS:-}"
+    export PATH=/opt/conda/bin:$PATH
+    export RETICULATE_PYTHON=/opt/conda/bin/python
+    export CC=x86_64-conda-linux-gnu-cc
+    export CXX=x86_64-conda-linux-gnu-c++
+    export FC=x86_64-conda-linux-gnu-gfortran
+    ln -sf /opt/conda/bin/x86_64-conda-linux-gnu-cc /opt/conda/bin/gcc
+    ln -sf /opt/conda/bin/x86_64-conda-linux-gnu-c++ /opt/conda/bin/g++
+    ln -sf /opt/conda/bin/x86_64-conda-linux-gnu-gfortran /opt/conda/bin/gfortran
+    export CUDAHOSTCXX=/opt/conda/bin/g++
+
+    mkdir -p /opt/src /opt/fit-sne/bin
+    cat > /opt/conda/lib/R/etc/Rprofile.site <<'RSITE'
+Sys.setenv(
+  R_LIBS = '/opt/conda/lib/R/library',
+  R_LIBS_USER = '/opt/conda/lib/R/library',
+  R_LIBS_SITE = '/opt/conda/lib/R/library',
+  R_PROFILE_USER = '/opt/conda/lib/R/etc/Rprofile.user',
+  R_ENVIRON_USER = '/opt/conda/lib/R/etc/Renviron.user',
+  RETICULATE_PYTHON = '/opt/conda/bin/python'
+)
+.libPaths('/opt/conda/lib/R/library')
+RSITE
+    cat > /opt/conda/lib/R/etc/Rprofile.user <<'RUSER'
+.libPaths('/opt/conda/lib/R/library')
+RUSER
+    cat > /opt/conda/lib/R/etc/Renviron.user <<'RENV'
+R_LIBS=/opt/conda/lib/R/library
+R_LIBS_USER=/opt/conda/lib/R/library
+R_LIBS_SITE=/opt/conda/lib/R/library
+R_PROFILE_USER=/opt/conda/lib/R/etc/Rprofile.user
+R_ENVIRON_USER=/opt/conda/lib/R/etc/Renviron.user
+RETICULATE_PYTHON=/opt/conda/bin/python
+RENV
+
+    Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); install.packages(c('remotes', 'BiocManager', 'float', 'reticulate'), Ncpus = 4)"
+    Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); install.packages(c('uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'RANN', 'RcppAnnoy', 'RcppHNSW', 'Rnanoflann', 'codetools', 'ggplot2', 'data.table', 'jsonlite'), Ncpus = 4)"
+    Rscript -e "BiocManager::install('BiocNeighbors', ask = FALSE, update = FALSE, Ncpus = 4)"
+
+    git clone --depth 1 https://github.com/KlugerLab/FIt-SNE /opt/fit-sne-src
+    cd /opt/fit-sne-src
+    x86_64-conda-linux-gnu-c++ -std=c++11 -O3 \
+      -I/opt/conda/include \
+      src/sptree.cpp src/tsne.cpp src/nbodyfft.cpp \
+      -o bin/fast_tsne \
+      -L/opt/conda/lib -pthread -lfftw3 -lm -Wno-address-of-packed-member
+    cp /opt/fit-sne-src/bin/fast_tsne /opt/fit-sne/bin/fast_tsne
+    cp /opt/fit-sne-src/fast_tsne.R /opt/fit-sne/bin/fast_tsne.R
+
+    python - <<'EOF_PY'
+import importlib
+import numpy as np
+mods = ["openTSNE", "umap", "sklearn", "numba", "pynndescent"]
+missing = [m for m in mods if importlib.util.find_spec(m) is None]
+if missing:
+    raise SystemExit("Missing Python packages: " + ", ".join(missing))
+
+from sklearn.datasets import load_iris
+from openTSNE import TSNE
+import umap
+
+iris = load_iris()
+X = iris.data.astype(np.float32)
+Y_tsne = TSNE(
+    n_components=2,
+    perplexity=5,
+    n_iter=50,
+    early_exaggeration_iter=10,
+    initialization="pca",
+    random_state=1,
+    n_jobs=2,
+).fit(X)
+if np.asarray(Y_tsne).shape != (150, 2):
+    raise SystemExit("Python openTSNE smoke test returned the wrong shape")
+
+Y_umap = umap.UMAP(
+    n_neighbors=10,
+    n_components=2,
+    n_epochs=20,
+    random_state=1,
+).fit_transform(X)
+if Y_umap.shape != (150, 2):
+    raise SystemExit("Python umap-learn smoke test returned the wrong shape")
+
+cuml_spec = importlib.util.find_spec("cuml")
+if cuml_spec is None:
+    raise SystemExit("RAPIDS cuML is not installed")
+import cuml
+from cuml.manifold import UMAP as cuMLUMAP
+print("Python DR packages OK")
+print("cuML version:", getattr(cuml, "__version__", "unknown"))
+print("cuML UMAP class:", cuMLUMAP)
+try:
+    from cuml.manifold import TSNE as cuMLTSNE
+    print("cuML TSNE class:", cuMLTSNE)
+except Exception as exc:
+    raise SystemExit("RAPIDS cuML TSNE is not importable: " + repr(exc))
+EOF_PY
+
+    R CMD INSTALL /opt/src/faissR_0.1.0.tar.gz
+    Rscript -e "remotes::install_github('tkcaccia/fastPLS', upgrade = 'never', dependencies = TRUE)"
+    R CMD INSTALL /opt/src/fastEmbedR_0.1.0.tar.gz
+
+    Rscript - <<'EOF_R'
+.libPaths('/opt/conda/lib/R/library')
+as_embedding_matrix <- function(x) {
+  if (is.matrix(x)) return(x)
+  for (nm in c('layout', 'embedding', 'Y')) {
+    if (!is.null(x[[nm]]) && is.matrix(x[[nm]])) return(x[[nm]])
+  }
+  stop('Embedding result is not a matrix and has no matrix layout/embedding/Y field')
+}
+pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'faissR', 'fastPLS', 'fastEmbedR')
+missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing)) stop('Missing R packages: ', paste(missing, collapse = ', '))
+print(faissR::backend_info())
+stopifnot(file.exists('/opt/rapids/lib/libcugraph.so') || file.exists('/opt/conda/lib/libcugraph.so'))
+stopifnot(file.exists('/opt/rapids/lib/libcugraph_c.so') || file.exists('/opt/conda/lib/libcugraph_c.so'))
+stopifnot(faissR::faiss_available())
+set.seed(1)
+x <- matrix(rnorm(200), 50, 4)
+n <- nrow(x)
+k <- 5L
+idx <- t(vapply(seq_len(n), function(i) ((i + seq_len(k) - 1L) %% n) + 1L, integer(k)))
+dst <- matrix(rep(seq_len(k), each = n), n, k)
+y <- fastEmbedR::umap_knn(idx, dst, backend = 'cpu', n_threads = 2, graph_mode = 'fuzzy')
+y <- as_embedding_matrix(y)
+stopifnot(all(dim(y) == c(50, 2)))
+init <- scale(x[, 1:2], scale = FALSE) * 1e-4
+t <- fastEmbedR::opentsne_knn(idx, dst, perplexity = 2, backend = 'cpu', n_threads = 2, init_data = init, n_iter = 50, early_exaggeration_iter = 10)
+t <- as_embedding_matrix(t)
+stopifnot(all(dim(t) == c(50, 2)))
+EOF_R
+
+%runscript
+    exec "$@"
+
+%test
+    Rscript - <<'EOF_R'
+.libPaths('/opt/conda/lib/R/library')
+as_embedding_matrix <- function(x) {
+  if (is.matrix(x)) return(x)
+  for (nm in c('layout', 'embedding', 'Y')) {
+    if (!is.null(x[[nm]]) && is.matrix(x[[nm]])) return(x[[nm]])
+  }
+  stop('Embedding result is not a matrix and has no matrix layout/embedding/Y field')
+}
+pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'faissR', 'fastPLS', 'fastEmbedR')
+missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing)) stop('Missing R packages: ', paste(missing, collapse = ', '))
+stopifnot(faissR::faiss_available())
+print(faissR::backend_info())
+stopifnot(file.exists('/opt/rapids/lib/libcugraph.so') || file.exists('/opt/conda/lib/libcugraph.so'))
+stopifnot(file.exists('/opt/rapids/lib/libcugraph_c.so') || file.exists('/opt/conda/lib/libcugraph_c.so'))
+set.seed(1)
+x <- matrix(rnorm(200), 50, 4)
+n <- nrow(x)
+k <- 5L
+idx <- t(vapply(seq_len(n), function(i) ((i + seq_len(k) - 1L) %% n) + 1L, integer(k)))
+dst <- matrix(rep(seq_len(k), each = n), n, k)
+y <- fastEmbedR::umap_knn(idx, dst, backend = 'cpu', n_threads = 2, graph_mode = 'fuzzy')
+y <- as_embedding_matrix(y)
+stopifnot(all(dim(y) == c(50, 2)))
+init <- scale(x[, 1:2], scale = FALSE) * 1e-4
+t <- fastEmbedR::opentsne_knn(idx, dst, perplexity = 2, backend = 'cpu', n_threads = 2, init_data = init, n_iter = 50, early_exaggeration_iter = 10)
+t <- as_embedding_matrix(t)
+stopifnot(all(dim(t) == c(50, 2)))
+EOF_R
+    python - <<'EOF_PY'
+import importlib
+
+for name in ("openTSNE", "umap", "sklearn", "numba", "pynndescent", "cuml"):
+    if importlib.util.find_spec(name) is None:
+        raise SystemExit(f"Missing Python module: {name}")
+
+# Keep %test import-only for Python dimensionality-reduction packages.
+# Executing openTSNE/umap-learn here can trigger Numba cache writes from a
+# read-only image-finalization context. The benchmark launcher validates the
+# actual Python methods at runtime with writable cache directories.
+import cuml
+from cuml.manifold import UMAP as cuMLUMAP
+from cuml.manifold import TSNE as cuMLTSNE
+print("Python DR packages OK")
+print("cuML version:", getattr(cuml, "__version__", "unknown"))
+EOF_PY

@@ -17,12 +17,12 @@ embed_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object returned by [faissR::nn()], or an integer KNN index
+\item{indices}{A KNN object, or an integer KNN index
 matrix. If a self-neighbor first column is present it is removed
 automatically.}
 
 \item{distances}{Numeric KNN distance matrix matching `indices`. Leave as
-`NULL` when `indices` is a [faissR::nn()] result.}
+`NULL` when `indices` is a KNN object with `indices` and `distances` fields.}
 
 \item{method}{Embedding method: `"opentsne"` or `"umap"`.}
 
@@ -47,4 +47,15 @@ A numeric embedding matrix with resolved settings stored in
 }
 \description{
 Embed from precomputed KNN
+}
+\examples{
+x <- scale(as.matrix(iris[, 1:4]))
+d <- as.matrix(dist(x))
+diag(d) <- Inf
+k <- 10L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+y <- embed_knn(idx, dst, method = "umap", n_threads = 1, seed = 1)
+dim(y)
 }

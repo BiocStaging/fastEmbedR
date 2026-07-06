@@ -2,10 +2,12 @@
 
 [Home](../README.md) |
 [Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
 **Implementation** |
 [Examples](examples.md) |
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
+[Reproducibility](reproducibility.md) |
 [References](references.md)
 
 `fastEmbedR` implements two nonlinear embedding families: UMAP and an
@@ -23,9 +25,37 @@ The public package surface is deliberately small:
 - `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
 - `opentsne()` and `umap()` compute KNN through `faissR` and then call the KNN
   entry point.
+- `pca()` computes fastPLS-style randomized SVD PCA scores and loadings.
 - `backend` is limited to `"cpu"`, `"metal"`, and `"cuda"`.
 - GPU requests fail clearly if native GPU code is unavailable. CPU fallback is
   never reported as Metal or CUDA work.
+
+## Native Implementation Validation
+
+Because fastEmbedR implements the embedding path natively rather than calling
+Python openTSNE, the package includes a small reference-validation workflow.
+The script
+[`tools/validate_reference_implementations.R`](../tools/validate_reference_implementations.R)
+uses exact KNN on iris, fixes the random seed, and compares package-native
+outputs with established R references.
+
+For t-SNE, the validation compares `opentsne_knn()` with
+`Rtsne::Rtsne_neighbors()` from the same exact KNN matrix and PCA
+initialization. It records trustworthiness, nearest-neighbour preservation,
+embedding-space KNN label accuracy, the final KL/cost value where exposed, and
+Procrustes-aligned similarity between the two embeddings [1-4,11]. On a small
+dataset the script uses the exact negative-gradient diagnostic path rather
+than the large-data FFT-grid approximation, because this isolates objective
+correctness from interpolation-grid engineering.
+
+For UMAP, the validation compares `umap_knn(..., graph_mode = "fuzzy")` with
+`uwot::umap()` and compares the sparse graph returned by
+`prepare_umap_knn()` with `uwot::similarity_graph()` [7,10,13]. The graph check
+reports edge overlap and Spearman correlation of common-edge weights. These
+checks are intended to show behavioural agreement, not bitwise identity:
+stochastic optimizers, spectral initialization details, and parallel floating
+point reductions can legitimately rotate, reflect, scale, or slightly deform
+the final layout.
 
 ## Nearest-Neighbour Layer
 
@@ -34,16 +64,58 @@ The public package surface is deliberately small:
 the one-call embedding functions call `faissR` internally. The neighbour layer
 uses FAISS/cuVS concepts for high-throughput vector search [8-9].
 
-For reproducibility, the one-call API fixes only the requested KNN device class:
+For reproducibility, the one-call API fixes only the requested KNN device class
+and a small/large data policy:
 
-- CPU/Metal one-call embedding requests faissR CPU HNSW tuned to `target_recall = 0.99`.
-- CUDA one-call embedding requests faissR CUDA `method = "auto"` tuned to `target_recall = 0.99`.
+- CPU/Metal one-call embedding requests exact KNN below 100,000 samples and IVF
+  above that threshold through `faissR::nn()`.
+- CUDA one-call openTSNE can request GPU-resident exact KNN below 100,000
+  samples and resident IVF above 100,000 samples when exposed by the installed
+  `faissR` build.
+- CUDA one-call UMAP requests CUDA faissR KNN, then materializes the KNN result
+  for the validated host-prepared graph path before native CUDA optimization.
+  This path is the default because it matches the visually validated binary and
+  fuzzy graph behaviour; the fully GPU-resident UMAP graph path is kept for
+  explicit `umap_knn()` experiments until parity is restored.
 - KNN-input functions accept the index and distance matrices as already
   measured data and do not repeat neighbour search.
 
 This separation makes benchmark timing interpretable: KNN time, affinity/graph
 construction time, embedding time, and projection/transform time can be
 reported separately.
+
+## PCA And RSVD Initialization
+
+`fastEmbedR::pca()` provides a small PCA API for reusable scores, loadings, and
+openTSNE initialization. The implementation follows the fastPLS-style
+randomized SVD structure: draw a Gaussian sketch, multiply by the data matrix,
+apply optional power iterations, orthogonalize the sketch, compute the SVD of
+the projected small matrix, and form scores from the left singular vectors and
+singular values. The full data matrix is not passed to `irlba`, ARPACK, or a
+method-selection layer. The only exact SVD is the small projected-matrix SVD
+that is intrinsic to RSVD.
+
+The general `pca()` helper uses the same RSVD family across backends:
+
+| Backend | PCA implementation |
+| --- | --- |
+| CPU | Native R/C++ RSVD matrix products using BLAS-backed `%*%`/`crossprod`. |
+| Metal | The same RSVD algorithm with package-native Metal matrix-multiply steps when compiled. |
+| CUDA | Native C++/CUDA initialization through RAPIDS RAFT TSVD compiled into the CUDA backend. |
+
+For openTSNE initialization, the input is mean-centered before RSVD and the
+resulting scores are centered and scaled to the small t-SNE initialization
+scale. CUDA acceleration for this step is native C++/CUDA through RAPIDS RAFT
+TSVD compiled in the package CUDA translation unit; the package does not call
+Python, `reticulate`, or Python cuML from public functions. If RAFT/cuML TSVD
+support is not compiled in, CUDA PCA initialization fails loudly rather than
+falling back to a different implementation.
+
+`opentsne_pca_init()` is a thin initialization helper on top of this PCA
+family. It centers the PCA scores and rescales them so the maximum component
+standard deviation is `1e-4`, matching the small-scale initialization expected
+by t-SNE/openTSNE optimizers [1,3-4]. Users can compute this once and pass it
+as `Y_init` to `opentsne_knn()` or `opentsne()`.
 
 ## UMAP From KNN
 

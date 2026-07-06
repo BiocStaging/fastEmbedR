@@ -42,7 +42,7 @@ possible.}
 
 \item{reference_nn}{Optional precomputed high-dimensional nearest-neighbor
 list. It may include a self-neighbor column, like
-\code{faissR::nn(x, x, k + 1)}.}
+a self-neighbour KNN object with at least \code{k + 1} columns.}
 
 \item{sample_size_for_global_metrics}{Maximum deterministic subsample size
 for all-pairs global distance metrics.}
@@ -74,4 +74,24 @@ A one-row data frame with local, global, label-aware, batch-aware,
 }
 \description{
 Evaluate an embedding against high-dimensional structure
+}
+\examples{
+x <- scale(as.matrix(iris[, 1:4]))
+d <- as.matrix(dist(x))
+diag(d) <- Inf
+k <- 10L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+embedding <- as.matrix(iris[, 1:2])
+evaluate_embedding(
+  x,
+  embedding,
+  labels = iris$Species,
+  k = 5,
+  reference_nn = list(indices = idx, distances = dst),
+  sample_size_for_global_metrics = nrow(x),
+  sample_size_for_local_metrics = nrow(x),
+  n_threads = 1
+)
 }

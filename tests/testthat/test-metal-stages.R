@@ -1,3 +1,5 @@
+if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
+
 test_that("Metal public paths stay native and do not depend on Python bridges", {
   desc <- utils::packageDescription("fastEmbedR")
   dependency_fields <- paste(

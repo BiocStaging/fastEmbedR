@@ -50,6 +50,9 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   if [ -d "$cuda_home/targets/x86_64-linux/include" ]; then
     cuda_include_flags="$cuda_include_flags -I$cuda_home/targets/x86_64-linux/include"
   fi
+  if [ -d "$cuda_home/targets/x86_64-linux/include/cccl" ]; then
+    cuda_include_flags="$cuda_include_flags -I$cuda_home/targets/x86_64-linux/include/cccl"
+  fi
   if [ -d "$cuda_home/targets/x86_64-linux/lib" ]; then
     cuda_lib_flags="$cuda_lib_flags -L$cuda_home/targets/x86_64-linux/lib"
   fi
@@ -60,11 +63,57 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   cuda_extra_flags=${FASTEMBEDR_CUDA_FLAGS:-}
   cuda_objects="embedding_cuda_impl.o embedding_cuda_kernels.o"
   cppflags="$cppflags -DFASTEMBEDR_HAS_CUDA $cuda_include_flags"
-  libs="$libs $cuda_lib_flags -lcudart -lcufft"
+  libs="$libs $cuda_lib_flags -lcudart -lcufft -lcublas -lcusolver"
+  if [ "${FASTEMBEDR_USE_CUML:-0}" = "1" ]; then
+    cuml_home=${CUML_HOME:-}
+    if [ -z "$cuml_home" ]; then
+      echo "FASTEMBEDR_USE_CUML=1 was requested, but CUML_HOME is not set." >&2
+      echo "Set CUML_HOME to a native libcuml prefix containing include/ and lib64/." >&2
+      exit 1
+    fi
+    if [ ! -f "$cuml_home/include/cuml/decomposition/pca.hpp" ]; then
+      echo "Could not find cuml/decomposition/pca.hpp under CUML_HOME=$cuml_home." >&2
+      exit 1
+    fi
+    rapids_cccl_include=""
+    for dep_home in ${RAPIDS_HOME:-} ${RAFT_HOME:-} ${RMM_HOME:-}; do
+      if [ -f "$dep_home/include/rapids/cuda/version" ]; then
+        rapids_cccl_include="$dep_home/include/rapids"
+        break
+      fi
+    done
+    if [ -n "$rapids_cccl_include" ]; then
+      cppflags="-I$rapids_cccl_include $cppflags"
+      cuda_include_flags="-I$rapids_cccl_include $cuda_include_flags"
+    elif [ -d "$cuda_home/targets/x86_64-linux/include/cccl" ]; then
+      cppflags="-I$cuda_home/targets/x86_64-linux/include/cccl $cppflags"
+    fi
+    cppflags="$cppflags -DFASTEMBEDR_HAS_CUML -I$cuml_home/include"
+    cuda_include_flags="$cuda_include_flags -DFASTEMBEDR_HAS_CUML -I$cuml_home/include"
+    libs="$libs -L$cuml_home/lib64 -L$cuml_home/lib -lcuml"
+    for dep_home in ${RAFT_HOME:-} ${RMM_HOME:-} ${RAPIDS_HOME:-} ${NVFOREST_HOME:-}; do
+      if [ -n "$dep_home" ]; then
+        if [ -d "$dep_home/include" ]; then
+          cppflags="$cppflags -I$dep_home/include"
+          cuda_include_flags="$cuda_include_flags -I$dep_home/include"
+        fi
+        if [ -d "$dep_home/lib64" ]; then
+          libs="$libs -L$dep_home/lib64"
+        fi
+        if [ -d "$dep_home/lib" ]; then
+          libs="$libs -L$dep_home/lib"
+        fi
+      fi
+    done
+    for dep_dir in ${FASTEMBEDR_CUML_LIB_DIRS:-}; do
+      libs="$libs -L$dep_dir"
+    done
+    libs="$libs -lraft -lrmm -lrapids_logger -lnvforest++ -lcublasLt -lcublas -lcusolver -lcusparse -lcurand"
+  fi
   cuda_rule="
 .DEFAULT_GOAL := all
 
-CUDA_NVCCFLAGS = -std=c++14 -x cu -Xcompiler -fPIC $cuda_include_flags$cuda_arch_flags $cuda_extra_flags
+CUDA_NVCCFLAGS = -std=c++17 -x cu --extended-lambda --expt-relaxed-constexpr -Xcompiler -fPIC $cuda_include_flags$cuda_arch_flags $cuda_extra_flags
 
 embedding_cuda_kernels.o: embedding_cuda_kernels.cpp
 	\$(NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@

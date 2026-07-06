@@ -57,6 +57,13 @@ perplexity <- num_arg("perplexity", 15)
 backend_group <- args$backend_group %||% "cpu"
 force <- bool_arg("force", FALSE)
 worker <- bool_arg("worker", FALSE)
+thread_grid <- csv_arg("thread_grid", as.character(threads))
+thread_grid <- suppressWarnings(as.integer(thread_grid))
+thread_grid <- unique(thread_grid[!is.na(thread_grid) & thread_grid > 0L])
+if (!length(thread_grid)) thread_grid <- threads
+if (identical(backend_group, "cuda") || worker) {
+  thread_grid <- threads
+}
 
 datasets <- csv_arg(
   "datasets",
@@ -64,9 +71,9 @@ datasets <- csv_arg(
 )
 
 default_methods <- if (identical(backend_group, "cuda")) {
-  "fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary"
+  "fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary,rapids_cuml_umap_full,rapids_cuml_tsne_full"
 } else {
-  "fastEmbedR_opentsne_cpu,fastEmbedR_umap_cpu_fuzzy,fastEmbedR_umap_cpu_binary,Rtsne_full,KlugerLab_FItSNE,umap_package,uwot_default,uwot_fast_sgd"
+  "fastEmbedR_opentsne_cpu,fastEmbedR_umap_cpu_fuzzy,fastEmbedR_umap_cpu_binary,Rtsne_full,KlugerLab_FItSNE,python_opentsne_fft,umap_package,uwot_default,uwot_fast_sgd,python_umap_learn"
 }
 methods <- csv_arg("methods", default_methods)
 
@@ -177,10 +184,24 @@ sample_for_metrics <- function(n, size, seed) {
   sort(sample.int(n, size))
 }
 
+empty_score_record <- function() {
+  list(
+    trustworthiness = NA_real_,
+    knn_preservation = NA_real_,
+    knn_preservation_15 = NA_real_,
+    knn_preservation_30 = NA_real_,
+    knn_preservation_50 = NA_real_,
+    silhouette = NA_real_,
+    label_knn_accuracy = NA_real_,
+    quality_sample_n = NA_integer_
+  )
+}
+
 score_layout <- function(x_standard, layout, labels) {
-  out <- list(trust = NA_real_, knn_preservation = NA_real_, label_acc = NA_real_)
+  out <- empty_score_record()
   if (!requireNamespace("fastEmbedR", quietly = TRUE)) return(out)
   rows <- sample_for_metrics(nrow(layout), min(5000L, nrow(layout)), seed + 19L)
+  out$quality_sample_n <- length(rows)
   score <- tryCatch(
     fastEmbedR::evaluate_embedding(
       x_standard[rows, , drop = FALSE],
@@ -196,9 +217,13 @@ score_layout <- function(x_standard, layout, labels) {
     error = function(e) e
   )
   if (!inherits(score, "error")) {
-    out$trust <- as.numeric(score$trustworthiness %||% NA_real_)
-    out$knn_preservation <- as.numeric(score$knn_preservation %||% score$knn_preservation_15 %||% NA_real_)
-    out$label_acc <- as.numeric(score$nn_accuracy %||% score$label_knn_accuracy %||% NA_real_)
+    out$trustworthiness <- as.numeric(score$trustworthiness %||% NA_real_)
+    out$knn_preservation_15 <- as.numeric(score$knn_preservation_15 %||% NA_real_)
+    out$knn_preservation_30 <- as.numeric(score$knn_preservation_30 %||% score$knn_preservation %||% NA_real_)
+    out$knn_preservation_50 <- as.numeric(score$knn_preservation_50 %||% NA_real_)
+    out$knn_preservation <- out$knn_preservation_30
+    out$silhouette <- as.numeric(score$silhouette %||% NA_real_)
+    out$label_knn_accuracy <- as.numeric(score$nn_accuracy %||% score$label_knn_accuracy %||% NA_real_)
   }
   out
 }
@@ -288,8 +313,285 @@ run_fitsne <- function(x, y_init = NULL) {
   do.call(wrapper$fun, call_args)
 }
 
+ensure_reticulate <- function() {
+  if (!requireNamespace("reticulate", quietly = TRUE)) {
+    stop("reticulate is not installed.", call. = FALSE)
+  }
+  py <- Sys.getenv("RETICULATE_PYTHON", unset = "")
+  if (nzchar(py)) reticulate::use_python(py, required = FALSE)
+  invisible(TRUE)
+}
+
+numpy_float32 <- function(x) {
+  ensure_reticulate()
+  np <- reticulate::import("numpy", convert = FALSE)
+  np$array(as_double_matrix(x), dtype = "float32", order = "C")
+}
+
+py_array_to_matrix <- function(x) {
+  ensure_reticulate()
+  np <- reticulate::import("numpy", convert = FALSE)
+  if (inherits(x, "python.builtin.object")) {
+    # cuML commonly returns a CuPy/cuDF-backed object. Try GPU-to-host conversion
+    # only at the final embedding boundary.
+    as_numpy <- tryCatch(x$to_numpy(), error = function(e) NULL)
+    if (!is.null(as_numpy)) x <- as_numpy
+    cp <- tryCatch(reticulate::import("cupy", convert = FALSE), error = function(e) NULL)
+    if (!is.null(cp)) {
+      host <- tryCatch(cp$asnumpy(x), error = function(e) NULL)
+      if (!is.null(host)) x <- host
+    }
+    x <- tryCatch(np$asarray(x), error = function(e) x)
+  }
+  y <- reticulate::py_to_r(x)
+  y <- as.matrix(y)
+  storage.mode(y) <- "double"
+  y[, 1:2, drop = FALSE]
+}
+
+run_python_umap_learn <- function(x) {
+  ensure_reticulate()
+  umap_py <- reticulate::import("umap", convert = FALSE)
+  x_np <- numpy_float32(x)
+  model <- umap_py$UMAP(
+    n_neighbors = as.integer(k),
+    n_components = 2L,
+    metric = "euclidean",
+    random_state = as.integer(seed),
+    n_jobs = as.integer(threads),
+    verbose = FALSE
+  )
+  py_array_to_matrix(model$fit_transform(x_np))
+}
+
+run_python_opentsne_fft <- function(x) {
+  ensure_reticulate()
+  openTSNE <- reticulate::import("openTSNE", convert = FALSE)
+  x_np <- numpy_float32(x)
+  model <- openTSNE$TSNE(
+    n_components = 2L,
+    perplexity = as.numeric(perplexity),
+    initialization = "pca",
+    negative_gradient_method = "fft",
+    n_iter = 500L,
+    early_exaggeration_iter = 250L,
+    random_state = as.integer(seed),
+    n_jobs = as.integer(threads),
+    verbose = FALSE
+  )
+  py_array_to_matrix(model$fit(x_np))
+}
+
+run_rapids_cuml_umap <- function(x) {
+  ensure_reticulate()
+  cuml_umap <- reticulate::import("cuml.manifold", convert = FALSE)$UMAP
+  x_np <- numpy_float32(x)
+  model <- cuml_umap(
+    n_neighbors = as.integer(k),
+    n_components = 2L,
+    metric = "euclidean",
+    random_state = as.integer(seed),
+    verbose = FALSE
+  )
+  py_array_to_matrix(model$fit_transform(x_np))
+}
+
+run_rapids_cuml_tsne <- function(x) {
+  ensure_reticulate()
+  cuml_tsne <- reticulate::import("cuml.manifold", convert = FALSE)$TSNE
+  x_np <- numpy_float32(x)
+  base_args <- list(
+    n_components = 2L,
+    perplexity = as.numeric(perplexity),
+    random_state = as.integer(seed),
+    verbose = FALSE
+  )
+  # RAPIDS/cuML TSNE signatures have changed across releases. Try the modern
+  # full-embedding call first, then fall back to a minimal compatible call.
+  model <- tryCatch(
+    do.call(cuml_tsne, c(base_args, list(method = "fft"))),
+    error = function(e) do.call(cuml_tsne, base_args)
+  )
+  py_array_to_matrix(model$fit_transform(x_np))
+}
+
+is_tsne_method <- function(method) {
+  grepl("tsne|Rtsne|FItSNE|opentsne", method, ignore.case = TRUE)
+}
+
+is_umap_method <- function(method) {
+  grepl("umap", method, ignore.case = TRUE)
+}
+
 method_backend <- function(method) {
-  if (grepl("_cuda$", method) || grepl("_cuda_", method)) "cuda" else "cpu"
+  if (grepl("_cuda$", method) || grepl("_cuda_", method) || startsWith(method, "rapids_cuml_")) {
+    "cuda"
+  } else {
+    "cpu"
+  }
+}
+
+method_parameter_row <- function(method) {
+  backend <- method_backend(method)
+  tsne_method <- is_tsne_method(method)
+  umap_method <- is_umap_method(method)
+  base <- list(
+    method = method,
+    backend = backend,
+    n_neighbors_k = NA_character_,
+    perplexity = NA_character_,
+    iterations_or_epochs = NA_character_,
+    early_exaggeration = NA_character_,
+    learning_rate = NA_character_,
+    initialization = NA_character_,
+    distance_metric = "euclidean",
+    thread_count = as.character(threads),
+    random_seed = as.character(seed),
+    knn_precomputed = "no",
+    knn_source = NA_character_,
+    knn_exact_or_approximate = NA_character_,
+    input_matrix = if (grepl("^fastEmbedR", method)) "float32" else "standard R matrix",
+    notes = NA_character_
+  )
+  if (method == "fastEmbedR_opentsne_cpu") {
+    base$n_neighbors_k <- paste0("ceiling(perplexity) = ", ceiling(perplexity))
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "auto opt-SNE policy; default 250 early-exaggeration + 500 normal iterations unless auto stop applies"
+    base$early_exaggeration <- "auto; default 12"
+    base$learning_rate <- "auto; n / early_exaggeration"
+    base$initialization <- "PCA initialization from fastPLS rSVD when no Y_init is supplied"
+    base$knn_source <- "internal faissR CPU HNSW policy, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "approximate"
+    base$notes <- "total runtime includes faissR KNN, PCA initialization, affinity construction, and embedding"
+  } else if (method == "fastEmbedR_opentsne_cuda") {
+    base$n_neighbors_k <- paste0("ceiling(perplexity) = ", ceiling(perplexity))
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "auto opt-SNE policy; default 250 early-exaggeration + 500 normal iterations unless auto stop applies"
+    base$early_exaggeration <- "auto; default 12"
+    base$learning_rate <- "auto; n / early_exaggeration"
+    base$initialization <- "native CUDA RAFT/cuML TSVD PCA initialization"
+    base$knn_source <- "internal faissR CUDA auto policy, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "approximate"
+    base$notes <- "CUDA run is counted only when native CUDA backend and RAFT/cuML TSVD initialization are available; no host fallback is used"
+  } else if (method %in% c("fastEmbedR_umap_cpu_fuzzy", "fastEmbedR_umap_cpu_binary")) {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "fastEmbedR auto UMAP policy; resolved per dataset and stored in the returned parameters"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "fastEmbedR auto UMAP policy; default starts at 1"
+    base$initialization <- "spectral initialization from the KNN graph"
+    base$knn_source <- "internal faissR CPU HNSW policy, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "approximate"
+    base$notes <- if (grepl("_binary$", method)) {
+      "binary symmetric graph_mode"
+    } else {
+      "standard fuzzy UMAP graph_mode"
+    }
+  } else if (method %in% c("fastEmbedR_umap_cuda_fuzzy", "fastEmbedR_umap_cuda_binary")) {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "fastEmbedR auto UMAP policy; resolved per dataset and stored in the returned parameters"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "fastEmbedR auto UMAP policy; default starts at 1"
+    base$initialization <- "spectral initialization from the KNN graph"
+    base$knn_source <- "internal faissR CUDA auto policy, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "approximate"
+    base$notes <- if (grepl("_binary$", method)) {
+      "binary symmetric graph_mode; CUDA run is counted only when native CUDA backend is available"
+    } else {
+      "standard fuzzy UMAP graph_mode; CUDA run is counted only when native CUDA backend is available"
+    }
+  } else if (method == "Rtsne_full") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "Rtsne default max_iter = 1000"
+    base$early_exaggeration <- "Rtsne default exaggeration_factor = 12, stop_lying_iter = 250"
+    base$learning_rate <- "Rtsne default eta = 200"
+    base$initialization <- "Rtsne PCA preprocessing enabled with pca = TRUE"
+    base$knn_source <- "internal Rtsne nearest-neighbour/affinity construction"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "total runtime includes Rtsne internal preprocessing, KNN/affinity construction, and embedding"
+  } else if (method == "KlugerLab_FItSNE") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "max_iter = 750"
+    base$early_exaggeration <- "FIt-SNE wrapper default"
+    base$learning_rate <- "FIt-SNE wrapper default"
+    base$initialization <- "FIt-SNE wrapper default unless external wrapper supplies otherwise"
+    base$knn_source <- "internal FIt-SNE nearest-neighbour/affinity construction"
+    base$knn_exact_or_approximate <- "package/executable internal"
+    base$notes <- "theta = 0.5; nthreads set to benchmark thread count"
+  } else if (method == "python_opentsne_fft") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "Python openTSNE n_iter = 500 plus early_exaggeration_iter = 250"
+    base$early_exaggeration <- "Python openTSNE default"
+    base$learning_rate <- "Python openTSNE auto/default"
+    base$initialization <- "Python openTSNE PCA initialization"
+    base$knn_source <- "Python openTSNE internal affinity/neighbor construction"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "negative_gradient_method = fft; run through reticulate for reference benchmarking"
+  } else if (method == "umap_package") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "umap::umap.defaults except n_neighbors = k"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "umap package default"
+    base$initialization <- "umap package default"
+    base$knn_source <- "internal umap package KNN"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "total runtime includes umap package internal KNN and embedding"
+  } else if (method == "uwot_default") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "uwot defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "uwot default"
+    base$initialization <- "uwot default"
+    base$knn_source <- "internal uwot KNN with package default nn_method"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "fast_sgd = FALSE; n_sgd_threads = 1"
+  } else if (method == "uwot_fast_sgd") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "uwot defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "uwot default"
+    base$initialization <- "uwot default"
+    base$knn_source <- "internal uwot KNN with package default nn_method"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "fast_sgd = TRUE; n_sgd_threads set to benchmark thread count"
+  } else if (method == "python_umap_learn") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "Python umap-learn defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "Python umap-learn default"
+    base$initialization <- "Python umap-learn default"
+    base$knn_source <- "Python umap-learn internal nearest-neighbor graph construction"
+    base$knn_exact_or_approximate <- "package internal approximate"
+    base$notes <- "run through reticulate for reference benchmarking"
+  } else if (method == "rapids_cuml_umap_full") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "RAPIDS cuML UMAP defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "RAPIDS cuML default"
+    base$initialization <- "RAPIDS cuML default"
+    base$knn_source <- "RAPIDS cuML internal GPU nearest-neighbor graph construction"
+    base$knn_exact_or_approximate <- "RAPIDS internal"
+    base$notes <- "full RAPIDS cuML UMAP through reticulate; total runtime includes Python/R boundary and GPU transfer"
+  } else if (method == "rapids_cuml_tsne_full") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "RAPIDS cuML TSNE defaults"
+    base$early_exaggeration <- "RAPIDS cuML default"
+    base$learning_rate <- "RAPIDS cuML default"
+    base$initialization <- "RAPIDS cuML default"
+    base$knn_source <- "RAPIDS cuML internal GPU affinity construction"
+    base$knn_exact_or_approximate <- "RAPIDS internal"
+    base$notes <- "full RAPIDS cuML TSNE through reticulate; total runtime includes Python/R boundary and GPU transfer"
+  } else {
+    base$n_neighbors_k <- if (umap_method) as.character(k) else NA_character_
+    base$perplexity <- if (tsne_method) as.character(perplexity) else NA_character_
+    base$notes <- "unknown method; inspect worker log"
+  }
+  as.data.frame(base, stringsAsFactors = FALSE)
+}
+
+method_parameter_summary <- function(method) {
+  row <- method_parameter_row(method)
+  pairs <- paste(names(row), as.character(row[1, , drop = TRUE]), sep = "=")
+  paste(pairs[!is.na(row[1, , drop = TRUE])], collapse = "; ")
 }
 
 cuda_status_message <- function() {
@@ -373,6 +675,14 @@ run_embedding_method <- function(method, dataset, x_fast, x_ref, labels) {
     if (is.null(x_ref)) stop("Standard R dataset is required for KlugerLab_FItSNE.", call. = FALSE)
     return(run_fitsne(x_ref))
   }
+  if (method == "python_opentsne_fft") {
+    if (is.null(x_ref)) stop("Standard R dataset is required for python_opentsne_fft.", call. = FALSE)
+    return(run_python_opentsne_fft(x_ref))
+  }
+  if (method == "rapids_cuml_tsne_full") {
+    if (is.null(x_ref)) stop("Standard R dataset is required for rapids_cuml_tsne_full.", call. = FALSE)
+    return(run_rapids_cuml_tsne(x_ref))
+  }
   if (method == "umap_package") {
     if (is.null(x_ref)) stop("Standard R dataset is required for umap_package.", call. = FALSE)
     if (!requireNamespace("umap", quietly = TRUE)) stop("umap is not installed.", call. = FALSE)
@@ -391,6 +701,14 @@ run_embedding_method <- function(method, dataset, x_fast, x_ref, labels) {
     if (!requireNamespace("uwot", quietly = TRUE)) stop("uwot is not installed.", call. = FALSE)
     return(uwot::umap(x_ref, n_neighbors = k, n_threads = threads,
                       n_sgd_threads = threads, fast_sgd = TRUE, verbose = FALSE))
+  }
+  if (method == "python_umap_learn") {
+    if (is.null(x_ref)) stop("Standard R dataset is required for python_umap_learn.", call. = FALSE)
+    return(run_python_umap_learn(x_ref))
+  }
+  if (method == "rapids_cuml_umap_full") {
+    if (is.null(x_ref)) stop("Standard R dataset is required for rapids_cuml_umap_full.", call. = FALSE)
+    return(run_rapids_cuml_umap(x_ref))
   }
   stop("Unknown method: ", method, call. = FALSE)
 }
@@ -424,39 +742,77 @@ worker_main <- function() {
   t <- system.time({
     fit <- run_embedding_method(method, dataset, x_fast, x_ref, labels)
   })
-  layout <- layout_matrix(fit)
   elapsed <- unname(t[["elapsed"]])
-  layout_file <- file.path(out_dir, "layouts", paste0(dataset, "_", method, "_seed", seed, ".rds"))
-  plot_file <- file.path(out_dir, "plots", paste0(dataset, "_", method, "_seed", seed, ".png"))
-  saveRDS(list(layout = layout, labels = labels, method = method, dataset = dataset), layout_file)
-  plot_layout(layout, labels, plot_file, sprintf("%s %s %.2fs", dataset, method, elapsed))
+  layout <- layout_matrix(fit)
+  layout_file <- file.path(out_dir, "layouts", paste0(dataset, "_", method, "_threads", threads, "_seed", seed, ".rds"))
+  plot_file <- file.path(out_dir, "plots", paste0(dataset, "_", method, "_threads", threads, "_seed", seed, ".png"))
+  postprocess_warnings <- character()
+  add_postprocess_warning <- function(stage, condition) {
+    postprocess_warnings <<- c(
+      postprocess_warnings,
+      sprintf("%s: %s", stage, conditionMessage(condition))
+    )
+  }
+  save_ok <- tryCatch({
+    saveRDS(list(layout = layout, labels = labels, method = method, dataset = dataset), layout_file)
+    TRUE
+  }, error = function(e) {
+    add_postprocess_warning("save_layout", e)
+    FALSE
+  })
+  if (!isTRUE(save_ok)) layout_file <- NA_character_
+  plot_ok <- tryCatch({
+    plot_layout(layout, labels, plot_file, sprintf("%s %s %d threads %.2fs", dataset, method, threads, elapsed))
+    TRUE
+  }, error = function(e) {
+    add_postprocess_warning("plot_layout", e)
+    FALSE
+  })
+  if (!isTRUE(plot_ok)) plot_file <- NA_character_
   # Metrics need numeric matrix arithmetic; this conversion is only for scoring,
-  # never for the reference package calls above.
-  scores <- score_layout(x_score, layout, labels)
+  # never for the reference package calls above. Metric failures should not
+  # invalidate a completed embedding in long HPC runs.
+  scores <- tryCatch(
+    score_layout(x_score, layout, labels),
+    error = function(e) {
+      add_postprocess_warning("score_layout", e)
+      empty_score_record()
+    }
+  )
 
   result <- data.frame(
     dataset = dataset,
     method = method,
     backend = method_backend(method),
+    cpu_threads = threads,
     status = "success",
     n = nrow(x_fast),
     p = ncol(x_fast),
-    k = if (grepl("umap", method, ignore.case = TRUE)) k else NA_integer_,
-    perplexity = if (grepl("tsne|Rtsne|FItSNE", method, ignore.case = TRUE)) perplexity else NA_real_,
+    k = if (is_umap_method(method)) k else NA_integer_,
+    perplexity = if (is_tsne_method(method)) perplexity else NA_real_,
+    parameters = method_parameter_summary(method),
     input_fastEmbedR = if (grepl("^fastEmbedR", method)) {
       "float32"
     } else {
       "standard_R_matrix"
     },
     elapsed_sec = elapsed,
-    trust = scores$trust,
+    trust = scores$trustworthiness,
+    trustworthiness = scores$trustworthiness,
     knn_preservation = scores$knn_preservation,
-    label_acc = scores$label_acc,
+    nn_preservation = scores$knn_preservation,
+    knn_preservation_15 = scores$knn_preservation_15,
+    knn_preservation_30 = scores$knn_preservation_30,
+    knn_preservation_50 = scores$knn_preservation_50,
+    silhouette = scores$silhouette,
+    label_acc = scores$label_knn_accuracy,
+    knn_label_accuracy = scores$label_knn_accuracy,
+    quality_sample_n = scores$quality_sample_n,
     max_rss_kb = NA_real_,
     max_rss_gb = NA_real_,
     layout_file = layout_file,
     plot_file = plot_file,
-    error = NA_character_,
+    error = if (length(postprocess_warnings)) paste(postprocess_warnings, collapse = " | ") else NA_character_,
     stringsAsFactors = FALSE
   )
   write.csv(result, worker_out, row.names = FALSE)
@@ -478,15 +834,379 @@ parse_time_v <- function(path) {
   list(max_rss_kb = rss, exit_status = exit_status)
 }
 
+ensure_quality_columns <- function(tab) {
+  defaults <- list(
+    trust = NA_real_,
+    trustworthiness = NA_real_,
+    cpu_threads = NA_real_,
+    knn_preservation = NA_real_,
+    nn_preservation = NA_real_,
+    knn_preservation_15 = NA_real_,
+    knn_preservation_30 = NA_real_,
+    knn_preservation_50 = NA_real_,
+    silhouette = NA_real_,
+    label_acc = NA_real_,
+    knn_label_accuracy = NA_real_,
+    quality_sample_n = NA_integer_,
+    max_rss_kb = NA_real_,
+    max_rss_gb = NA_real_
+  )
+  for (nm in names(defaults)) {
+    if (!nm %in% names(tab)) tab[[nm]] <- defaults[[nm]]
+  }
+  if (all(is.na(tab$trustworthiness)) && any(!is.na(tab$trust))) {
+    tab$trustworthiness <- tab$trust
+  }
+  if (all(is.na(tab$trust)) && any(!is.na(tab$trustworthiness))) {
+    tab$trust <- tab$trustworthiness
+  }
+  if (all(is.na(tab$knn_preservation_30)) && any(!is.na(tab$knn_preservation))) {
+    tab$knn_preservation_30 <- tab$knn_preservation
+  }
+  if (all(is.na(tab$knn_preservation)) && any(!is.na(tab$knn_preservation_30))) {
+    tab$knn_preservation <- tab$knn_preservation_30
+  }
+  if (all(is.na(tab$nn_preservation)) && any(!is.na(tab$knn_preservation_30))) {
+    tab$nn_preservation <- tab$knn_preservation_30
+  }
+  if (all(is.na(tab$knn_label_accuracy)) && any(!is.na(tab$label_acc))) {
+    tab$knn_label_accuracy <- tab$label_acc
+  }
+  if (all(is.na(tab$label_acc)) && any(!is.na(tab$knn_label_accuracy))) {
+    tab$label_acc <- tab$knn_label_accuracy
+  }
+  numeric_cols <- c(
+    "n", "p", "k", "perplexity", "cpu_threads", "elapsed_sec", "trust",
+    "trustworthiness", "knn_preservation", "nn_preservation",
+    "knn_preservation_15", "knn_preservation_30", "knn_preservation_50",
+    "silhouette", "label_acc", "knn_label_accuracy", "quality_sample_n",
+    "max_rss_kb", "max_rss_gb"
+  )
+  for (nm in intersect(numeric_cols, names(tab))) {
+    tab[[nm]] <- suppressWarnings(as.numeric(tab[[nm]]))
+  }
+  tab
+}
+
+write_markdown_table <- function(tab, path) {
+  if (!nrow(tab)) return(invisible(NULL))
+  numeric_cols <- vapply(tab, is.numeric, logical(1))
+  display <- tab
+  display[numeric_cols] <- lapply(display[numeric_cols], function(x) {
+    ifelse(is.na(x), "", formatC(x, digits = 4L, format = "fg"))
+  })
+  display[] <- lapply(display, function(x) {
+    x <- as.character(x)
+    x[is.na(x) | x == "NA"] <- ""
+    x
+  })
+  con <- file(path, open = "wt")
+  on.exit(close(con), add = TRUE)
+  cat("| ", paste(names(display), collapse = " | "), " |\n", sep = "", file = con)
+  cat("| ", paste(rep("---", ncol(display)), collapse = " | "), " |\n", sep = "", file = con)
+  for (i in seq_len(nrow(display))) {
+    cat("| ", paste(as.character(display[i, , drop = TRUE]), collapse = " | "), " |\n", sep = "", file = con)
+  }
+  invisible(NULL)
+}
+
+write_parameter_outputs <- function(methods, thread_values = threads) {
+  old_threads <- threads
+  on.exit({
+    threads <<- old_threads
+    Sys.setenv(
+      OMP_NUM_THREADS = as.character(threads),
+      OPENBLAS_NUM_THREADS = as.character(threads),
+      MKL_NUM_THREADS = as.character(threads),
+      VECLIB_MAXIMUM_THREADS = as.character(threads),
+      RCPP_PARALLEL_NUM_THREADS = as.character(threads)
+    )
+  }, add = TRUE)
+  tabs <- lapply(thread_values, function(th) {
+    threads <<- as.integer(th)
+    Sys.setenv(
+      OMP_NUM_THREADS = as.character(threads),
+      OPENBLAS_NUM_THREADS = as.character(threads),
+      MKL_NUM_THREADS = as.character(threads),
+      VECLIB_MAXIMUM_THREADS = as.character(threads),
+      RCPP_PARALLEL_NUM_THREADS = as.character(threads)
+    )
+    tab <- do.call(rbind, lapply(methods, method_parameter_row))
+    tab$cpu_threads <- threads
+    tab
+  })
+  param_tab <- do.call(rbind, tabs)
+  param_tab <- param_tab[order(param_tab$cpu_threads, param_tab$method, param_tab$backend), , drop = FALSE]
+  write.csv(param_tab, file.path(out_dir, "embedding_parameter_table.csv"), row.names = FALSE)
+  write_markdown_table(param_tab, file.path(out_dir, "embedding_parameter_table.md"))
+  invisible(param_tab)
+}
+
+run_cmd_capture <- function(command, args = character()) {
+  path <- Sys.which(command)
+  if (!nzchar(path)) return(NA_character_)
+  out <- tryCatch(
+    system2(path, args, stdout = TRUE, stderr = TRUE),
+    warning = function(w) conditionMessage(w),
+    error = function(e) conditionMessage(e)
+  )
+  paste(out, collapse = "\n")
+}
+
+git_capture <- function(args) {
+  out <- run_cmd_capture("git", args)
+  if (length(out) != 1L || is.na(out)) NA_character_ else trimws(out)
+}
+
+pkg_version_or_na <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) return(NA_character_)
+  as.character(utils::packageVersion(pkg))
+}
+
+write_text_manifest <- function(x, path) {
+  con <- file(path, open = "wt")
+  on.exit(close(con), add = TRUE)
+  recurse <- function(obj, prefix = "") {
+    if (is.list(obj)) {
+      for (nm in names(obj)) {
+        cat(prefix, nm, ":\n", sep = "", file = con)
+        recurse(obj[[nm]], paste0(prefix, "  "))
+      }
+    } else {
+      val <- paste(as.character(obj), collapse = "\n")
+      if (!nzchar(val) || is.na(val)) val <- "NA"
+      for (line in strsplit(val, "\n", fixed = TRUE)[[1L]]) {
+        cat(prefix, line, "\n", sep = "", file = con)
+      }
+    }
+  }
+  recurse(x)
+  invisible(path)
+}
+
+write_reproducibility_bundle <- function() {
+  session_txt <- paste(capture.output(utils::sessionInfo()), collapse = "\n")
+  writeLines(session_txt, file.path(out_dir, "sessionInfo.txt"))
+
+  command_lines <- c(
+    current_invocation = paste(commandArgs(FALSE), collapse = " "),
+    hpc_cpu1_4 = paste(
+      paste0("DATASETS=", paste(datasets, collapse = ",")),
+      paste0("K=", k),
+      paste0("PERPLEXITY=", perplexity),
+      paste0("CPU_THREADS_GRID=", paste(thread_grid, collapse = ",")),
+      paste0("TIMEOUT=", timeout),
+      paste0("FORCE=", force),
+      "sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cpu12.sh"
+    ),
+    hpc_cuda = paste(
+      paste0("DATASETS=", paste(datasets, collapse = ",")),
+      paste0("K=", k),
+      paste0("PERPLEXITY=", perplexity),
+      paste0("TIMEOUT=", timeout),
+      "sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh"
+    ),
+    small_reference_validation = paste(
+      "Rscript tools/validate_reference_implementations.R",
+      "--out-dir=results/reference_validation_current",
+      "--threads=2 --seed=4 --perplexity=10 --k=31"
+    )
+  )
+  writeLines(paste(names(command_lines), command_lines, sep = ": "), file.path(out_dir, "benchmark_command_lines.txt"))
+
+  backend_info <- if (requireNamespace("faissR", quietly = TRUE)) {
+    paste(capture.output(print(try(faissR::backend_info(), silent = TRUE))), collapse = "\n")
+  } else {
+    "faissR not installed"
+  }
+
+  manifest <- list(
+    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+    repository = "https://github.com/tkcaccia/fastEmbedR",
+    git_commit = git_capture(c("rev-parse", "HEAD")),
+    git_describe = git_capture(c("describe", "--tags", "--always", "--dirty")),
+    git_status_short = git_capture(c("status", "--short")),
+    manuscript_release_tag = Sys.getenv("FASTEMBEDR_MANUSCRIPT_TAG", unset = "v0.1.0-manuscript"),
+    archival_snapshot = Sys.getenv("FASTEMBEDR_ZENODO_DOI", unset = "Zenodo DOI to be minted from the manuscript release tag before submission"),
+    base_dir = base_dir,
+    data_root = data_root,
+    out_dir = out_dir,
+    datasets = paste(datasets, collapse = ","),
+    methods = paste(methods, collapse = ","),
+    seed = seed,
+    k = k,
+    perplexity = perplexity,
+    threads = threads,
+    thread_grid = paste(thread_grid, collapse = ","),
+    timeout_seconds = timeout,
+    backend_group = backend_group,
+    command_lines = as.list(command_lines),
+    package_versions = list(
+      fastEmbedR = pkg_version_or_na("fastEmbedR"),
+      faissR = pkg_version_or_na("faissR"),
+      Rcpp = pkg_version_or_na("Rcpp"),
+      float = pkg_version_or_na("float"),
+      Rtsne = pkg_version_or_na("Rtsne"),
+      uwot = pkg_version_or_na("uwot"),
+      umap = pkg_version_or_na("umap"),
+      jsonlite = pkg_version_or_na("jsonlite")
+    ),
+    hardware = list(
+      sys_info = Sys.info(),
+      lscpu = run_cmd_capture("lscpu"),
+      free_h = run_cmd_capture("free", "-h"),
+      nvidia_smi_query = run_cmd_capture(
+        "nvidia-smi",
+        c("--query-gpu=name,driver_version,memory.total,compute_cap", "--format=csv,noheader")
+      ),
+      nvidia_smi = run_cmd_capture("nvidia-smi")
+    ),
+    cuda_stack = list(
+      nvcc_version = run_cmd_capture("nvcc", "--version"),
+      cuda_home = Sys.getenv("CUDA_HOME", unset = NA_character_),
+      ld_library_path = Sys.getenv("LD_LIBRARY_PATH", unset = NA_character_),
+      faissR_cuda_available = if (requireNamespace("faissR", quietly = TRUE)) {
+        paste(capture.output(print(try(faissR::cuda_available(), silent = TRUE))), collapse = "\n")
+      } else {
+        "faissR not installed"
+      },
+      faissR_cuvs_available = if (requireNamespace("faissR", quietly = TRUE)) {
+        paste(capture.output(print(try(faissR::cuvs_available(), silent = TRUE))), collapse = "\n")
+      } else {
+        "faissR not installed"
+      },
+      faissR_backend_info = backend_info
+    ),
+    r = list(
+      version = R.version.string,
+      platform = R.version$platform,
+      library_paths = paste(.libPaths(), collapse = "; "),
+      sessionInfo_file = "sessionInfo.txt"
+    ),
+    environment_files = list(
+      r_environment = "tools/reproducibility/benchmark_environment.yml",
+      installation = "docs/installation.md",
+      backend_capabilities = "docs/backend-capabilities.md",
+      hpc_driver = "tools/hpc_embeddings/benchmark_embeddings_float32_publication.R",
+      cpu_wrapper = "tools/hpc_embeddings/benchmark_embeddings_float32_cpu12.sh",
+      cuda_wrapper = "tools/hpc_embeddings/benchmark_embeddings_float32_cuda.sh"
+    )
+  )
+  write_text_manifest(manifest, file.path(out_dir, "reproducibility_manifest.txt"))
+  if (requireNamespace("jsonlite", quietly = TRUE)) {
+    jsonlite::write_json(manifest, file.path(out_dir, "reproducibility_manifest.json"), auto_unbox = TRUE, pretty = TRUE)
+  }
+  invisible(manifest)
+}
+
+write_quality_outputs <- function(tab) {
+  tab <- ensure_quality_columns(tab)
+  quality_cols <- c(
+    "dataset", "method", "backend", "status", "n", "p",
+    "cpu_threads", "elapsed_sec", "max_rss_gb", "trustworthiness",
+    "knn_preservation_30", "silhouette", "knn_label_accuracy",
+    "knn_preservation_15", "knn_preservation_50", "quality_sample_n",
+    "plot_file", "error"
+  )
+  quality_cols <- quality_cols[quality_cols %in% names(tab)]
+  quality <- tab[, quality_cols, drop = FALSE]
+  names(quality) <- sub("^elapsed_sec$", "runtime_sec", names(quality))
+  names(quality) <- sub("^knn_preservation_30$", "nn_preservation", names(quality))
+  names(quality) <- sub("^knn_label_accuracy$", "knn_label_accuracy", names(quality))
+
+  key_datasets <- c(
+    "MNIST", "FashionMNIST", "flow18", "mass41", "imagenet",
+    "FlowRepository_FR-FCM-ZYRM_files", "MetRef"
+  )
+  quality$key_manuscript_dataset <- quality$dataset %in% key_datasets
+  quality <- quality[order(!quality$key_manuscript_dataset, quality$dataset, quality$method, quality$backend), , drop = FALSE]
+  write.csv(quality, file.path(out_dir, "embedding_quality_table.csv"), row.names = FALSE)
+
+  md_cols <- c(
+    "dataset", "method", "backend", "cpu_threads", "runtime_sec", "trustworthiness",
+    "nn_preservation", "silhouette", "knn_label_accuracy", "max_rss_gb",
+    "status"
+  )
+  md_cols <- md_cols[md_cols %in% names(quality)]
+  md_quality <- quality[quality$key_manuscript_dataset, md_cols, drop = FALSE]
+  if (!nrow(md_quality)) md_quality <- quality[, md_cols, drop = FALSE]
+  write_markdown_table(
+    md_quality,
+    file.path(out_dir, "embedding_quality_table.md")
+  )
+
+  ok <- quality$status == "success" &
+    is.finite(quality$runtime_sec) &
+    is.finite(quality$trustworthiness) &
+    quality$runtime_sec > 0
+  if (any(ok)) {
+    pareto <- quality[ok, , drop = FALSE]
+    write.csv(pareto, file.path(out_dir, "embedding_runtime_quality_pareto.csv"), row.names = FALSE)
+    plot_datasets <- intersect(key_datasets, unique(pareto$dataset))
+    if (!length(plot_datasets)) plot_datasets <- unique(pareto$dataset)
+    plot_datasets <- head(plot_datasets, 6L)
+    methods <- unique(pareto$method)
+    palette <- grDevices::hcl.colors(max(3L, length(methods)), "Dark 3")
+    method_cols <- setNames(palette[seq_along(methods)], methods)
+    png(file.path(out_dir, "embedding_runtime_quality_pareto.png"),
+        width = 2100, height = 1500, res = 170)
+    old_par <- par(no.readonly = TRUE)
+    on.exit({
+      par(old_par)
+      dev.off()
+    }, add = TRUE)
+    par(mfrow = c(2, 3), mar = c(4.2, 4.3, 3.2, 1.1), oma = c(0, 0, 2, 0))
+    for (ds in plot_datasets) {
+      z <- pareto[pareto$dataset == ds, , drop = FALSE]
+      xlim <- range(z$runtime_sec, finite = TRUE)
+      if (length(unique(z$runtime_sec)) == 1L) xlim <- xlim * c(0.8, 1.2)
+      plot(
+        z$runtime_sec, z$trustworthiness,
+        log = "x",
+        pch = 19,
+        cex = 1.15,
+        col = method_cols[z$method],
+        xlab = "Runtime (seconds, log scale)",
+        ylab = "Trustworthiness",
+        main = ds,
+        xlim = xlim
+      )
+      point_labels <- if ("cpu_threads" %in% names(z) && any(!is.na(z$cpu_threads))) {
+        paste0(z$backend, "/", z$cpu_threads, "t")
+      } else {
+        z$backend
+      }
+      text(z$runtime_sec, z$trustworthiness, labels = point_labels, pos = 3, cex = 0.7)
+      grid(col = "grey88")
+    }
+    legend(
+      "bottom",
+      inset = -0.02,
+      legend = methods,
+      col = method_cols[methods],
+      pch = 19,
+      horiz = TRUE,
+      cex = 0.75,
+      bty = "n",
+      xpd = NA
+    )
+    mtext("Runtime-quality Pareto comparison for manuscript datasets", outer = TRUE, cex = 1.0)
+  }
+  invisible(quality)
+}
+
 write_combined_outputs <- function(results) {
   if (!length(results)) return(invisible(NULL))
   tab <- do.call(rbind, results)
+  tab <- ensure_quality_columns(tab)
   write.csv(tab, file.path(out_dir, "embedding_benchmark_results.csv"), row.names = FALSE)
+  write_quality_outputs(tab)
   ok <- tab$status == "success" & is.finite(tab$elapsed_sec)
   if (any(ok)) {
     png(file.path(out_dir, "embedding_time_barplot.png"), width = 1800, height = 1100, res = 150)
     par(mar = c(11, 5, 3, 1))
-    labs <- paste(tab$dataset[ok], tab$method[ok], sep = "\n")
+    thread_label <- if ("cpu_threads" %in% names(tab)) paste0(tab$cpu_threads[ok], "t") else tab$backend[ok]
+    labs <- paste(tab$dataset[ok], tab$method[ok], thread_label, sep = "\n")
     barplot(tab$elapsed_sec[ok], names.arg = labs, las = 2, cex.names = 0.55,
             ylab = "Seconds", main = "Embedding runtime")
     dev.off()
@@ -494,7 +1214,8 @@ write_combined_outputs <- function(results) {
     if (any(mem_ok)) {
       png(file.path(out_dir, "embedding_memory_barplot.png"), width = 1800, height = 1100, res = 150)
       par(mar = c(11, 5, 3, 1))
-      mem_labs <- paste(tab$dataset[mem_ok], tab$method[mem_ok], sep = "\n")
+      mem_thread_label <- if ("cpu_threads" %in% names(tab)) paste0(tab$cpu_threads[mem_ok], "t") else tab$backend[mem_ok]
+      mem_labs <- paste(tab$dataset[mem_ok], tab$method[mem_ok], mem_thread_label, sep = "\n")
       barplot(tab$max_rss_gb[mem_ok], names.arg = mem_labs, las = 2, cex.names = 0.55,
               ylab = "Peak RSS (GB)", main = "Embedding peak memory")
       dev.off()
@@ -512,11 +1233,13 @@ if (worker) {
       dataset = dataset,
       method = method,
       backend = method_backend(method),
+      cpu_threads = threads,
       status = "failed",
       n = NA_integer_,
       p = NA_integer_,
-      k = if (grepl("umap", method, ignore.case = TRUE)) k else NA_integer_,
-      perplexity = if (grepl("tsne|Rtsne|FItSNE", method, ignore.case = TRUE)) perplexity else NA_real_,
+      k = if (is_umap_method(method)) k else NA_integer_,
+      perplexity = if (is_tsne_method(method)) perplexity else NA_real_,
+      parameters = method_parameter_summary(method),
       input_fastEmbedR = if (grepl("^fastEmbedR", method)) {
         "float32"
       } else {
@@ -524,8 +1247,16 @@ if (worker) {
       },
       elapsed_sec = NA_real_,
       trust = NA_real_,
+      trustworthiness = NA_real_,
       knn_preservation = NA_real_,
+      nn_preservation = NA_real_,
+      knn_preservation_15 = NA_real_,
+      knn_preservation_30 = NA_real_,
+      knn_preservation_50 = NA_real_,
+      silhouette = NA_real_,
       label_acc = NA_real_,
+      knn_label_accuracy = NA_real_,
+      quality_sample_n = NA_integer_,
       max_rss_kb = NA_real_,
       max_rss_gb = NA_real_,
       layout_file = NA_character_,
@@ -551,9 +1282,13 @@ if (nzchar(time_bin)) {
   if (!isTRUE(has_time_v)) time_bin <- ""
 }
 
-log_msg("Starting benchmark: backend_group=%s threads=%d timeout=%d", backend_group, threads, timeout)
+log_msg("Starting benchmark: backend_group=%s thread_grid=%s timeout=%d", backend_group, paste(thread_grid, collapse = ","), timeout)
 log_msg("Datasets: %s", paste(datasets, collapse = ","))
 log_msg("Methods: %s", paste(methods, collapse = ","))
+parameter_tab <- write_parameter_outputs(methods, thread_grid)
+log_msg("Parameter table: %s", file.path(out_dir, "embedding_parameter_table.csv"))
+write_reproducibility_bundle()
+log_msg("Reproducibility manifest: %s", file.path(out_dir, "reproducibility_manifest.txt"))
 
 input_audit <- do.call(rbind, lapply(datasets, function(dataset) {
   float_path <- tryCatch(find_float_rdata(dataset), error = function(e) NA_character_)
@@ -573,68 +1308,95 @@ if (length(missing_standard)) {
   log_msg("Datasets missing standard .RData for reference methods: %s", paste(missing_standard, collapse = ","))
 }
 
-for (dataset in datasets) {
-  for (method in methods) {
-    worker_csv <- file.path(out_dir, "worker_results", paste0(dataset, "_", method, ".csv"))
-    worker_log <- file.path(out_dir, "logs", paste0(dataset, "_", method, ".log"))
-    time_log <- file.path(out_dir, "logs", paste0(dataset, "_", method, "_time.txt"))
-    if (!force && file.exists(worker_csv)) {
-      log_msg("%s/%s: existing worker result, reusing", dataset, method)
-      row <- read.csv(worker_csv, stringsAsFactors = FALSE)
-      main_results[[length(main_results) + 1L]] <- row
-      write_combined_outputs(main_results)
-      next
-    }
-    cmd <- c()
-    if (nzchar(timeout_bin)) cmd <- c(cmd, timeout_bin, as.character(timeout))
-    if (nzchar(time_bin)) cmd <- c(cmd, time_bin, "-v", "-o", time_log)
-    cmd <- c(
-      cmd,
-      file.path(R.home("bin"), "Rscript"),
-      script_path,
-      "--worker=TRUE",
-      paste0("--base_dir=", base_dir),
-      paste0("--data_root=", data_root),
-      paste0("--out_dir=", out_dir),
-      paste0("--dataset=", dataset),
-      paste0("--method=", method),
-      paste0("--worker_out=", worker_csv),
-      paste0("--threads=", threads),
-      paste0("--timeout=", timeout),
-      paste0("--seed=", seed),
-      paste0("--k=", k),
-      paste0("--perplexity=", perplexity)
-    )
-    log_msg("%s/%s: running", dataset, method)
-    status <- system2(cmd[[1L]], args = cmd[-1L], stdout = worker_log, stderr = worker_log)
-    time_info <- parse_time_v(time_log)
-    if (file.exists(worker_csv)) {
-      row <- read.csv(worker_csv, stringsAsFactors = FALSE)
-    } else {
-      row <- data.frame(
-        dataset = dataset,
-        method = method,
-        backend = method_backend(method),
-        status = if (identical(status, 124L)) "timeout" else "failed",
-        n = NA_integer_, p = NA_integer_,
-        k = if (grepl("umap", method, ignore.case = TRUE)) k else NA_integer_,
-        perplexity = if (grepl("tsne|Rtsne|FItSNE", method, ignore.case = TRUE)) perplexity else NA_real_,
-        input_fastEmbedR = if (grepl("^fastEmbedR", method)) "float32" else "standard_R_matrix",
-        elapsed_sec = NA_real_, trust = NA_real_, knn_preservation = NA_real_,
-        label_acc = NA_real_, max_rss_kb = NA_real_, max_rss_gb = NA_real_,
-        layout_file = NA_character_, plot_file = NA_character_,
-        error = paste("worker exited with status", status),
-        stringsAsFactors = FALSE
+for (current_threads in thread_grid) {
+  threads <- as.integer(current_threads)
+  Sys.setenv(
+    OMP_NUM_THREADS = as.character(threads),
+    OPENBLAS_NUM_THREADS = as.character(threads),
+    MKL_NUM_THREADS = as.character(threads),
+    VECLIB_MAXIMUM_THREADS = as.character(threads),
+    RCPP_PARALLEL_NUM_THREADS = as.character(threads)
+  )
+  log_msg("Thread setting: %d", threads)
+  for (dataset in datasets) {
+    for (method in methods) {
+      worker_csv <- file.path(out_dir, "worker_results", paste0(dataset, "_", method, "_threads", threads, ".csv"))
+      worker_log <- file.path(out_dir, "logs", paste0(dataset, "_", method, "_threads", threads, ".log"))
+      time_log <- file.path(out_dir, "logs", paste0(dataset, "_", method, "_threads", threads, "_time.txt"))
+      if (!force && file.exists(worker_csv)) {
+        log_msg("%s/%s/%dt: existing worker result, reusing", dataset, method, threads)
+        row <- read.csv(worker_csv, stringsAsFactors = FALSE)
+        if (!"cpu_threads" %in% names(row)) row$cpu_threads <- threads
+        main_results[[length(main_results) + 1L]] <- row
+        write_combined_outputs(main_results)
+        next
+      }
+      cmd <- c()
+      if (nzchar(timeout_bin)) cmd <- c(cmd, timeout_bin, as.character(timeout))
+      if (nzchar(time_bin)) cmd <- c(cmd, time_bin, "-v", "-o", time_log)
+      cmd <- c(
+        cmd,
+        file.path(R.home("bin"), "Rscript"),
+        script_path,
+        "--worker=TRUE",
+        paste0("--base_dir=", base_dir),
+        paste0("--data_root=", data_root),
+        paste0("--out_dir=", out_dir),
+        paste0("--dataset=", dataset),
+        paste0("--method=", method),
+        paste0("--worker_out=", worker_csv),
+        paste0("--threads=", threads),
+        paste0("--timeout=", timeout),
+        paste0("--seed=", seed),
+        paste0("--k=", k),
+        paste0("--perplexity=", perplexity)
       )
+      log_msg("%s/%s/%dt: running", dataset, method, threads)
+      status <- system2(cmd[[1L]], args = cmd[-1L], stdout = worker_log, stderr = worker_log)
+      time_info <- parse_time_v(time_log)
+      if (file.exists(worker_csv)) {
+        row <- read.csv(worker_csv, stringsAsFactors = FALSE)
+        if (!"cpu_threads" %in% names(row)) row$cpu_threads <- threads
+      } else {
+        row <- data.frame(
+          dataset = dataset,
+          method = method,
+          backend = method_backend(method),
+          cpu_threads = threads,
+          status = if (identical(status, 124L)) "timeout" else "failed",
+          n = NA_integer_, p = NA_integer_,
+          k = if (is_umap_method(method)) k else NA_integer_,
+          perplexity = if (is_tsne_method(method)) perplexity else NA_real_,
+          parameters = method_parameter_summary(method),
+          input_fastEmbedR = if (grepl("^fastEmbedR", method)) "float32" else "standard_R_matrix",
+          elapsed_sec = NA_real_,
+          trust = NA_real_,
+          trustworthiness = NA_real_,
+          knn_preservation = NA_real_,
+          nn_preservation = NA_real_,
+          knn_preservation_15 = NA_real_,
+          knn_preservation_30 = NA_real_,
+          knn_preservation_50 = NA_real_,
+          silhouette = NA_real_,
+          label_acc = NA_real_,
+          knn_label_accuracy = NA_real_,
+          quality_sample_n = NA_integer_,
+          max_rss_kb = NA_real_, max_rss_gb = NA_real_,
+          layout_file = NA_character_, plot_file = NA_character_,
+          error = paste("worker exited with status", status),
+          stringsAsFactors = FALSE
+        )
+        write.csv(row, worker_csv, row.names = FALSE)
+      }
+      row$cpu_threads <- threads
+      row$max_rss_kb <- time_info$max_rss_kb
+      row$max_rss_gb <- time_info$max_rss_kb / 1024^2
       write.csv(row, worker_csv, row.names = FALSE)
+      main_results[[length(main_results) + 1L]] <- row
+      log_msg("%s/%s/%dt: %s sec=%s rss_gb=%s", dataset, method, threads, row$status[1],
+              format(row$elapsed_sec[1], digits = 4), format(row$max_rss_gb[1], digits = 4))
+      write_combined_outputs(main_results)
     }
-    row$max_rss_kb <- time_info$max_rss_kb
-    row$max_rss_gb <- time_info$max_rss_kb / 1024^2
-    write.csv(row, worker_csv, row.names = FALSE)
-    main_results[[length(main_results) + 1L]] <- row
-    log_msg("%s/%s: %s sec=%s rss_gb=%s", dataset, method, row$status[1],
-            format(row$elapsed_sec[1], digits = 4), format(row$max_rss_gb[1], digits = 4))
-    write_combined_outputs(main_results)
   }
 }
 

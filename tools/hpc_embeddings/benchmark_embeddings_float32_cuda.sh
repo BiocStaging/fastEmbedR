@@ -16,8 +16,8 @@ set -euo pipefail
 
 # CUDA-only embedding benchmark for publication.
 #
-# Only native fastEmbedR CUDA methods are run here. Reference R packages are
-# deliberately kept in the CPU script so they are not reported as GPU work.
+# Native fastEmbedR CUDA methods and RAPIDS/cuML Python GPU references are run
+# here. CPU-only reference packages are kept in the CPU script.
 #
 # Submit on the HPC with:
 #   sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh
@@ -33,9 +33,13 @@ export TIMEOUT="${TIMEOUT:-10800}"
 export K="${K:-30}"
 export PERPLEXITY="${PERPLEXITY:-15}"
 export SEED="${SEED:-4}"
+export FORCE="${FORCE:-FALSE}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${OUT_DIR}/.cache}"
+export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${OUT_DIR}/numba_cache}"
+export CUPY_CACHE_DIR="${CUPY_CACHE_DIR:-${OUT_DIR}/cupy_cache}"
 
 export DATASETS="${DATASETS:-COIL20,USPS,FashionMNIST,FlowRepository_FR-FCM-ZYRM_files,flow18,MNIST,imagenet,MetRef,mass41,TabulaMuris}"
-export METHODS="${METHODS:-fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary}"
+export METHODS="${METHODS:-fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary,rapids_cuml_umap_full,rapids_cuml_tsne_full}"
 
 export OMP_NUM_THREADS="${THREADS}"
 export OPENBLAS_NUM_THREADS="${THREADS}"
@@ -47,13 +51,19 @@ export APPTAINERENV_OPENBLAS_NUM_THREADS="${THREADS}"
 export APPTAINERENV_MKL_NUM_THREADS="${THREADS}"
 export APPTAINERENV_RCPP_PARALLEL_NUM_THREADS="${THREADS}"
 export APPTAINERENV_LD_LIBRARY_PATH="/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+export APPTAINERENV_XDG_CACHE_HOME="${XDG_CACHE_HOME}"
+export APPTAINERENV_NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR}"
+export APPTAINERENV_CUPY_CACHE_DIR="${CUPY_CACHE_DIR}"
 export SINGULARITYENV_OMP_NUM_THREADS="${THREADS}"
 export SINGULARITYENV_OPENBLAS_NUM_THREADS="${THREADS}"
 export SINGULARITYENV_MKL_NUM_THREADS="${THREADS}"
 export SINGULARITYENV_RCPP_PARALLEL_NUM_THREADS="${THREADS}"
 export SINGULARITYENV_LD_LIBRARY_PATH="/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+export SINGULARITYENV_XDG_CACHE_HOME="${XDG_CACHE_HOME}"
+export SINGULARITYENV_NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR}"
+export SINGULARITYENV_CUPY_CACHE_DIR="${CUPY_CACHE_DIR}"
 
-mkdir -p "${LOG_DIR}" "${OUT_DIR}"
+mkdir -p "${LOG_DIR}" "${OUT_DIR}" "${XDG_CACHE_HOME}" "${NUMBA_CACHE_DIR}" "${CUPY_CACHE_DIR}"
 cd "${BASE_DIR}"
 
 if [[ -f "${SCRIPT_DIR}/benchmark_embeddings_float32_publication.R" ]]; then
@@ -82,8 +92,15 @@ fi
   echo "OUT_DIR=${OUT_DIR}"
   echo "THREADS=${THREADS}"
   echo "TIMEOUT=${TIMEOUT}"
+  echo "FORCE=${FORCE}"
   echo "DATASETS=${DATASETS}"
   echo "METHODS=${METHODS}"
+	  echo "Quality outputs will be written to:"
+	  echo "  ${OUT_DIR}/embedding_parameter_table.csv"
+	  echo "  ${OUT_DIR}/embedding_parameter_table.md"
+	  echo "  ${OUT_DIR}/embedding_quality_table.csv"
+	  echo "  ${OUT_DIR}/embedding_quality_table.md"
+	  echo "  ${OUT_DIR}/embedding_runtime_quality_pareto.png"
   echo "CUDA diagnostics:"
   "${RUNNER[@]}" bash -c '
     nvidia-smi || true
@@ -96,7 +113,7 @@ fi
     fi
     echo "Rscript=${RSCRIPT:-NOT_FOUND}"
     if [[ -n "${RSCRIPT}" ]]; then
-      "${RSCRIPT}" -e "cat(\"fastEmbedR diagnostics\\n\"); library(fastEmbedR); print(utils::packageVersion(\"fastEmbedR\")); print(\"cuda_available\" %in% getNamespaceExports(\"fastEmbedR\")); print(\"backend_info\" %in% getNamespaceExports(\"fastEmbedR\")); cat(\"faissR diagnostics\\n\"); library(faissR); print(try(faissR::backend_info(), silent=TRUE)); print(try(faissR::cuda_available(), silent=TRUE)); print(try(faissR::cuvs_available(), silent=TRUE))"
+      "${RSCRIPT}" -e "cat(\"fastEmbedR diagnostics\\n\"); library(fastEmbedR); print(utils::packageVersion(\"fastEmbedR\")); print(\"cuda_available\" %in% getNamespaceExports(\"fastEmbedR\")); print(\"backend_info\" %in% getNamespaceExports(\"fastEmbedR\")); print(try(fastEmbedR::opentsne_pca_init(matrix(runif(64), nrow = 16), backend = \"cuda\"), silent=TRUE)); cat(\"faissR diagnostics\\n\"); library(faissR); print(try(faissR::backend_info(), silent=TRUE)); print(try(faissR::cuda_available(), silent=TRUE)); print(try(faissR::cuvs_available(), silent=TRUE))"
     fi
   ' || true
   "${RUNNER[@]}" Rscript "${BENCH_R}" \
@@ -111,6 +128,12 @@ fi
     --timeout="${TIMEOUT}" \
     --k="${K}" \
     --perplexity="${PERPLEXITY}" \
-    --seed="${SEED}"
+    --seed="${SEED}" \
+    --force="${FORCE}"
+	  echo "Parameter table: ${OUT_DIR}/embedding_parameter_table.csv"
+	  echo "Parameter manuscript table: ${OUT_DIR}/embedding_parameter_table.md"
+	  echo "Quality table: ${OUT_DIR}/embedding_quality_table.csv"
+  echo "Quality manuscript table: ${OUT_DIR}/embedding_quality_table.md"
+  echo "Runtime-quality Pareto plot: ${OUT_DIR}/embedding_runtime_quality_pareto.png"
   echo "DONE: ${OUT_DIR}"
 } 2>&1 | tee -a "${OUT_DIR}/benchmark_cuda.log"

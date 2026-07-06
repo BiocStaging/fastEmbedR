@@ -34,6 +34,22 @@ and biological data.
 | Seurat/BMCITE | LocalMAP | 30,672 x 1,000 | Likely Stuart 2019 bone marrow CITE-seq via SeuratData `bmcite`; verify exact labels. |
 | Tabula Muris | TriMap | about 54,000 x 1,000 | Tabula Muris public files, log-normalize, select 1,000 HVGs. |
 
+### Current fastEmbedR publication-panel additions
+
+These datasets are included to broaden the manuscript benchmark beyond the
+TriMap/LocalMAP dataset list and must be described explicitly if their domains
+are mentioned in the Abstract, Introduction, Methods, or Results.
+
+| Dataset | Domain | Current source plan |
+| --- | --- | --- |
+| MetRef | metabolomics | KODAMA R package `data(MetRef)`. Remove zero-sum variables, apply the KODAMA preprocessing used in `tools/prepare_public_benchmark_data.R`, and use donor labels for label-aware metrics. |
+| FlowRepository_FR-FCM-ZYRM | cytometry | FlowRepository accession FR-FCM-ZYRM, transformed and labelled from metadata as described in the benchmark data-preparation script. |
+| ImageNet DINOv2 features | foundation-model image features | ImageNet labels with precomputed DINOv2 feature vectors. |
+
+Simulated matrices are not part of the manuscript embedding-quality panel. They
+are used only in Benchmark #1 as nearest-neighbour stress tests for controlled
+low-dimensional data shapes.
+
 ### Tier 2: large scalability benchmark
 
 Use these for the R Journal performance tables and GPU/remote machine runs.

@@ -9,6 +9,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef FASTEMBEDR_HAS_CUDA
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cusolverDn.h>
+#endif
+
 using Rcpp::IntegerMatrix;
 using Rcpp::IntegerVector;
 using Rcpp::List;
@@ -112,6 +118,69 @@ int fastembedr_cuda_opentsne_fft_from_knn_float(const int* indices,
                                                 unsigned int seed,
                                                 int index_offset,
                                                 float* out);
+int fastembedr_cuda_opentsne_fft_from_device_knn_float(const int* indices,
+                                                       const float* distances,
+                                                       const float* init,
+                                                       int has_init,
+                                                       int n,
+                                                       int k,
+                                                       int n_components,
+                                                       float perplexity,
+                                                       int early_exaggeration_iter,
+                                                       int n_iter,
+                                                       float early_exaggeration,
+                                                       float exaggeration,
+                                                       float learning_rate,
+                                                       int learning_rate_auto,
+                                                       float initial_momentum,
+                                                       float final_momentum,
+                                                       float min_gain,
+                                                       float max_step_norm,
+                                                       unsigned int seed,
+                                                       int index_offset,
+                                                       float* out);
+int fastembedr_cuda_opentsne_fft_from_device_knn_float_pca_double(const int* indices,
+                                                                  const float* distances,
+                                                                  const double* pca_init_values,
+                                                                  int pca_init_p,
+                                                                  int n,
+                                                                  int k,
+                                                                  int n_components,
+                                                                  float perplexity,
+                                                                  int early_exaggeration_iter,
+                                                                  int n_iter,
+                                                                  float early_exaggeration,
+                                                                  float exaggeration,
+                                                                  float learning_rate,
+                                                                  int learning_rate_auto,
+                                                                  float initial_momentum,
+                                                                  float final_momentum,
+                                                                  float min_gain,
+                                                                  float max_step_norm,
+                                                                  unsigned int seed,
+                                                                  int index_offset,
+                                                                  float* out);
+int fastembedr_cuda_opentsne_fft_from_device_knn_float_pca_float(const int* indices,
+                                                                 const float* distances,
+                                                                 const float* pca_init_values,
+                                                                 int pca_init_p,
+                                                                 int n,
+                                                                 int k,
+                                                                 int n_components,
+                                                                 float perplexity,
+                                                                 int early_exaggeration_iter,
+                                                                 int n_iter,
+                                                                 float early_exaggeration,
+                                                                 float exaggeration,
+                                                                 float learning_rate,
+                                                                 int learning_rate_auto,
+                                                                 float initial_momentum,
+                                                                 float final_momentum,
+                                                                 float min_gain,
+                                                                 float max_step_norm,
+                                                                 unsigned int seed,
+                                                                 int index_offset,
+                                                                 float* out);
 int fastembedr_cuda_umap_from_knn_spectral(const int* indices,
                                            const double* distances,
                                            int n,
@@ -142,6 +211,24 @@ int fastembedr_cuda_umap_from_knn_spectral_float(const int* indices,
                                                  int index_offset,
                                                  int optimizer_mode,
                                                  float* out);
+int fastembedr_cuda_umap_from_device_knn_spectral_float(const int* device_indices,
+                                                        const float* device_distances,
+                                                        int n,
+                                                        int k,
+                                                        int n_epochs,
+                                                        int negative_sample_rate,
+                                                        float learning_rate,
+                                                        float a,
+                                                        float b,
+                                                        float repulsion_strength,
+                                                        int spectral_n_iter,
+                                                        unsigned int seed,
+                                                        int index_offset,
+                                                        int optimizer_mode,
+                                                        int binary_graph,
+                                                        float* out);
+const int* cuda_int_device_ptr_from_external(SEXP ptr, const char* name);
+const float* cuda_float_device_ptr_from_external(SEXP ptr, const char* name);
 int fastembedr_cuda_umap_graph_dump_from_knn(const int* indices,
                                              const double* distances,
                                              int n,
@@ -230,6 +317,11 @@ int fastembedr_cuda_matrix_multiply(const double* left,
                                     int right_cols,
                                     int transpose_left,
                                     double* out);
+int fastembedr_cuda_raft_tsvd_pca_init(const double* values,
+                                       int n,
+                                       int p,
+                                       int n_components,
+                                       float* out);
 }
 
 namespace {
@@ -1049,6 +1141,215 @@ NumericMatrix rsvd_multiply_cuda_impl(NumericMatrix left,
   return out;
 }
 
+NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix data,
+                                      int n_components) {
+#ifndef FASTEMBEDR_HAS_CUDA
+  Rcpp::stop("fastEmbedR was not built with CUDA support.");
+#else
+  if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
+  const int n = data.nrow();
+  const int p = data.ncol();
+  if (n < 2 || p < 1) {
+    Rcpp::stop("CUDA PCA initialization requires at least two rows and one column.");
+  }
+  n_components = std::max(1, std::min(n_components, std::min(n, p)));
+
+  std::vector<double> means(p, 0.0);
+  for (int j = 0; j < p; ++j) {
+    double s = 0.0;
+    for (int i = 0; i < n; ++i) s += data(i, j);
+    means[j] = s / static_cast<double>(n);
+  }
+
+  std::vector<float> h_x(static_cast<std::size_t>(n) * p);
+  for (int j = 0; j < p; ++j) {
+    const std::size_t col = static_cast<std::size_t>(j) * n;
+    for (int i = 0; i < n; ++i) {
+      h_x[col + i] = static_cast<float>(data(i, j) - means[j]);
+    }
+  }
+
+  float* d_x = nullptr;
+  float* d_cov = nullptr;
+  float* d_scores = nullptr;
+  float* d_work = nullptr;
+  int* d_info = nullptr;
+  cublasHandle_t blas = nullptr;
+  cusolverDnHandle_t solver = nullptr;
+  auto cleanup = [&]() {
+    if (d_x != nullptr) cudaFree(d_x);
+    if (d_cov != nullptr) cudaFree(d_cov);
+    if (d_scores != nullptr) cudaFree(d_scores);
+    if (d_work != nullptr) cudaFree(d_work);
+    if (d_info != nullptr) cudaFree(d_info);
+    if (blas != nullptr) cublasDestroy(blas);
+    if (solver != nullptr) cusolverDnDestroy(solver);
+  };
+
+  const std::size_t x_items = static_cast<std::size_t>(n) * p;
+  const std::size_t cov_items = static_cast<std::size_t>(p) * p;
+  const std::size_t score_items = static_cast<std::size_t>(n) * n_components;
+  try {
+    if (cudaMalloc(reinterpret_cast<void**>(&d_x), x_items * sizeof(float)) != cudaSuccess ||
+        cudaMalloc(reinterpret_cast<void**>(&d_cov), cov_items * sizeof(float)) != cudaSuccess ||
+        cudaMalloc(reinterpret_cast<void**>(&d_scores), score_items * sizeof(float)) != cudaSuccess ||
+        cudaMalloc(reinterpret_cast<void**>(&d_info), sizeof(int)) != cudaSuccess) {
+      cleanup();
+      Rcpp::stop("CUDA allocation failed in PCA initialization.");
+    }
+    if (cudaMemcpy(d_x, h_x.data(), x_items * sizeof(float), cudaMemcpyHostToDevice) != cudaSuccess) {
+      cleanup();
+      Rcpp::stop("CUDA upload failed in PCA initialization.");
+    }
+    if (cublasCreate(&blas) != CUBLAS_STATUS_SUCCESS ||
+        cusolverDnCreate(&solver) != CUSOLVER_STATUS_SUCCESS) {
+      cleanup();
+      Rcpp::stop("Could not create cuBLAS/cuSOLVER handles for PCA initialization.");
+    }
+
+    const float alpha_cov = 1.0f / static_cast<float>(std::max(1, n - 1));
+    const float beta_zero = 0.0f;
+    if (cublasSgemm(
+          blas,
+          CUBLAS_OP_T,
+          CUBLAS_OP_N,
+          p,
+          p,
+          n,
+          &alpha_cov,
+          d_x,
+          n,
+          d_x,
+          n,
+          &beta_zero,
+          d_cov,
+          p
+        ) != CUBLAS_STATUS_SUCCESS) {
+      cleanup();
+      Rcpp::stop("cuBLAS covariance multiply failed in PCA initialization.");
+    }
+
+    int lwork = 0;
+    if (cusolverDnSsyevd_bufferSize(
+          solver,
+          CUSOLVER_EIG_MODE_VECTOR,
+          CUBLAS_FILL_MODE_UPPER,
+          p,
+          d_cov,
+          p,
+          d_scores,
+          &lwork
+        ) != CUSOLVER_STATUS_SUCCESS || lwork <= 0) {
+      cleanup();
+      Rcpp::stop("cuSOLVER workspace query failed in PCA initialization.");
+    }
+    if (cudaMalloc(reinterpret_cast<void**>(&d_work), static_cast<std::size_t>(lwork) * sizeof(float)) != cudaSuccess) {
+      cleanup();
+      Rcpp::stop("CUDA workspace allocation failed in PCA initialization.");
+    }
+    if (cusolverDnSsyevd(
+          solver,
+          CUSOLVER_EIG_MODE_VECTOR,
+          CUBLAS_FILL_MODE_UPPER,
+          p,
+          d_cov,
+          p,
+          d_scores,
+          d_work,
+          lwork,
+          d_info
+        ) != CUSOLVER_STATUS_SUCCESS) {
+      cleanup();
+      Rcpp::stop("cuSOLVER eigen decomposition failed in PCA initialization.");
+    }
+    int info = 0;
+    if (cudaMemcpy(&info, d_info, sizeof(int), cudaMemcpyDeviceToHost) != cudaSuccess || info != 0) {
+      cleanup();
+      Rcpp::stop("cuSOLVER PCA initialization returned info=%d.", info);
+    }
+
+    const float alpha_score = 1.0f;
+    const float beta_score = 0.0f;
+    const float* d_top_vectors = d_cov + static_cast<std::size_t>(p - n_components) * p;
+    if (cublasSgemm(
+          blas,
+          CUBLAS_OP_N,
+          CUBLAS_OP_N,
+          n,
+          n_components,
+          p,
+          &alpha_score,
+          d_x,
+          n,
+          d_top_vectors,
+          p,
+          &beta_score,
+          d_scores,
+          n
+        ) != CUBLAS_STATUS_SUCCESS) {
+      cleanup();
+      Rcpp::stop("cuBLAS score multiply failed in PCA initialization.");
+    }
+
+    std::vector<float> h_scores(score_items);
+    if (cudaMemcpy(h_scores.data(), d_scores, score_items * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) {
+      cleanup();
+      Rcpp::stop("CUDA score download failed in PCA initialization.");
+    }
+    cleanup();
+
+    NumericMatrix out(n, n_components);
+    for (int j = 0; j < n_components; ++j) {
+      const std::size_t col = static_cast<std::size_t>(j) * n;
+      for (int i = 0; i < n; ++i) {
+        out(i, j) = static_cast<double>(h_scores[col + i]);
+      }
+    }
+    return out;
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+#endif
+}
+
+NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
+                                       int n_components) {
+#ifndef FASTEMBEDR_HAS_CUML
+  Rcpp::stop("fastEmbedR was not built with native RAPIDS RAFT/cuML TSVD support.");
+#else
+  if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
+  const int n = data.nrow();
+  const int p = data.ncol();
+  if (n < 2 || p < 2) {
+    Rcpp::stop("RAPIDS RAFT TSVD initialization requires at least two rows and two columns.");
+  }
+  n_components = std::max(1, std::min(n_components, std::min(n, p)));
+
+  std::vector<float> h_scores(static_cast<std::size_t>(n) * n_components);
+  const int status = fastembedr_cuda_raft_tsvd_pca_init(
+    data.begin(), n, p, n_components, h_scores.data()
+  );
+  if (status != 0) {
+    Rcpp::stop("RAPIDS RAFT TSVD initialization failed: %s", cuda_embedding_error_message());
+  }
+
+  NumericMatrix out(n, n_components);
+  for (int j = 0; j < n_components; ++j) {
+    const std::size_t col = static_cast<std::size_t>(j) * n;
+    for (int i = 0; i < n; ++i) {
+      out(i, j) = static_cast<double>(h_scores[col + i]);
+    }
+  }
+  return out;
+#endif
+}
+
+NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix data,
+                                      int n_components) {
+  return cuml_tsvd_init_cuda_impl(data, n_components);
+}
+
 NumericMatrix spectral_knn_init_cuda_impl(IntegerMatrix indices,
                                           NumericMatrix distances,
                                           int n_components,
@@ -1281,6 +1582,97 @@ NumericMatrix knn_umap_cuda_fused_float_impl(IntegerMatrix indices,
   if (status != 0) {
     Rcpp::stop("CUDA fused UMAP failed: %s", cuda_embedding_error_message());
   }
+  NumericMatrix result(n, 2);
+  for (int i = 0; i < n; ++i) {
+    result(i, 0) = static_cast<double>(out[static_cast<std::size_t>(i) * 2u]);
+    result(i, 1) = static_cast<double>(out[static_cast<std::size_t>(i) * 2u + 1u]);
+  }
+  return result;
+}
+
+NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP gpu_knn,
+                                           int requested_k,
+                                           int n_epochs,
+                                           int negative_sample_rate,
+                                           double learning_rate,
+                                           double min_dist,
+                                           double repulsion_strength,
+                                           int spectral_n_iter,
+                                           int seed,
+                                           int optimizer_mode,
+                                           bool binary_graph) {
+  if (!Rf_inherits(gpu_knn, "faissR_gpu_knn")) {
+    Rcpp::stop("CUDA GPU-resident UMAP requires a faissR_gpu_knn object.");
+  }
+  Rcpp::List src(gpu_knn);
+  if (!src.containsElementNamed("indices_ptr") ||
+      !src.containsElementNamed("distances_ptr")) {
+    Rcpp::stop("faissR_gpu_knn object is missing CUDA KNN device pointers.");
+  }
+  const std::string distance_type = src.containsElementNamed("distance_type") ?
+    Rcpp::as<std::string>(src["distance_type"]) : "float32";
+  if (distance_type != "float32") {
+    Rcpp::stop("CUDA GPU-resident UMAP requires float32 KNN distances.");
+  }
+  const std::string layout = src.containsElementNamed("layout") ?
+    Rcpp::as<std::string>(src["layout"]) : "column_major_query_by_k";
+  if (layout != "column_major_query_by_k") {
+    Rcpp::stop("Unsupported faissR_gpu_knn layout for CUDA UMAP.");
+  }
+  const bool exclude_self = src.containsElementNamed("exclude_self") ?
+    Rcpp::as<bool>(src["exclude_self"]) : true;
+  if (!exclude_self) {
+    Rcpp::stop(
+      "CUDA GPU-resident UMAP requires non-self KNN. ",
+      "Call faissR::nn_gpu(..., exclude_self = TRUE) or use the host KNN path."
+    );
+  }
+  const int n = src.containsElementNamed("n_query") ?
+    Rcpp::as<int>(src["n_query"]) : Rcpp::as<int>(src["n"]);
+  const int available_k = Rcpp::as<int>(src["k"]);
+  const int k = requested_k > 0 ? requested_k : available_k;
+  if (k < 1 || k > available_k) {
+    Rcpp::stop("Requested GPU KNN width exceeds the faissR_gpu_knn object width.");
+  }
+  if (k > kMaxCudaNeighbors) {
+    Rcpp::stop("CUDA fused UMAP currently supports at most %d neighbors.", kMaxCudaNeighbors);
+  }
+  if (n_epochs < 1) Rcpp::stop("n_epochs must be positive");
+  if (negative_sample_rate < 0) Rcpp::stop("negative_sample_rate must be non-negative");
+  if (learning_rate <= 0.0) Rcpp::stop("learning_rate must be positive");
+  if (min_dist < 0.0) Rcpp::stop("min_dist must be non-negative");
+  if (repulsion_strength <= 0.0) Rcpp::stop("repulsion_strength must be positive");
+  if (spectral_n_iter < 1) Rcpp::stop("spectral_n_iter must be positive");
+  if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
+
+  const int* device_indices = cuda_int_device_ptr_from_external(src["indices_ptr"], "indices_ptr");
+  const float* device_distances = cuda_float_device_ptr_from_external(src["distances_ptr"], "distances_ptr");
+  const int index_offset = src.containsElementNamed("index_base") ?
+    Rcpp::as<int>(src["index_base"]) : 1;
+  std::vector<float> out(static_cast<std::size_t>(n) * 2u);
+  const auto ab = find_ab_params(1.0, min_dist);
+  const int status = fastembedr_cuda_umap_from_device_knn_spectral_float(
+    device_indices,
+    device_distances,
+    n,
+    k,
+    n_epochs,
+    negative_sample_rate,
+    static_cast<float>(learning_rate),
+    static_cast<float>(ab.first),
+    static_cast<float>(ab.second),
+    static_cast<float>(repulsion_strength),
+    spectral_n_iter,
+    static_cast<unsigned int>(seed),
+    index_offset,
+    optimizer_mode,
+    binary_graph ? 1 : 0,
+    out.data()
+  );
+  if (status != 0) {
+    Rcpp::stop("CUDA GPU-resident UMAP failed: %s", cuda_embedding_error_message());
+  }
+
   NumericMatrix result(n, 2);
   for (int i = 0; i < n; ++i) {
     result(i, 0) = static_cast<double>(out[static_cast<std::size_t>(i) * 2u]);
@@ -1736,5 +2128,271 @@ List knn_tsne_opentsne_cuda_float_impl(IntegerMatrix indices,
     Rcpp::Named("auto_kld_stop") = false,
     Rcpp::Named("auto_stop_reason") = "cuda_fft_no_host_kld_monitor",
     Rcpp::Named("auto_iter_end") = NA_REAL
+  );
+}
+
+const int* cuda_int_device_ptr_from_external(SEXP ptr, const char* name) {
+  if (TYPEOF(ptr) != EXTPTRSXP) {
+    Rcpp::stop("%s must be an external pointer", name);
+  }
+  void* address = R_ExternalPtrAddr(ptr);
+  if (address == nullptr) {
+    Rcpp::stop("%s points to a released CUDA allocation", name);
+  }
+  return static_cast<const int*>(address);
+}
+
+const float* cuda_float_device_ptr_from_external(SEXP ptr, const char* name) {
+  if (TYPEOF(ptr) != EXTPTRSXP) {
+    Rcpp::stop("%s must be an external pointer", name);
+  }
+  void* address = R_ExternalPtrAddr(ptr);
+  if (address == nullptr) {
+    Rcpp::stop("%s points to a released CUDA allocation", name);
+  }
+  return static_cast<const float*>(address);
+}
+
+List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
+                                     int requested_k,
+                                     NumericMatrix y_init,
+                                     bool init,
+                                     SEXP pca_init_data,
+                                     int n_components,
+                                     double perplexity,
+                                     int early_exaggeration_iter,
+                                     int n_iter,
+                                     double early_exaggeration,
+                                     double exaggeration,
+                                     double learning_rate,
+                                     bool learning_rate_auto,
+                                     double initial_momentum,
+                                     double final_momentum,
+                                     double min_gain,
+                                     double max_step_norm,
+                                     std::string negative_gradient_method,
+                                     int seed,
+                                     bool record_costs) {
+  (void)record_costs;
+  if (!Rf_inherits(gpu_knn, "faissR_gpu_knn")) {
+    Rcpp::stop("CUDA GPU-resident openTSNE requires a faissR_gpu_knn object.");
+  }
+  Rcpp::List src(gpu_knn);
+  std::transform(
+    negative_gradient_method.begin(),
+    negative_gradient_method.end(),
+    negative_gradient_method.begin(),
+    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); }
+  );
+  if (!(negative_gradient_method == "fft" ||
+        negative_gradient_method == "fitsne" ||
+        negative_gradient_method == "fit_sne" ||
+        negative_gradient_method == "interpolation" ||
+        negative_gradient_method == "auto")) {
+    Rcpp::stop(
+      "CUDA openTSNE supports `negative_gradient_method = \"fft\"` only. "
+      "Use the FFT/FIt-SNE path for CUDA; exact CUDA t-SNE is kept separate and is not labelled as openTSNE."
+    );
+  }
+  if (!src.containsElementNamed("indices_ptr") ||
+      !src.containsElementNamed("distances_ptr")) {
+    Rcpp::stop("faissR_gpu_knn object is missing CUDA KNN device pointers.");
+  }
+  const std::string distance_type = src.containsElementNamed("distance_type") ?
+    Rcpp::as<std::string>(src["distance_type"]) : "float32";
+  if (distance_type != "float32") {
+    Rcpp::stop("CUDA GPU-resident openTSNE requires float32 KNN distances.");
+  }
+  const std::string layout = src.containsElementNamed("layout") ?
+    Rcpp::as<std::string>(src["layout"]) : "column_major_query_by_k";
+  if (layout != "column_major_query_by_k") {
+    Rcpp::stop("Unsupported faissR_gpu_knn layout for CUDA openTSNE.");
+  }
+  const bool exclude_self = src.containsElementNamed("exclude_self") ?
+    Rcpp::as<bool>(src["exclude_self"]) : true;
+  if (!exclude_self) {
+    Rcpp::stop(
+      "CUDA GPU-resident openTSNE requires non-self KNN. ",
+      "Call faissR::nn_gpu(..., exclude_self = TRUE) or use the host KNN path."
+    );
+  }
+  const int n = src.containsElementNamed("n_query") ?
+    Rcpp::as<int>(src["n_query"]) : Rcpp::as<int>(src["n"]);
+  const int available_k = Rcpp::as<int>(src["k"]);
+  const int k = requested_k > 0 ? requested_k : available_k;
+  if (k < 1 || k > available_k) {
+    Rcpp::stop("Requested GPU KNN width exceeds the faissR_gpu_knn object width.");
+  }
+  if (n_components != 2) {
+    Rcpp::stop("CUDA openTSNE FFT-grid currently supports exactly two output components.");
+  }
+  if (init && (y_init.nrow() != n || y_init.ncol() != 2)) {
+    Rcpp::stop("CUDA openTSNE FFT-grid requires a two-dimensional initialization.");
+  }
+  if (k > kMaxCudaNeighbors) {
+    Rcpp::stop("CUDA openTSNE FFT-grid currently supports at most %d neighbors.", kMaxCudaNeighbors);
+  }
+  if (perplexity <= 0.0) Rcpp::stop("perplexity must be positive");
+  if (early_exaggeration_iter < 0 || n_iter < 0 || early_exaggeration_iter + n_iter < 1) {
+    Rcpp::stop("CUDA openTSNE FFT-grid requires at least one optimization iteration.");
+  }
+  if (early_exaggeration <= 0.0 || exaggeration <= 0.0) {
+    Rcpp::stop("CUDA openTSNE FFT-grid exaggeration values must be positive.");
+  }
+  if (learning_rate <= 0.0 && !learning_rate_auto) {
+    Rcpp::stop("CUDA openTSNE FFT-grid learning rate must be positive.");
+  }
+  if (initial_momentum < 0.0 || final_momentum < 0.0) {
+    Rcpp::stop("CUDA openTSNE FFT-grid momentum values must be non-negative.");
+  }
+  if (min_gain <= 0.0) Rcpp::stop("CUDA openTSNE FFT-grid min_gain must be positive.");
+  if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
+
+  const int* device_indices = cuda_int_device_ptr_from_external(src["indices_ptr"], "indices_ptr");
+  const float* device_distances = cuda_float_device_ptr_from_external(src["distances_ptr"], "distances_ptr");
+  const bool use_device_pca = !init && pca_init_data != R_NilValue;
+  std::vector<float> init_float;
+  std::vector<float> pca_float;
+  NumericMatrix pca_double;
+  const double* pca_double_ptr = nullptr;
+  const float* pca_float_ptr = nullptr;
+  int pca_p = 0;
+  if (init) {
+    init_float = init_to_float_2d(y_init);
+  } else if (use_device_pca) {
+    if (cuda_is_float32_s4(pca_init_data)) {
+      IntegerMatrix payload = cuda_float32_data_slot(pca_init_data);
+      if (payload.nrow() != n || payload.ncol() < n_components) {
+        Rcpp::stop("CUDA device PCA initialization data has incompatible dimensions.");
+      }
+      pca_p = payload.ncol();
+      pca_float = cuda_copy_float32_payload(pca_init_data, n, pca_p);
+      pca_float_ptr = pca_float.data();
+    } else {
+      pca_double = Rcpp::as<NumericMatrix>(pca_init_data);
+      if (pca_double.nrow() != n || pca_double.ncol() < n_components) {
+        Rcpp::stop("CUDA device PCA initialization data has incompatible dimensions.");
+      }
+      pca_p = pca_double.ncol();
+      pca_double_ptr = pca_double.begin();
+    }
+  } else {
+    init_float.assign(static_cast<std::size_t>(n) * 2u, 0.0f);
+  }
+  std::vector<float> out(init_float.size());
+  if (out.empty()) out.assign(static_cast<std::size_t>(n) * 2u, 0.0f);
+  const int index_offset = src.containsElementNamed("index_base") ?
+    Rcpp::as<int>(src["index_base"]) : 1;
+  int status = 0;
+  if (pca_double_ptr != nullptr) {
+    status = fastembedr_cuda_opentsne_fft_from_device_knn_float_pca_double(
+      device_indices,
+      device_distances,
+      pca_double_ptr,
+      pca_p,
+      n,
+      k,
+      n_components,
+      static_cast<float>(perplexity),
+      early_exaggeration_iter,
+      n_iter,
+      static_cast<float>(early_exaggeration),
+      static_cast<float>(exaggeration),
+      static_cast<float>(learning_rate),
+      learning_rate_auto ? 1 : 0,
+      static_cast<float>(initial_momentum),
+      static_cast<float>(final_momentum),
+      static_cast<float>(min_gain),
+      static_cast<float>(max_step_norm),
+      static_cast<unsigned int>(seed),
+      index_offset,
+      out.data()
+    );
+  } else if (pca_float_ptr != nullptr) {
+    status = fastembedr_cuda_opentsne_fft_from_device_knn_float_pca_float(
+      device_indices,
+      device_distances,
+      pca_float_ptr,
+      pca_p,
+      n,
+      k,
+      n_components,
+      static_cast<float>(perplexity),
+      early_exaggeration_iter,
+      n_iter,
+      static_cast<float>(early_exaggeration),
+      static_cast<float>(exaggeration),
+      static_cast<float>(learning_rate),
+      learning_rate_auto ? 1 : 0,
+      static_cast<float>(initial_momentum),
+      static_cast<float>(final_momentum),
+      static_cast<float>(min_gain),
+      static_cast<float>(max_step_norm),
+      static_cast<unsigned int>(seed),
+      index_offset,
+      out.data()
+    );
+  } else {
+    status = fastembedr_cuda_opentsne_fft_from_device_knn_float(
+      device_indices,
+      device_distances,
+      init_float.data(),
+      init ? 1 : 0,
+      n,
+      k,
+      n_components,
+      static_cast<float>(perplexity),
+      early_exaggeration_iter,
+      n_iter,
+      static_cast<float>(early_exaggeration),
+      static_cast<float>(exaggeration),
+      static_cast<float>(learning_rate),
+      learning_rate_auto ? 1 : 0,
+      static_cast<float>(initial_momentum),
+      static_cast<float>(final_momentum),
+      static_cast<float>(min_gain),
+      static_cast<float>(max_step_norm),
+      static_cast<unsigned int>(seed),
+      index_offset,
+      out.data()
+    );
+  }
+  if (status != 0) {
+    Rcpp::stop("CUDA openTSNE FFT-grid failed: %s", cuda_embedding_error_message());
+  }
+
+  NumericMatrix result(n, 2);
+  for (int i = 0; i < n; ++i) {
+    result(i, 0) = static_cast<double>(out[static_cast<std::size_t>(i) * 2u]);
+    result(i, 1) = static_cast<double>(out[static_cast<std::size_t>(i) * 2u + 1u]);
+  }
+  return List::create(
+    Rcpp::Named("Y") = result,
+    Rcpp::Named("costs") = NumericVector::create(),
+    Rcpp::Named("itercosts") = NumericVector::create(),
+    Rcpp::Named("itercost_iterations") = IntegerVector::create(),
+    Rcpp::Named("optimizer") = "opentsne_fitsne_fft_grid_native_cuda_gpu_knn",
+    Rcpp::Named("repulsion") = "fft_grid_cuda_cufft",
+    Rcpp::Named("probabilities") = "symmetric_sparse_knn_cuda_float32_gpu_resident",
+    Rcpp::Named("precision") = "float32",
+    Rcpp::Named("n_negatives") = NA_INTEGER,
+    Rcpp::Named("n_threads") = NA_INTEGER,
+    Rcpp::Named("learning_rate_early") = learning_rate_auto ?
+      static_cast<double>(n) / static_cast<double>(early_exaggeration) :
+      static_cast<double>(learning_rate),
+    Rcpp::Named("learning_rate_normal") = learning_rate_auto ?
+      static_cast<double>(n) / static_cast<double>(std::max(exaggeration, 1.0)) :
+      static_cast<double>(learning_rate),
+    Rcpp::Named("early_exaggeration_iter_actual") = early_exaggeration_iter,
+    Rcpp::Named("n_iter_actual") = n_iter,
+    Rcpp::Named("max_iter_actual") = early_exaggeration_iter + n_iter,
+    Rcpp::Named("initialization") = use_device_pca ?
+      "pca_cuda_raft_tsvd_pca_device" :
+      (init ? "host_supplied" : "cuda_random"),
+    Rcpp::Named("init_residency") = use_device_pca ? "cuda_device" : (init ? "host_to_device" : "cuda_device"),
+    Rcpp::Named("auto_kld_stop") = false,
+    Rcpp::Named("auto_stop_reason") = "not_available_cuda_gpu_resident_fft",
+    Rcpp::Named("auto_iter_end") = early_exaggeration_iter + n_iter,
+    Rcpp::Named("knn_residency") = "cuda_device"
   );
 }

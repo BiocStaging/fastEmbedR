@@ -92,3 +92,20 @@ uses a fused native Metal projection kernel for query-to-landmark KNN,
 interpolation, and projection confidence before the fixed-reference
 transform.
 }
+\examples{
+pkg <- "faissR"
+if (requireNamespace(pkg, quietly = TRUE)) {
+  x <- scale(as.matrix(iris[, 1:4]))
+  fit <- landmark_tsne(
+    x,
+    landmarks = 30,
+    perplexity = 3,
+    early_exaggeration_iter = 5,
+    n_iter = 10,
+    transform_iter = 5,
+    n_threads = 1,
+    seed = 1
+  )
+  dim(fit$layout)
+}
+}

@@ -10,7 +10,7 @@ prepare_opentsne_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object returned by \code{faissR::nn()}, or an integer KNN index matrix.}
+\item{indices}{A KNN object, or an integer KNN index matrix.}
 \item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave \code{NULL} when \code{indices} is a KNN object.}
 \item{n_neighbors}{Optional number of non-self neighbour columns to retain.}
 \item{perplexity}{Optional t-SNE perplexity used to choose the retained KNN width when \code{n_neighbors} is not supplied.}
@@ -23,8 +23,13 @@ A prepared openTSNE KNN object. Pass it to \code{opentsne_knn()} for repeated ru
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
-knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-prep <- prepare_opentsne_knn(knn, perplexity = 10)
-y <- opentsne_knn(prep, early_exaggeration_iter = 50, n_iter = 100)
+d <- as.matrix(stats::dist(x))
+diag(d) <- Inf
+k <- 10L
+idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+  nrow = nrow(d), byrow = TRUE)
+prep <- prepare_opentsne_knn(idx, dst, perplexity = 5)
+y <- opentsne_knn(prep, early_exaggeration_iter = 10, n_iter = 20)
 plot(y, pch = 21, bg = iris$Species)
 }

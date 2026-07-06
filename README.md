@@ -2,10 +2,12 @@
 
 **Home** |
 [Installation](docs/installation.md) |
+[Bioconductor](docs/bioconductor.md) |
 [Implementation](docs/implementation.md) |
 [Examples](docs/examples.md) |
 [Benchmarks](docs/benchmarks.md) |
 [API](docs/usage-api.md) |
+[Reproducibility](docs/reproducibility.md) |
 [References](docs/references.md)
 
 `fastEmbedR` is a native R/C++ package for fast dimensionality reduction from
@@ -26,8 +28,11 @@ The intended workflow is:
 
 For the one-call functions `opentsne()` and `umap()`, the embedding backend is
 deliberately limited to `backend = "cpu"`, `"metal"`, or `"cuda"`. Internal
-KNN is delegated to `faissR`: CPU and Metal use faissR CPU HNSW with
-`target_recall = 0.99`, while CUDA uses faissR's CUDA policy.
+KNN is delegated to `faissR`: the one-call embedding API currently asks for
+exact KNN below 100,000 samples and IVF above that threshold. CUDA openTSNE can
+consume GPU-resident KNN when the installed `faissR` build exposes it. CUDA UMAP
+uses CUDA faissR KNN, then materializes the KNN result for the validated
+host-prepared graph path before native CUDA optimization.
 
 ## Quick Start
 
@@ -66,6 +71,7 @@ plot(y_umap, pch = 21, bg = labels)
 | `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
+| `pca()` | fastPLS-style randomized SVD PCA for reusable scores and t-SNE initialization. |
 | `landmark_tsne()` / `landmark_umap()` | Landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
 | `faissR::backend_info()` | Report FAISS/cuVS neighbour-search availability. |
@@ -83,6 +89,9 @@ remotes::install_github("tkcaccia/fastEmbedR")
 See [Installation](docs/installation.md) for `fastEmbedR` CPU, Metal, and CUDA
 embedding builds. FAISS/cuVS nearest-neighbour installation is documented in
 the companion [`faissR`](https://github.com/tkcaccia/faissR) project.
+See [Bioconductor](docs/bioconductor.md) for the dependency split used for
+submission: core embedding code in `fastEmbedR`, optional KNN acceleration in
+`faissR`, and reference packages only in `Suggests`.
 
 ## License
 

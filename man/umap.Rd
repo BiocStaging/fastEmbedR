@@ -8,7 +8,7 @@ umap(
   n_components = 2L,
   standardize = FALSE,
   pca_dims = NULL,
-  metric = c("euclidean", "cosine"),
+  metric = c("euclidean", "cosine", "correlation", "inner_product"),
   nn = NULL,
   seed = 4L,
   backend = c("cpu", "cuda", "metal"),
@@ -19,7 +19,7 @@ umap(
 )
 }
 \arguments{
-\item{data}{Numeric matrix/data frame, or a KNN object returned by \code{\link[faissR:nn]{faissR::nn()}}.}
+\item{data}{Numeric matrix/data frame, or a KNN object with \code{indices} and \code{distances} fields.}
 
 \item{n_neighbors}{Number of non-self neighbours. \code{NULL} chooses the
 package default for the data size.}
@@ -32,13 +32,14 @@ from the supplied matrix.}
 
 \item{pca_dims}{Optional PCA dimension before KNN.}
 
-\item{metric}{KNN distance metric for one-call matrix input.}
+\item{metric}{KNN distance metric for one-call matrix input: \code{"euclidean"},
+\code{"cosine"}, \code{"correlation"}, or \code{"inner_product"}.}
 
 \item{nn}{Optional precomputed KNN result when \code{data} is a matrix.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. KNN is delegated to faissR with automatic method and tuning selection through an internal bridge. CPU and Metal request faissR CPU HNSW with \code{target_recall = 0.99}, while CUDA requests faissR CUDA \code{method = "auto"} with \code{target_recall = 0.99}. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. KNN is delegated to faissR through an internal bridge. The current default asks for exact KNN below 100,000 samples and IVF above that threshold. CUDA requests CUDA faissR KNN, then materializes the KNN result for the validated host-prepared graph path before native CUDA UMAP optimization. This preserves the visually validated binary/fuzzy graph behaviour while the fully GPU-resident UMAP graph path remains available only for explicit \code{umap_knn()} experiments. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
 
 \item{n_threads}{Number of CPU worker threads for KNN and CPU UMAP.}
 
@@ -58,7 +59,10 @@ A \code{fastEmbedR_embedding} object.
 \code{\link{evaluate_embedding}} rather than inside the embedding call.
 }
 \examples{
-x <- scale(as.matrix(iris[, 1:4]))
-fit <- umap(x, n_neighbors = 15, seed = 1)
-plot(fit)
+pkg <- "faissR"
+if (requireNamespace(pkg, quietly = TRUE)) {
+  x <- scale(as.matrix(iris[, 1:4]))
+  fit <- umap(x, n_neighbors = 15, seed = 1)
+  plot(fit)
+}
 }

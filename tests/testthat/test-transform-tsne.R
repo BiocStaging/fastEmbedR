@@ -1,3 +1,5 @@
+if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
+
 test_that("transform_tsne places query rows from supplied reference neighbours", {
   set.seed(401)
   x <- matrix(rnorm(70L * 5L), 70L, 5L)

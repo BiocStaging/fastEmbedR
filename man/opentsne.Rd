@@ -12,7 +12,7 @@ opentsne(
   Y_init = NULL,
   standardize = FALSE,
   pca_dims = NULL,
-  metric = c("euclidean", "cosine"),
+  metric = c("euclidean", "cosine", "correlation", "inner_product"),
   nn = NULL,
   seed = 4L,
   backend = c("cpu", "cuda", "metal"),
@@ -35,7 +35,7 @@ opentsne(
 }
 \arguments{
 \item{data}{Numeric matrix/data frame with observations in rows, or a KNN
-object returned by [faissR::nn()].}
+object with `indices` and `distances` fields.}
 
 \item{perplexity}{t-SNE perplexity. The one-call API uses
 `ceiling(perplexity)` non-self neighbours internally. If `NULL`, uses the
@@ -55,15 +55,19 @@ so one-call results match a KNN object computed from the supplied matrix.}
 
 \item{pca_dims}{Optional PCA dimension before KNN.}
 
-\item{metric}{KNN distance metric for one-call matrix input.}
+\item{metric}{KNN distance metric for one-call matrix input: \code{"euclidean"},
+\code{"cosine"}, \code{"correlation"}, or \code{"inner_product"}.}
 
 \item{nn}{Optional precomputed KNN output when `data` is a data matrix.}
 
 \item{seed}{Random seed.}
 
 \item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. For
-matrix input, KNN is delegated to faissR with
-automatic method/tuning selection through an internal bridge. CPU and Metal request faissR CPU HNSW with \code{target_recall = 0.99}; CUDA requests faissR CUDA \code{method = "auto"} with \code{target_recall = 0.99}.
+matrix input, KNN is delegated to faissR through an internal bridge. The current
+default asks for exact KNN below 100,000 samples and IVF above that threshold.
+CUDA requests GPU-resident faissR KNN; if resident IVF is not exposed by the
+installed faissR build, CUDA large-data runs use faissR's tuned
+\code{method = "auto"} instead of materializing the KNN result on the host.
 Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
 \item{keep_knn}{If `TRUE`, retain KNN matrices in the returned object.}
@@ -119,4 +123,19 @@ openTSNE-style two-phase optimizer. The default optimizer is CPU-native.
 Explicit `backend = "metal"` and `backend = "cuda"` requests use the
 matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
+}
+\examples{
+pkg <- "faissR"
+if (requireNamespace(pkg, quietly = TRUE)) {
+  x <- scale(as.matrix(iris[, 1:4]))
+  fit <- opentsne(
+    x,
+    perplexity = 5,
+    early_exaggeration_iter = 10,
+    n_iter = 20,
+    n_threads = 1,
+    seed = 1
+  )
+  dim(fit$layout)
+}
 }

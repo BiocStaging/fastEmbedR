@@ -1,5 +1,15 @@
 # Usage And API
 
+[Home](../README.md) |
+[Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
+[Implementation](implementation.md) |
+[Examples](examples.md) |
+[Benchmarks](benchmarks.md) |
+**API** |
+[Reproducibility](reproducibility.md) |
+[References](references.md)
+
 This page gives the main KNN-first workflows and the public API.
 
 ## Which Function Should I Use?
@@ -8,6 +18,7 @@ This page gives the main KNN-first workflows and the public API.
 | --- | --- |
 | You already computed nearest neighbours | `umap_knn()` or `opentsne_knn()` |
 | You want one call from a data matrix | `umap()` or `opentsne()` |
+| You want reusable PCA scores or t-SNE initialization | `pca()` or `opentsne_pca_init()` |
 | You want to compare UMAP and openTSNE fairly | compute `knn <- faissR::nn(...)` once, then reuse it |
 | You want Apple GPU | set `backend = "metal"` explicitly |
 | You want NVIDIA GPU | build with CUDA/cuVS, then set embedding `backend = "cuda"` |
@@ -28,9 +39,12 @@ benchmarks easier to interpret.
 The one-call functions intentionally hide the KNN algorithm choice. For
 `opentsne()` and `umap()`, `backend` accepts only `"cpu"`, `"metal"`, or
 `"cuda"`. Matrix-input KNN is delegated to faissR through fastEmbedR's internal bridge:
-CPU and Metal use faissR CPU HNSW with `target_recall = 0.99`, while CUDA uses
-faissR's CUDA policy. To benchmark another KNN algorithm, compute it explicitly with
-`faissR::nn()` and pass the result to `opentsne_knn()` or `umap_knn()`.
+fastEmbedR asks for exact KNN below 100,000 samples and IVF above that threshold.
+CUDA openTSNE can consume GPU-resident KNN when available. CUDA UMAP uses CUDA
+faissR KNN but materializes the result for the validated graph-construction
+path before CUDA optimization. To benchmark another KNN algorithm, compute it
+explicitly with `faissR::nn()` or `faissR::nn_gpu()` and pass the result to
+`opentsne_knn()` or `umap_knn()`.
 
 ## Distance Metrics In `faissR::nn()`
 
@@ -83,9 +97,10 @@ plot(fit)
 ## openTSNE From The Same KNN
 
 ```r
+Y_init <- opentsne_pca_init(x, seed = 1)
 layout_tsne <- opentsne_knn(
   knn,
-  init_data = x,
+  Y_init = Y_init,
   perplexity = 10,
   early_exaggeration_iter = 100,
   n_iter = 250
@@ -94,8 +109,25 @@ layout_tsne <- opentsne_knn(
 plot(layout_tsne, pch = 21, bg = labels)
 ```
 
-`init_data` is used only to compute PCA initialization for KNN-input runs. It
-is not used for neighbour search or optimization.
+`Y_init` can be computed once and reused across runs. `init_data` is still
+available as a convenience; it is used only to compute PCA initialization for
+KNN-input runs and is not used for neighbour search or optimization.
+
+## PCA API
+
+`fastEmbedR::pca()` exposes the same RSVD family used internally for
+openTSNE initialization:
+
+```r
+pca_fit <- pca(x, ncomp = 2, backend = "cpu", seed = 1)
+Y_init <- opentsne_pca_init(x, backend = "cpu", seed = 1)
+```
+
+The public `pca()` helper is intentionally simple: randomized SVD only, no
+`irlba`, no ARPACK method menu, and no Python bridge. For openTSNE
+initialization, CUDA uses native RAPIDS RAFT TSVD compiled into the package
+CUDA backend and fails loudly if that support is unavailable. CPU and Metal
+use the native RSVD family available to the package build.
 
 ## Explicit GPU Use
 
@@ -178,6 +210,7 @@ supplied neighbour graph.
 | `faissR::nn()` | Companion-package KNN function for data/query matrices. |
 | `umap_knn()` | UMAP from a supplied KNN object or matrices. |
 | `umap()` | One-call preprocessing, KNN, and UMAP embedding. |
+| `pca()` | fastPLS-style randomized SVD PCA scores/loadings. |
 | `embed_knn()` | KNN dispatcher; UMAP by default, openTSNE with `method = "opentsne"`. |
 | `opentsne_knn()` | Direct native openTSNE-style optimizer from KNN. |
 | `opentsne()` | One-call preprocessing, KNN, and openTSNE-style embedding. |

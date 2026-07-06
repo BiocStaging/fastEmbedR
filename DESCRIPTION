@@ -10,18 +10,27 @@ Author: Stefano Caccia [aut, cre]
 Maintainer: Stefano Caccia <tkcaccia@gmail.com>
 Description: A compact UMAP and openTSNE-style implementation focused on fast
     embeddings from precomputed nearest-neighbor index and distance matrices.
-    Nearest-neighbor search is provided by the companion faissR package, while
+    Nearest-neighbor search can be provided by the optional companion faissR package, while
     fastEmbedR keeps preprocessing helpers, fixed-reference transform, and
     stochastic layout optimization in native code with explicit CPU/Metal/CUDA
     backend reporting.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
+biocViews:
+    Software,
+    DimensionReduction,
+    Visualization,
+    Clustering,
+    SingleCell,
+    FlowCytometry,
+    GeneExpression,
+    GPU
 Encoding: UTF-8
 Imports:
-    faissR,
     Rcpp
 Suggests:
+    BiocStyle,
     float,
     igraph,
     jsonlite,
@@ -29,10 +38,19 @@ Suggests:
     leidenbase,
     rmarkdown,
     Rtsne,
-    testthat
+    testthat,
+    umap,
+    uwot
+Enhances:
+    faissR,
+    fastPLS
 LinkingTo:
     Rcpp
-SystemRequirements: C++17, Fortran, Metal framework on macOS for optional embedding backends, CUDA toolkit for the optional CUDA embedding backend
+SystemRequirements: C++17, Fortran; optional Apple Metal framework on
+    macOS for native Metal embedding backends; optional CUDA Toolkit with
+    cuFFT, cuBLAS, cuSOLVER, and RAPIDS RAFT/cuML headers/libraries for native
+    CUDA embedding backends; optional FAISS/cuVS nearest-neighbor support is
+    provided by the companion faissR package and is not vendored in fastEmbedR
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
 Config/testthat/edition: 3

@@ -21,6 +21,10 @@ knn_umap_cuda_fused_float_cpp <- function(indices, distances, n_epochs, negative
     .Call(`_fastEmbedR_knn_umap_cuda_fused_float_cpp`, indices, distances, n_epochs, negative_sample_rate, learning_rate, min_dist, repulsion_strength, spectral_n_iter, seed, optimizer_mode)
 }
 
+knn_umap_cuda_fused_gpu_cpp <- function(gpu_knn, requested_k, n_epochs, negative_sample_rate, learning_rate, min_dist, repulsion_strength, spectral_n_iter, seed, optimizer_mode, binary_graph) {
+    .Call(`_fastEmbedR_knn_umap_cuda_fused_gpu_cpp`, gpu_knn, requested_k, n_epochs, negative_sample_rate, learning_rate, min_dist, repulsion_strength, spectral_n_iter, seed, optimizer_mode, binary_graph)
+}
+
 umap_cuda_graph_dump_cpp <- function(indices, distances) {
     .Call(`_fastEmbedR_umap_cuda_graph_dump_cpp`, indices, distances)
 }
@@ -43,6 +47,10 @@ knn_tsne_opentsne_cuda_cpp <- function(indices, distances, y_init, init, n_compo
 
 knn_tsne_opentsne_cuda_float_cpp <- function(indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs) {
     .Call(`_fastEmbedR_knn_tsne_opentsne_cuda_float_cpp`, indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs)
+}
+
+knn_tsne_opentsne_cuda_gpu_cpp <- function(gpu_knn, requested_k, y_init, init, pca_init_data, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs) {
+    .Call(`_fastEmbedR_knn_tsne_opentsne_cuda_gpu_cpp`, gpu_knn, requested_k, y_init, init, pca_init_data, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs)
 }
 
 standardize_cuda_cpp <- function(data) {
@@ -71,6 +79,10 @@ silhouette_score_cuda_cpp <- function(layout, labels, n_label_levels) {
 
 rsvd_multiply_cuda_cpp <- function(left, right, transpose_left) {
     .Call(`_fastEmbedR_rsvd_multiply_cuda_cpp`, left, right, transpose_left)
+}
+
+cuml_tsvd_init_cuda_cpp <- function(data, n_components) {
+    .Call(`_fastEmbedR_cuml_tsvd_init_cuda_cpp`, data, n_components)
 }
 
 embedding_metal_available_cpp <- function() {

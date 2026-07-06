@@ -2,10 +2,12 @@
 
 [Home](../README.md) |
 **Installation** |
+[Bioconductor](bioconductor.md) |
 [Implementation](implementation.md) |
 [Examples](examples.md) |
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
+[Reproducibility](reproducibility.md) |
 [References](references.md)
 
 `fastEmbedR` is split from the nearest-neighbour package `faissR`.
@@ -26,7 +28,10 @@ remotes::install_github("tkcaccia/fastEmbedR")
 Suggested benchmark/reference packages:
 
 ```r
-install.packages(c("Rtsne", "uwot", "umap", "igraph", "jsonlite", "knitr", "rmarkdown"))
+install.packages(c(
+  "Rtsne", "uwot", "umap",
+  "igraph", "jsonlite", "knitr", "rmarkdown", "float"
+))
 ```
 
 `Rtsne`, `uwot`, and `umap` are optional comparison packages. They are not
@@ -39,13 +44,19 @@ required by the core `fastEmbedR` embedding functions.
 - R;
 - a C++17 compiler;
 - `Rcpp`;
-- the companion package `faissR`;
+- the companion package `faissR` for one-call matrix-input KNN;
 - macOS Metal framework for native Metal embedding kernels on Apple Silicon;
 - CUDA toolkit for optional native CUDA embedding kernels.
 
 `faissR` owns FAISS/cuVS KNN installation. Install and validate `faissR` first
 using the instructions in the [`faissR` GitHub project](https://github.com/tkcaccia/faissR),
 then install `fastEmbedR`.
+
+For Bioconductor submission, `faissR` is treated as an optional enhancement
+rather than vendored source. The KNN-input functions `opentsne_knn()` and
+`umap_knn()` remain available when users provide neighbor matrices directly.
+The matrix-input convenience functions `opentsne()` and `umap()` require
+`faissR` and fail explicitly if it is not installed.
 
 ## CUDA Embedding Build
 

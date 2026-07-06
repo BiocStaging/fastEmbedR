@@ -1,3 +1,5 @@
+if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
+
 test_that("auto_k chooses bounded size-aware neighborhoods", {
   expect_equal(fastEmbedR:::auto_k(100L), 15L)
   expect_equal(fastEmbedR:::auto_k(100L, include_self = TRUE), 16L)
@@ -10,6 +12,14 @@ test_that("auto_k chooses bounded size-aware neighborhoods", {
 test_that("automatic embedding K is openTSNE focused", {
   expect_equal(fastEmbedR:::auto_embedding_k(1000L, "opentsne"), 30L)
   expect_equal(fastEmbedR:::auto_embedding_k(1000L, include_self = TRUE), 31L)
+})
+
+test_that("embedding metrics match faissR public metrics", {
+  expect_equal(fastEmbedR:::resolve_embedding_metric("euclidean"), "euclidean")
+  expect_equal(fastEmbedR:::resolve_embedding_metric("cosine"), "cosine")
+  expect_equal(fastEmbedR:::resolve_embedding_metric("correlation"), "correlation")
+  expect_equal(fastEmbedR:::resolve_embedding_metric("inner_product"), "inner_product")
+  expect_error(fastEmbedR:::resolve_embedding_metric("manhattan"), "arg")
 })
 
 test_that("preprocessing PCA uses fastPLS-style RSVD", {
@@ -203,22 +213,26 @@ test_that("float32 KNN bridge passes float32 data directly to faissR nn", {
   expect_s4_class(out$distances, "float32")
 })
 
-test_that("one-call CPU and Metal KNN policy uses high-recall faissR HNSW", {
+test_that("one-call KNN policy uses size-aware faissR defaults", {
   expect_equal(
-    fastembedr_embedding_nn_policy("cpu"),
-    list(backend = "cpu", method = "hnsw", tuning = "auto", target_recall = 0.99)
+    fastembedr_embedding_nn_policy("cpu", n = 1000L),
+    list(backend = "cpu", method = "exact", tuning = "auto", target_recall = 0.99)
   )
   expect_equal(
-    fastembedr_embedding_nn_policy("metal"),
-    list(backend = "cpu", method = "hnsw", tuning = "auto", target_recall = 0.99)
+    fastembedr_embedding_nn_policy("metal", n = 1000L),
+    list(backend = "cpu", method = "exact", tuning = "auto", target_recall = 0.99)
   )
   expect_equal(
-    fastembedr_embedding_nn_policy("cuda"),
-    list(backend = "cuda", method = "auto", tuning = "auto", target_recall = 0.99)
+    fastembedr_embedding_nn_policy("cpu", n = 200000L),
+    list(backend = "cpu", method = "ivf", tuning = "auto", target_recall = 0.99)
+  )
+  expect_equal(
+    fastembedr_embedding_nn_policy("cuda", n = 1000L),
+    list(backend = "cuda", method = "exact", tuning = "auto", target_recall = 0.99)
   )
 })
 
-test_that("KNN bridge forwards HNSW tuning arguments when faissR supports them", {
+test_that("KNN bridge forwards faissR tuning arguments when supported", {
   set.seed(45)
   x <- matrix(rnorm(40L), 10L, 4L)
   old_nn <- .fastembedr_faissr_cache[["nn"]]
@@ -250,7 +264,7 @@ test_that("KNN bridge forwards HNSW tuning arguments when faissR supports them",
     structure(list(indices = idx[, seq_len(k), drop = FALSE], distances = dst), backend = "mock")
   }
 
-  policy <- fastembedr_embedding_nn_policy("metal")
+  policy <- fastembedr_embedding_nn_policy("metal", n = nrow(x))
   out <- fastembedr_nn_without_self(
     x,
     k = 2L,
@@ -261,10 +275,325 @@ test_that("KNN bridge forwards HNSW tuning arguments when faissR supports them",
   )
 
   expect_equal(captured$backend, "cpu")
-  expect_equal(captured$method, "hnsw")
+  expect_equal(captured$method, "exact")
   expect_equal(captured$tuning, "auto")
   expect_equal(captured$target_recall, 0.99)
   expect_equal(dim(out$indices), c(10L, 2L))
+})
+
+test_that("CUDA KNN bridge consumes faissR GPU-resident output when available", {
+  set.seed(47)
+  x <- matrix(rnorm(40L), 10L, 4L)
+  cache <- .fastembedr_faissr_cache
+  old_nn_gpu <- cache[["nn_gpu"]]
+  old_gpu_to_host <- cache[["gpu_knn_to_host"]]
+  on.exit({
+    if (is.null(old_nn_gpu)) {
+      if (exists("nn_gpu", envir = cache, inherits = FALSE)) rm(list = "nn_gpu", envir = cache)
+    } else {
+      cache[["nn_gpu"]] <- old_nn_gpu
+    }
+    if (is.null(old_gpu_to_host)) {
+      if (exists("gpu_knn_to_host", envir = cache, inherits = FALSE)) {
+        rm(list = "gpu_knn_to_host", envir = cache)
+      }
+    } else {
+      cache[["gpu_knn_to_host"]] <- old_gpu_to_host
+    }
+  }, add = TRUE)
+
+  captured <- new.env(parent = emptyenv())
+  captured$to_host <- FALSE
+  cache[["nn_gpu"]] <- function(data,
+                                points = data,
+                                k,
+                                exclude_self = FALSE,
+                                method = "auto",
+                                metric = "euclidean",
+                                tuning = "auto",
+                                target_recall = 0.99) {
+    captured$called <- TRUE
+    captured$k <- k
+    captured$exclude_self <- exclude_self
+    captured$metric <- metric
+    captured$target_recall <- target_recall
+    structure(
+      list(
+        handle = "mock",
+        backend_used = "cuda_native_exact_gpu",
+        metric = metric,
+        n_query = nrow(data),
+        k = k,
+        exclude_self = exclude_self,
+        result_residency = "cuda",
+        distance_type = "float32",
+        layout = "column_major_query_by_k"
+      ),
+      class = "faissR_gpu_knn"
+    )
+  }
+  cache[["gpu_knn_to_host"]] <- function(knn) {
+    captured$to_host <- TRUE
+    stop("gpu_knn_to_host should not be called when keep_gpu = TRUE", call. = FALSE)
+  }
+
+  out <- fastembedr_nn_without_self(
+    x,
+    k = 2L,
+    backend = "cuda",
+    method = "auto",
+    metric = "correlation",
+    target_recall = 0.99,
+    keep_gpu = TRUE
+  )
+
+  expect_true(captured$called)
+  expect_false(captured$to_host)
+  expect_true(captured$exclude_self)
+  expect_equal(captured$metric, "correlation")
+  expect_equal(captured$target_recall, 0.99)
+  expect_s3_class(out, "faissR_gpu_knn")
+  expect_equal(out$backend_used, "cuda_native_exact_gpu")
+  expect_equal(out$metric, "correlation")
+
+  out_gpu <- fastembedr_nn_without_self(
+    x,
+    k = 2L,
+    backend = "cuda",
+    method = "auto",
+    metric = "inner_product",
+    target_recall = 0.99,
+    keep_gpu = TRUE
+  )
+  expect_s3_class(out_gpu, "faissR_gpu_knn")
+  expect_false(captured$to_host)
+  expect_equal(out_gpu$metric, "inner_product")
+})
+
+test_that("precomputed faissR GPU KNN objects can be supplied directly", {
+  cache <- .fastembedr_faissr_cache
+  old_gpu_to_host <- cache[["gpu_knn_to_host"]]
+  on.exit({
+    if (is.null(old_gpu_to_host)) {
+      if (exists("gpu_knn_to_host", envir = cache, inherits = FALSE)) {
+        rm(list = "gpu_knn_to_host", envir = cache)
+      }
+    } else {
+      cache[["gpu_knn_to_host"]] <- old_gpu_to_host
+    }
+  }, add = TRUE)
+
+  cache[["gpu_knn_to_host"]] <- function(knn) {
+    idx <- cbind(c(2L, 3L, 4L, 1L), c(3L, 4L, 1L, 2L))
+    dst <- matrix(c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8), 4L, 2L)
+    structure(
+      list(indices = idx, distances = dst),
+      class = "faissR_nn",
+      backend = "cuda_native_exact_gpu_host"
+    )
+  }
+  gpu_knn <- structure(
+    list(
+      handle = "mock",
+      backend_used = "cuda_native_exact_gpu",
+      metric = "inner_product",
+      n_query = 4L,
+      k = 2L
+    ),
+    class = "faissR_gpu_knn"
+  )
+
+  knn <- fastEmbedR:::coerce_knn_input(gpu_knn)
+  expect_equal(dim(knn$indices), c(4L, 2L))
+  expect_equal(knn$input_backend, "cuda_native_exact_gpu_host")
+  expect_true(knn$input_gpu_resident_source)
+})
+
+test_that("CUDA openTSNE keeps precomputed faissR GPU KNN on device", {
+  cache <- .fastembedr_faissr_cache
+  old_gpu_to_host <- cache[["gpu_knn_to_host"]]
+  on.exit({
+    if (is.null(old_gpu_to_host)) {
+      if (exists("gpu_knn_to_host", envir = cache, inherits = FALSE)) {
+        rm(list = "gpu_knn_to_host", envir = cache)
+      }
+    } else {
+      cache[["gpu_knn_to_host"]] <- old_gpu_to_host
+    }
+  }, add = TRUE)
+
+  cache[["gpu_knn_to_host"]] <- function(knn) {
+    stop("gpu_knn_to_host should not be called by CUDA openTSNE", call. = FALSE)
+  }
+  captured <- new.env(parent = emptyenv())
+  gpu_knn <- structure(
+    list(
+      handle = "mock",
+      backend_used = "cuda_auto",
+      result_residency = "cuda",
+      distance_type = "float32",
+      metric = "euclidean",
+      layout = "column_major_query_by_k",
+      exclude_self = TRUE,
+      n_query = 8L,
+      k = 3L
+    ),
+    class = "faissR_gpu_knn"
+  )
+  with_mocked_bindings(
+    opentsne_knn = function(indices, distances = NULL, n_neighbors = NULL, ...) {
+      captured$gpu_input <- fastembedr_is_gpu_knn(indices)
+      captured$distances_null <- is.null(distances)
+      out <- matrix(0, 8L, 2L)
+      attr(out, "fastEmbedR_config") <- list(
+        n_neighbors = 3L,
+        perplexity = 3,
+        knn_residency = "cuda_device"
+      )
+      out
+    },
+    {
+      fit <- opentsne(gpu_knn, backend = "cuda", perplexity = 3, keep_knn = TRUE)
+    }
+  )
+
+  expect_true(captured$gpu_input)
+  expect_true(captured$distances_null)
+  expect_s3_class(fit, "fastEmbedR_embedding")
+  expect_s3_class(fit$knn, "faissR_gpu_knn")
+  expect_equal(fit$parameters$preprocess, "none_precomputed_gpu_knn_cuda_random_init")
+})
+
+test_that("CUDA UMAP keeps supplied faissR GPU KNN on device", {
+  cache <- .fastembedr_faissr_cache
+  old_gpu_to_host <- cache[["gpu_knn_to_host"]]
+  on.exit({
+    if (is.null(old_gpu_to_host)) {
+      if (exists("gpu_knn_to_host", envir = cache, inherits = FALSE)) {
+        rm(list = "gpu_knn_to_host", envir = cache)
+      }
+    } else {
+      cache[["gpu_knn_to_host"]] <- old_gpu_to_host
+    }
+  }, add = TRUE)
+
+  cache[["gpu_knn_to_host"]] <- function(knn) {
+    stop("gpu_knn_to_host should not be called by CUDA UMAP", call. = FALSE)
+  }
+  captured <- new.env(parent = emptyenv())
+  x <- matrix(stats::rnorm(32L), 8L, 4L)
+  gpu_knn <- structure(
+    list(
+      handle = "mock",
+      backend_used = "cuda_auto",
+      result_residency = "cuda",
+      distance_type = "float32",
+      metric = "euclidean",
+      layout = "column_major_query_by_k",
+      exclude_self = TRUE,
+      n_query = 8L,
+      k = 3L
+    ),
+    class = "faissR_gpu_knn"
+  )
+  with_mocked_bindings(
+    fast_knn_umap = function(indices, distances = NULL, ...) {
+      captured$gpu_input <- fastembedr_is_gpu_knn(indices)
+      captured$distances_null <- is.null(distances)
+      out <- matrix(0, 8L, 2L)
+      attr(out, "fastEmbedR_config") <- list(
+        knn_n_neighbors = 3L,
+        n_neighbors = 3L,
+        knn_residency = "cuda_device",
+        graph_storage = "native_cuda_device_coo_fused"
+      )
+      out
+    },
+    {
+      fit <- umap(x, nn = gpu_knn, backend = "cuda", keep_knn = TRUE)
+    }
+  )
+
+  expect_true(captured$gpu_input)
+  expect_true(captured$distances_null)
+  expect_s3_class(fit, "fastEmbedR_embedding")
+  expect_s3_class(fit$knn, "faissR_gpu_knn")
+  expect_equal(fit$parameters$knn_residency, "cuda_device")
+})
+
+test_that("one-call CUDA embeddings use the intended KNN residency policy", {
+  x <- matrix(stats::rnorm(32L), 8L, 4L)
+  y_init <- matrix(0, 8L, 2L)
+  gpu_knn <- structure(
+    list(
+      handle = "mock",
+      backend_used = "cuda_auto",
+      result_residency = "cuda",
+      distance_type = "float32",
+      metric = "euclidean",
+      layout = "column_major_query_by_k",
+      exclude_self = TRUE,
+      n_query = 8L,
+      k = 3L
+    ),
+    class = "faissR_gpu_knn"
+  )
+  captured <- new.env(parent = emptyenv())
+  captured$keep_gpu <- list()
+  with_mocked_bindings(
+    fastembedr_nn_without_self = function(data, k, backend, method, metric, output,
+                                          n_threads, tuning, target_recall, keep_gpu) {
+      captured$keep_gpu[[length(captured$keep_gpu) + 1L]] <- keep_gpu
+      expect_identical(backend, "cuda")
+      if (isTRUE(keep_gpu)) {
+        gpu_knn
+      } else {
+        structure(
+          list(
+            indices = matrix(rep(1:3, each = 8L), 8L, 3L),
+            distances = matrix(1, 8L, 3L),
+            backend_used = "cuda_host_exact"
+          ),
+          class = c("faissR_nn", "list")
+        )
+      }
+    },
+    fast_knn_umap = function(indices, distances = NULL, ...) {
+      captured$umap_gpu_input <- fastembedr_is_gpu_knn(indices)
+      captured$umap_distances_null <- is.null(distances)
+      out <- matrix(0, 8L, 2L)
+      attr(out, "fastEmbedR_config") <- list(
+        knn_n_neighbors = 3L,
+        n_neighbors = 3L,
+        knn_residency = "host_materialized_from_cuda",
+        graph_storage = "cpu_binary_csr"
+      )
+      out
+    },
+    opentsne_knn = function(indices, distances = NULL, ...) {
+      captured$tsne_gpu_input <- fastembedr_is_gpu_knn(indices)
+      captured$tsne_distances_null <- is.null(distances)
+      out <- matrix(0, 8L, 2L)
+      attr(out, "fastEmbedR_config") <- list(
+        n_neighbors = 3L,
+        perplexity = 3,
+        knn_residency = "cuda_device"
+      )
+      out
+    },
+    {
+      fit_umap <- umap(x, n_neighbors = 3L, backend = "cuda", keep_knn = TRUE)
+      fit_tsne <- opentsne(x, perplexity = 2, Y_init = y_init, backend = "cuda", keep_knn = TRUE)
+    }
+  )
+
+  expect_equal(captured$keep_gpu, list(FALSE, TRUE))
+  expect_false(captured$umap_gpu_input)
+  expect_true(captured$umap_distances_null)
+  expect_true(captured$tsne_gpu_input)
+  expect_true(captured$tsne_distances_null)
+  expect_s3_class(fit_umap$knn, "faissR_nn")
+  expect_s3_class(fit_tsne$knn, "faissR_gpu_knn")
 })
 
 test_that("float32 KNN distances use less memory than double distances", {
@@ -364,6 +693,21 @@ test_that("opentsne PCA initialization can use fastPLS package backend", {
   expect_true(all(is.finite(init)))
   expect_match(attr(init, "fastEmbedR_init_method"), "^pca_fastPLS_rsvd$")
   expect_equal(attr(init, "fastEmbedR_init_backend"), "fastPLS_cpu_rsvd")
+})
+
+test_that("public PCA API uses randomized SVD", {
+  set.seed(45)
+  x <- matrix(rnorm(300L), 60L, 5L)
+  fit <- pca(x, ncomp = 2L, seed = 45L, backend = "cpu")
+
+  expect_s3_class(fit, "fastEmbedR_pca")
+  expect_equal(dim(fit$scores), c(60L, 2L))
+  expect_equal(dim(fit$loadings), c(5L, 2L))
+  expect_equal(fit$method, "rsvd")
+  expect_equal(fit$backend, "cpu_rsvd")
+  expect_true(all(is.finite(fit$scores)))
+  expect_true(all(is.finite(fit$loadings)))
+  expect_true(all(is.finite(fit$singular_values)))
 })
 
 test_that("high-level embeddings avoid retaining KNN matrices by default", {

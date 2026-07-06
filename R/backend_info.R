@@ -1,7 +1,7 @@
 # Internal backend summary used by tests and diagnostics.
 backend_info <- function() {
   nn_info <- tryCatch(
-    faissR::backend_info(),
+    fastembedr_faissr_function("backend_info")(),
     error = function(e) data.frame(
       backend = c("cpu", "faiss", "cuvs", "cuda", "metal"),
       available = c(TRUE, FALSE, FALSE, FALSE, FALSE),
@@ -106,7 +106,7 @@ resolve_native_gpu_backend <- function(need_knn = FALSE,
 
 available_native_gpu_backend <- function(need_knn = FALSE,
                                          need_embedding = FALSE) {
-  cuda_ok <- (!isTRUE(need_knn) || backend_flag(faissR::cuda_available)) &&
+  cuda_ok <- (!isTRUE(need_knn) || backend_flag(fastembedr_faissr_function("cuda_available"))) &&
     (!isTRUE(need_embedding) || backend_flag(embedding_cuda_available_cpp))
   if (cuda_ok) return("cuda")
 

@@ -2,10 +2,12 @@
 
 [Home](../README.md) |
 [Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
 [Implementation](implementation.md) |
 [Examples](examples.md) |
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
+[Reproducibility](reproducibility.md) |
 **References**
 
 References are listed in AACR journal style. Software projects are included

@@ -2,6 +2,7 @@
 
 [Home](../README.md) |
 [Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
 [Implementation](implementation.md) |
 [Examples](examples.md) |
 [Benchmarks](benchmarks.md) |

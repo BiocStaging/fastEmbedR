@@ -41,6 +41,17 @@ NumericMatrix knn_umap_cuda_fused_float_impl(IntegerMatrix indices,
                                              int spectral_n_iter,
                                              int seed,
                                              int optimizer_mode);
+NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP gpu_knn,
+                                           int requested_k,
+                                           int n_epochs,
+                                           int negative_sample_rate,
+                                           double learning_rate,
+                                           double min_dist,
+                                           double repulsion_strength,
+                                           int spectral_n_iter,
+                                           int seed,
+                                           int optimizer_mode,
+                                           bool binary_graph);
 List umap_cuda_graph_dump_impl(IntegerMatrix indices,
                                NumericMatrix distances);
 NumericMatrix umap_cuda_optimize_coo_impl(IntegerVector heads,
@@ -105,6 +116,26 @@ List knn_tsne_opentsne_cuda_float_impl(IntegerMatrix indices,
                                        std::string negative_gradient_method,
                                        int seed,
                                        bool record_costs);
+List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
+                                     int requested_k,
+                                     NumericMatrix y_init,
+                                     bool init,
+                                     SEXP pca_init_data,
+                                     int n_components,
+                                     double perplexity,
+                                     int early_exaggeration_iter,
+                                     int n_iter,
+                                     double early_exaggeration,
+                                     double exaggeration,
+                                     double learning_rate,
+                                     bool learning_rate_auto,
+                                     double initial_momentum,
+                                     double final_momentum,
+                                     double min_gain,
+                                     double max_step_norm,
+                                     std::string negative_gradient_method,
+                                     int seed,
+                                     bool record_costs);
 List standardize_cuda_impl(NumericMatrix data);
 NumericMatrix project_embedding_knn_cuda_impl(NumericMatrix reference_layout,
                                               IntegerMatrix projection_indices,
@@ -131,6 +162,12 @@ double silhouette_score_cuda_impl(NumericMatrix layout,
 NumericMatrix rsvd_multiply_cuda_impl(NumericMatrix left,
                                       NumericMatrix right,
                                       bool transpose_left);
+NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix data,
+                                      int n_components);
+NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
+                                       int n_components);
+NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix data,
+                                      int n_components);
 
 // [[Rcpp::export]]
 bool embedding_cuda_available_cpp() {
@@ -211,6 +248,33 @@ NumericMatrix knn_umap_cuda_fused_float_cpp(IntegerMatrix indices,
     spectral_n_iter,
     seed,
     optimizer_mode
+  );
+}
+
+// [[Rcpp::export]]
+NumericMatrix knn_umap_cuda_fused_gpu_cpp(SEXP gpu_knn,
+                                          int requested_k,
+                                          int n_epochs,
+                                          int negative_sample_rate,
+                                          double learning_rate,
+                                          double min_dist,
+                                          double repulsion_strength,
+                                          int spectral_n_iter,
+                                          int seed,
+                                          int optimizer_mode,
+                                          bool binary_graph) {
+  return knn_umap_cuda_fused_gpu_impl(
+    gpu_knn,
+    requested_k,
+    n_epochs,
+    negative_sample_rate,
+    learning_rate,
+    min_dist,
+    repulsion_strength,
+    spectral_n_iter,
+    seed,
+    optimizer_mode,
+    binary_graph
   );
 }
 
@@ -391,6 +455,51 @@ List knn_tsne_opentsne_cuda_float_cpp(IntegerMatrix indices,
 }
 
 // [[Rcpp::export]]
+List knn_tsne_opentsne_cuda_gpu_cpp(SEXP gpu_knn,
+                                    int requested_k,
+                                    NumericMatrix y_init,
+                                    bool init,
+                                    SEXP pca_init_data,
+                                    int n_components,
+                                    double perplexity,
+                                    int early_exaggeration_iter,
+                                    int n_iter,
+                                    double early_exaggeration,
+                                    double exaggeration,
+                                    double learning_rate,
+                                    bool learning_rate_auto,
+                                    double initial_momentum,
+                                    double final_momentum,
+                                    double min_gain,
+                                    double max_step_norm,
+                                    std::string negative_gradient_method,
+                                    int seed,
+                                    bool record_costs) {
+  return knn_tsne_opentsne_cuda_gpu_impl(
+    gpu_knn,
+    requested_k,
+    y_init,
+    init,
+    pca_init_data,
+    n_components,
+    perplexity,
+    early_exaggeration_iter,
+    n_iter,
+    early_exaggeration,
+    exaggeration,
+    learning_rate,
+    learning_rate_auto,
+    initial_momentum,
+    final_momentum,
+    min_gain,
+    max_step_norm,
+    negative_gradient_method,
+    seed,
+    record_costs
+  );
+}
+
+// [[Rcpp::export]]
 List standardize_cuda_cpp(NumericMatrix data) {
   return standardize_cuda_impl(data);
 }
@@ -458,4 +567,10 @@ NumericMatrix rsvd_multiply_cuda_cpp(NumericMatrix left,
                                      NumericMatrix right,
                                      bool transpose_left) {
   return rsvd_multiply_cuda_impl(left, right, transpose_left);
+}
+
+// [[Rcpp::export]]
+NumericMatrix cuml_tsvd_init_cuda_cpp(NumericMatrix data,
+                                      int n_components) {
+  return cuml_tsvd_init_cuda_impl(data, n_components);
 }

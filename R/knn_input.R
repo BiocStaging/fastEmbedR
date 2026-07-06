@@ -2,14 +2,21 @@ coerce_knn_input <- function(indices,
                              distances = NULL,
                              arg_name = "indices") {
   input_backend <- NA_character_
+  input_gpu_resident_source <- FALSE
   if (is.null(distances)) {
+    if (fastembedr_is_gpu_knn(indices)) {
+      indices <- fastembedr_gpu_knn_to_host(indices)
+      input_gpu_resident_source <- TRUE
+    }
     if (!is.list(indices) || !all(c("indices", "distances") %in% names(indices))) {
       stop(
         "`distances` is required unless `", arg_name,
-        "` is a list returned by `faissR::nn()` with `indices` and `distances`.",
+        "` is a KNN object returned by `faissR::nn()` or `faissR::nn_gpu()`.",
         call. = FALSE
       )
     }
+    input_gpu_resident_source <- input_gpu_resident_source ||
+      isTRUE(attr(indices, "gpu_resident_source"))
     input_backend <- attr(indices, "backend")
     distances <- indices$distances
     indices <- indices$indices
@@ -52,13 +59,15 @@ coerce_knn_input <- function(indices,
     n_neighbors = as.integer(n_neighbors),
     materialized = isTRUE(stripped$materialized),
     input_backend = if (is.null(input_backend)) NA_character_ else input_backend,
+    input_gpu_resident_source = input_gpu_resident_source,
     distance_type = stripped$distance_type %||%
       if (distance_is_float32) "float32" else "double"
   )
 }
 
 is_knn_input <- function(x) {
-  is.list(x) && all(c("indices", "distances") %in% names(x))
+  fastembedr_is_gpu_knn(x) ||
+    (is.list(x) && all(c("indices", "distances") %in% names(x)))
 }
 
 is_float32_matrix <- function(x) {

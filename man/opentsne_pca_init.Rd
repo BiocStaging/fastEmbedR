@@ -38,4 +38,15 @@ A numeric initialization matrix suitable for `Y_init`.
 as an RDS file; later calls with the same path reuse the saved matrix instead
 of recomputing PCA. This is useful when comparing several KNN backends with
 exactly the same initialization.
+For \code{backend = "cuda"}, fastEmbedR requires native RAPIDS RAFT/cuML TSVD
+support compiled into the CUDA backend and fails loudly if that backend is
+unavailable. CPU and Metal use the native RSVD family available to the package
+build, including fastPLS when installed. The public package does not call
+Python or \code{reticulate} for PCA initialization.
+}
+\examples{
+x <- scale(as.matrix(iris[, 1:4]))
+init <- opentsne_pca_init(x, seed = 1)
+dim(init)
+range(init)
 }

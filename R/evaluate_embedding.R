@@ -188,6 +188,16 @@ normalize_evaluation_reference <- function(reference_nn, n, max_k) {
   out
 }
 
+knn_backend_label <- function(knn) {
+  label <- attr(knn, "backend", exact = TRUE)
+  if (is.null(label) && is.list(knn)) label <- knn$backend
+  if (is.null(label) || length(label) == 0L || is.na(label[[1L]])) {
+    NA_character_
+  } else {
+    as.character(label[[1L]])
+  }
+}
+
 get_or_compute_evaluation_reference <- function(x_high,
                                                 max_k,
                                                 dataset = "dataset",
@@ -207,15 +217,23 @@ get_or_compute_evaluation_reference <- function(x_high,
     cached$cache_hit <- TRUE
     return(normalize_evaluation_reference(cached, n, max_k))
   }
-  raw <- faissR::nn(
-    x_high,
-    x_high,
-    k = max_k + 1L,
-    backend = backend,
-    n_threads = n_threads
+  raw <- tryCatch(
+    fastembedr_faissr_nn(
+      x_high,
+      x_high,
+      k = max_k + 1L,
+      backend = backend,
+      n_threads = n_threads
+    ),
+    error = function(e) fastembedr_exact_knn_fallback(
+      x_high,
+      x_high,
+      k = max_k + 1L,
+      include_self = TRUE
+    )
   )
   out <- normalize_supplied_knn(raw, n, max_k)
-  out$backend <- attr(raw, "backend")
+  out$backend <- knn_backend_label(raw)
   out$cache_hit <- FALSE
   out$cache_path <- cache_path
   if (isTRUE(use_cache)) {
@@ -460,7 +478,7 @@ evaluate_embedding <- function(x_high,
     normalize_evaluation_reference(reference_nn, nrow(x_high), max_k)
   }
   embed_nn <- tryCatch(
-    faissR::nn(
+    fastembedr_faissr_nn(
       embedding,
       embedding,
       max_k + 1L,
@@ -473,12 +491,20 @@ evaluate_embedding <- function(x_high,
         conditionMessage(e)
       )
       metric_backend <<- "cpu"
-      faissR::nn(
-        embedding,
-        embedding,
-        max_k + 1L,
-        backend = "cpu",
-        n_threads = n_threads
+      tryCatch(
+        fastembedr_faissr_nn(
+          embedding,
+          embedding,
+          max_k + 1L,
+          backend = "cpu",
+          n_threads = n_threads
+        ),
+        error = function(e2) fastembedr_exact_knn_fallback(
+          embedding,
+          embedding,
+          k = max_k + 1L,
+          include_self = TRUE
+        )
       )
     }
   )
@@ -561,7 +587,7 @@ evaluate_embedding <- function(x_high,
     metric_backend = metric_backend,
     metric_backend_reason = metric_backend_reason,
     high_nn_backend = if (is.null(high_nn$backend)) NA_character_ else as.character(high_nn$backend),
-    embedding_nn_backend = attr(embed_nn, "backend"),
+    embedding_nn_backend = knn_backend_label(embed_nn),
     n_threads = if (identical(metric_backend, "cpu")) as.integer(n_threads) else NA_integer_,
     seed = as.integer(seed),
     primary_k = as.integer(primary_k),
