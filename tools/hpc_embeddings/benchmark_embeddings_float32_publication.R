@@ -71,9 +71,32 @@ datasets <- csv_arg(
 )
 
 default_methods <- if (identical(backend_group, "cuda")) {
-  "fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary,rapids_cuml_umap_full,rapids_cuml_tsne_full"
+  paste(
+    "fastEmbedR_opentsne_cuda",
+    "fastEmbedR_umap_cuda_fuzzy",
+    "fastEmbedR_umap_cuda_binary",
+    "rapids_cuml_umap_full",
+    "rapids_cuml_tsne_full",
+    "rapids_cuml_umap_full_direct",
+    "rapids_cuml_tsne_full_direct",
+    sep = ","
+  )
 } else {
-  "fastEmbedR_opentsne_cpu,fastEmbedR_umap_cpu_fuzzy,fastEmbedR_umap_cpu_binary,Rtsne_full,KlugerLab_FItSNE,python_opentsne_fft,umap_package,uwot_default,uwot_fast_sgd,python_umap_learn"
+  paste(
+    "fastEmbedR_opentsne_cpu",
+    "fastEmbedR_umap_cpu_fuzzy",
+    "fastEmbedR_umap_cpu_binary",
+    "Rtsne_full",
+    "KlugerLab_FItSNE",
+    "python_opentsne_fft",
+    "python_opentsne_fft_direct",
+    "umap_package",
+    "uwot_default",
+    "uwot_fast_sgd",
+    "python_umap_learn",
+    "python_umap_learn_direct",
+    sep = ","
+  )
 }
 methods <- csv_arg("methods", default_methods)
 
@@ -415,6 +438,108 @@ run_rapids_cuml_tsne <- function(x) {
   py_array_to_matrix(model$fit_transform(x_np))
 }
 
+is_direct_python_method <- function(method) {
+  method %in% c(
+    "python_opentsne_fft_direct",
+    "python_umap_learn_direct",
+    "rapids_cuml_umap_full_direct",
+    "rapids_cuml_tsne_full_direct"
+  )
+}
+
+python_direct_helper <- function() {
+  candidates <- c(
+    file.path(dirname(script_path), "benchmark_python_direct.py"),
+    file.path(getwd(), "tools", "hpc_embeddings", "benchmark_python_direct.py"),
+    file.path(base_dir, "benchmark_python_direct.py")
+  )
+  candidates <- candidates[file.exists(candidates)]
+  if (!length(candidates)) {
+    stop("Cannot find benchmark_python_direct.py next to the benchmark R script.", call. = FALSE)
+  }
+  normalizePath(candidates[[1L]], mustWork = TRUE)
+}
+
+python_executable <- function() {
+  py <- Sys.getenv("RETICULATE_PYTHON", unset = "")
+  if (nzchar(py) && file.exists(py)) return(py)
+  py <- Sys.which("python")
+  if (nzchar(py)) return(py)
+  py <- Sys.which("python3")
+  if (nzchar(py)) return(py)
+  stop("Cannot find a Python executable for direct Python benchmark methods.", call. = FALSE)
+}
+
+prepare_direct_python_npz <- function(dataset, x_ref) {
+  if (is.null(x_ref)) {
+    stop("Standard R dataset is required for direct Python benchmark methods.", call. = FALSE)
+  }
+  ensure_reticulate()
+  np <- reticulate::import("numpy", convert = FALSE)
+  input_dir <- file.path(out_dir, "python_inputs")
+  dir.create(input_dir, recursive = TRUE, showWarnings = FALSE)
+  path <- file.path(input_dir, paste0(dataset, "_float32_for_python.npz"))
+  if (!file.exists(path)) {
+    x_np <- np$array(as_double_matrix(x_ref), dtype = "float32", order = "C")
+    np$savez_compressed(path, x = x_np)
+  }
+  path
+}
+
+read_direct_python_json <- function(path) {
+  if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    stop("jsonlite is required to read direct Python benchmark metadata.", call. = FALSE)
+  }
+  jsonlite::fromJSON(path, simplifyVector = TRUE)
+}
+
+run_python_direct_method <- function(method, npz_path) {
+  if (is.null(npz_path) || !nzchar(npz_path) || !file.exists(npz_path)) {
+    stop("Direct Python benchmark requires a pre-exported NPZ input.", call. = FALSE)
+  }
+  helper <- python_direct_helper()
+  py <- python_executable()
+  direct_dir <- file.path(out_dir, "python_direct")
+  dir.create(direct_dir, recursive = TRUE, showWarnings = FALSE)
+  stem <- paste0(args$dataset %||% "dataset", "_", method, "_threads", threads, "_seed", seed)
+  layout_csv <- file.path(direct_dir, paste0(stem, "_layout.csv"))
+  meta_json <- file.path(direct_dir, paste0(stem, "_metadata.json"))
+  cmd_args <- c(
+    helper,
+    paste0("--method=", method),
+    paste0("--input=", npz_path),
+    paste0("--layout=", layout_csv),
+    paste0("--json=", meta_json),
+    paste0("--k=", k),
+    paste0("--perplexity=", perplexity),
+    paste0("--threads=", threads),
+    paste0("--seed=", seed)
+  )
+  process_time <- system.time({
+    status <- system2(py, cmd_args, stdout = TRUE, stderr = TRUE)
+  })
+  process_elapsed <- unname(process_time[["elapsed"]])
+  if (!file.exists(meta_json)) {
+    stop("Direct Python benchmark did not write metadata. Output: ",
+         paste(status, collapse = "\n"), call. = FALSE)
+  }
+  meta <- read_direct_python_json(meta_json)
+  if (!identical(meta$status, "success")) {
+    stop("Direct Python benchmark failed: ", meta$error %||% "unknown error",
+         call. = FALSE)
+  }
+  if (!file.exists(layout_csv)) {
+    stop("Direct Python benchmark did not write a layout CSV.", call. = FALSE)
+  }
+  layout <- as.matrix(utils::read.csv(layout_csv, header = FALSE))
+  storage.mode(layout) <- "double"
+  layout <- layout[, 1:2, drop = FALSE]
+  attr(layout, "python_fit_sec") <- as.numeric(meta$python_fit_sec %||% NA_real_)
+  attr(layout, "process_elapsed_sec") <- process_elapsed
+  attr(layout, "python_executable") <- as.character(meta$python_executable %||% py)
+  layout
+}
+
 is_tsne_method <- function(method) {
   grepl("tsne|Rtsne|FItSNE|opentsne", method, ignore.case = TRUE)
 }
@@ -526,6 +651,15 @@ method_parameter_row <- function(method) {
     base$knn_source <- "Python openTSNE internal affinity/neighbor construction"
     base$knn_exact_or_approximate <- "package internal"
     base$notes <- "negative_gradient_method = fft; run through reticulate for reference benchmarking"
+  } else if (method == "python_opentsne_fft_direct") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "Python openTSNE n_iter = 500 plus early_exaggeration_iter = 250"
+    base$early_exaggeration <- "Python openTSNE default"
+    base$learning_rate <- "Python openTSNE auto/default"
+    base$initialization <- "Python openTSNE PCA initialization"
+    base$knn_source <- "Python openTSNE internal affinity/neighbor construction"
+    base$knn_exact_or_approximate <- "package internal"
+    base$notes <- "negative_gradient_method = fft; run in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
   } else if (method == "umap_package") {
     base$n_neighbors_k <- as.character(k)
     base$iterations_or_epochs <- "umap::umap.defaults except n_neighbors = k"
@@ -562,6 +696,15 @@ method_parameter_row <- function(method) {
     base$knn_source <- "Python umap-learn internal nearest-neighbor graph construction"
     base$knn_exact_or_approximate <- "package internal approximate"
     base$notes <- "run through reticulate for reference benchmarking"
+  } else if (method == "python_umap_learn_direct") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "Python umap-learn defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "Python umap-learn default"
+    base$initialization <- "Python umap-learn default"
+    base$knn_source <- "Python umap-learn internal nearest-neighbor graph construction"
+    base$knn_exact_or_approximate <- "package internal approximate"
+    base$notes <- "run in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
   } else if (method == "rapids_cuml_umap_full") {
     base$n_neighbors_k <- as.character(k)
     base$iterations_or_epochs <- "RAPIDS cuML UMAP defaults"
@@ -571,6 +714,15 @@ method_parameter_row <- function(method) {
     base$knn_source <- "RAPIDS cuML internal GPU nearest-neighbor graph construction"
     base$knn_exact_or_approximate <- "RAPIDS internal"
     base$notes <- "full RAPIDS cuML UMAP through reticulate; total runtime includes Python/R boundary and GPU transfer"
+  } else if (method == "rapids_cuml_umap_full_direct") {
+    base$n_neighbors_k <- as.character(k)
+    base$iterations_or_epochs <- "RAPIDS cuML UMAP defaults"
+    base$early_exaggeration <- "not used"
+    base$learning_rate <- "RAPIDS cuML default"
+    base$initialization <- "RAPIDS cuML default"
+    base$knn_source <- "RAPIDS cuML internal GPU nearest-neighbor graph construction"
+    base$knn_exact_or_approximate <- "RAPIDS internal"
+    base$notes <- "full RAPIDS cuML UMAP in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
   } else if (method == "rapids_cuml_tsne_full") {
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "RAPIDS cuML TSNE defaults"
@@ -580,6 +732,15 @@ method_parameter_row <- function(method) {
     base$knn_source <- "RAPIDS cuML internal GPU affinity construction"
     base$knn_exact_or_approximate <- "RAPIDS internal"
     base$notes <- "full RAPIDS cuML TSNE through reticulate; total runtime includes Python/R boundary and GPU transfer"
+  } else if (method == "rapids_cuml_tsne_full_direct") {
+    base$perplexity <- as.character(perplexity)
+    base$iterations_or_epochs <- "RAPIDS cuML TSNE defaults"
+    base$early_exaggeration <- "RAPIDS cuML default"
+    base$learning_rate <- "RAPIDS cuML default"
+    base$initialization <- "RAPIDS cuML default"
+    base$knn_source <- "RAPIDS cuML internal GPU affinity construction"
+    base$knn_exact_or_approximate <- "RAPIDS internal"
+    base$notes <- "full RAPIDS cuML TSNE in a native Python subprocess; elapsed_sec is Python-side fit time, process_elapsed_sec includes process startup and data load"
   } else {
     base$n_neighbors_k <- if (umap_method) as.character(k) else NA_character_
     base$perplexity <- if (tsne_method) as.character(perplexity) else NA_character_
@@ -639,7 +800,7 @@ cuda_ready_for_benchmark <- function() {
   isTRUE(tryCatch(faissR::cuda_available(), error = function(e) FALSE))
 }
 
-run_embedding_method <- function(method, dataset, x_fast, x_ref, labels) {
+run_embedding_method <- function(method, dataset, x_fast, x_ref, labels, python_npz = NULL) {
   set.seed(seed)
   if (method == "fastEmbedR_opentsne_cpu") {
     return(fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cpu",
@@ -679,9 +840,15 @@ run_embedding_method <- function(method, dataset, x_fast, x_ref, labels) {
     if (is.null(x_ref)) stop("Standard R dataset is required for python_opentsne_fft.", call. = FALSE)
     return(run_python_opentsne_fft(x_ref))
   }
+  if (method == "python_opentsne_fft_direct") {
+    return(run_python_direct_method(method, python_npz))
+  }
   if (method == "rapids_cuml_tsne_full") {
     if (is.null(x_ref)) stop("Standard R dataset is required for rapids_cuml_tsne_full.", call. = FALSE)
     return(run_rapids_cuml_tsne(x_ref))
+  }
+  if (method == "rapids_cuml_tsne_full_direct") {
+    return(run_python_direct_method(method, python_npz))
   }
   if (method == "umap_package") {
     if (is.null(x_ref)) stop("Standard R dataset is required for umap_package.", call. = FALSE)
@@ -706,9 +873,15 @@ run_embedding_method <- function(method, dataset, x_fast, x_ref, labels) {
     if (is.null(x_ref)) stop("Standard R dataset is required for python_umap_learn.", call. = FALSE)
     return(run_python_umap_learn(x_ref))
   }
+  if (method == "python_umap_learn_direct") {
+    return(run_python_direct_method(method, python_npz))
+  }
   if (method == "rapids_cuml_umap_full") {
     if (is.null(x_ref)) stop("Standard R dataset is required for rapids_cuml_umap_full.", call. = FALSE)
     return(run_rapids_cuml_umap(x_ref))
+  }
+  if (method == "rapids_cuml_umap_full_direct") {
+    return(run_python_direct_method(method, python_npz))
   }
   stop("Unknown method: ", method, call. = FALSE)
 }
@@ -737,12 +910,27 @@ worker_main <- function() {
     stop("Standard and float32 datasets have different number of rows for ", dataset, call. = FALSE)
   }
   x_score <- if (is.null(x_ref)) as_double_matrix(float_obj$data) else as_double_matrix(x_ref)
+  python_npz <- if (is_direct_python_method(method)) {
+    # Export is intentionally outside the timed embedding block. Direct Python
+    # rows report Python-side package fit time; process_elapsed_sec below records
+    # subprocess startup and NPZ load overhead for transparency.
+    prepare_direct_python_npz(dataset, x_ref)
+  } else {
+    NULL
+  }
 
   gc()
   t <- system.time({
-    fit <- run_embedding_method(method, dataset, x_fast, x_ref, labels)
+    fit <- run_embedding_method(method, dataset, x_fast, x_ref, labels, python_npz = python_npz)
   })
-  elapsed <- unname(t[["elapsed"]])
+  process_elapsed <- unname(t[["elapsed"]])
+  python_fit_sec <- as.numeric(attr(fit, "python_fit_sec", exact = TRUE) %||% NA_real_)
+  direct_process_elapsed <- as.numeric(attr(fit, "process_elapsed_sec", exact = TRUE) %||% NA_real_)
+  elapsed <- if (is_direct_python_method(method) && is.finite(python_fit_sec)) {
+    python_fit_sec
+  } else {
+    process_elapsed
+  }
   layout <- layout_matrix(fit)
   layout_file <- file.path(out_dir, "layouts", paste0(dataset, "_", method, "_threads", threads, "_seed", seed, ".rds"))
   plot_file <- file.path(out_dir, "plots", paste0(dataset, "_", method, "_threads", threads, "_seed", seed, ".png"))
@@ -796,7 +984,10 @@ worker_main <- function() {
     } else {
       "standard_R_matrix"
     },
+    timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
     elapsed_sec = elapsed,
+    process_elapsed_sec = if (is_direct_python_method(method)) direct_process_elapsed else process_elapsed,
+    python_fit_sec = if (is_direct_python_method(method)) python_fit_sec else NA_real_,
     trust = scores$trustworthiness,
     trustworthiness = scores$trustworthiness,
     knn_preservation = scores$knn_preservation,
@@ -849,7 +1040,10 @@ ensure_quality_columns <- function(tab) {
     knn_label_accuracy = NA_real_,
     quality_sample_n = NA_integer_,
     max_rss_kb = NA_real_,
-    max_rss_gb = NA_real_
+    max_rss_gb = NA_real_,
+    timing_mode = NA_character_,
+    process_elapsed_sec = NA_real_,
+    python_fit_sec = NA_real_
   )
   for (nm in names(defaults)) {
     if (!nm %in% names(tab)) tab[[nm]] <- defaults[[nm]]
@@ -880,7 +1074,7 @@ ensure_quality_columns <- function(tab) {
     "trustworthiness", "knn_preservation", "nn_preservation",
     "knn_preservation_15", "knn_preservation_30", "knn_preservation_50",
     "silhouette", "label_acc", "knn_label_accuracy", "quality_sample_n",
-    "max_rss_kb", "max_rss_gb"
+    "max_rss_kb", "max_rss_gb", "process_elapsed_sec", "python_fit_sec"
   )
   for (nm in intersect(numeric_cols, names(tab))) {
     tab[[nm]] <- suppressWarnings(as.numeric(tab[[nm]]))
@@ -990,7 +1184,7 @@ write_reproducibility_bundle <- function() {
 
   command_lines <- c(
     current_invocation = paste(commandArgs(FALSE), collapse = " "),
-    hpc_cpu1_4 = paste(
+    hpc_cpu1_12 = paste(
       paste0("DATASETS=", paste(datasets, collapse = ",")),
       paste0("K=", k),
       paste0("PERPLEXITY=", perplexity),
@@ -1088,6 +1282,7 @@ write_reproducibility_bundle <- function() {
       installation = "docs/installation.md",
       backend_capabilities = "docs/backend-capabilities.md",
       hpc_driver = "tools/hpc_embeddings/benchmark_embeddings_float32_publication.R",
+      direct_python_helper = "tools/hpc_embeddings/benchmark_python_direct.py",
       cpu_wrapper = "tools/hpc_embeddings/benchmark_embeddings_float32_cpu12.sh",
       cuda_wrapper = "tools/hpc_embeddings/benchmark_embeddings_float32_cuda.sh"
     )
@@ -1103,7 +1298,8 @@ write_quality_outputs <- function(tab) {
   tab <- ensure_quality_columns(tab)
   quality_cols <- c(
     "dataset", "method", "backend", "status", "n", "p",
-    "cpu_threads", "elapsed_sec", "max_rss_gb", "trustworthiness",
+    "cpu_threads", "timing_mode", "elapsed_sec", "process_elapsed_sec",
+    "python_fit_sec", "max_rss_gb", "trustworthiness",
     "knn_preservation_30", "silhouette", "knn_label_accuracy",
     "knn_preservation_15", "knn_preservation_50", "quality_sample_n",
     "plot_file", "error"
@@ -1125,7 +1321,7 @@ write_quality_outputs <- function(tab) {
   md_cols <- c(
     "dataset", "method", "backend", "cpu_threads", "runtime_sec", "trustworthiness",
     "nn_preservation", "silhouette", "knn_label_accuracy", "max_rss_gb",
-    "status"
+    "timing_mode", "status"
   )
   md_cols <- md_cols[md_cols %in% names(quality)]
   md_quality <- quality[quality$key_manuscript_dataset, md_cols, drop = FALSE]
@@ -1245,7 +1441,10 @@ if (worker) {
       } else {
         "standard_R_matrix"
       },
+      timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
       elapsed_sec = NA_real_,
+      process_elapsed_sec = NA_real_,
+      python_fit_sec = NA_real_,
       trust = NA_real_,
       trustworthiness = NA_real_,
       knn_preservation = NA_real_,
@@ -1369,7 +1568,10 @@ for (current_threads in thread_grid) {
           perplexity = if (is_tsne_method(method)) perplexity else NA_real_,
           parameters = method_parameter_summary(method),
           input_fastEmbedR = if (grepl("^fastEmbedR", method)) "float32" else "standard_R_matrix",
+          timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
           elapsed_sec = NA_real_,
+          process_elapsed_sec = NA_real_,
+          python_fit_sec = NA_real_,
           trust = NA_real_,
           trustworthiness = NA_real_,
           knn_preservation = NA_real_,

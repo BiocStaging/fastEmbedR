@@ -42,7 +42,7 @@ export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${OUT_DIR}/numba_cache}"
 export CUPY_CACHE_DIR="${CUPY_CACHE_DIR:-${OUT_DIR}/cupy_cache}"
 
 export DATASETS="${DATASETS:-COIL20,USPS,FashionMNIST,FlowRepository_FR-FCM-ZYRM_files,flow18,MNIST,imagenet,MetRef,mass41,TabulaMuris}"
-export METHODS="${METHODS:-fastEmbedR_opentsne_cpu,fastEmbedR_umap_cpu_fuzzy,fastEmbedR_umap_cpu_binary,Rtsne_full,KlugerLab_FItSNE,python_opentsne_fft,umap_package,uwot_default,uwot_fast_sgd,python_umap_learn}"
+export METHODS="${METHODS:-fastEmbedR_opentsne_cpu,fastEmbedR_umap_cpu_fuzzy,fastEmbedR_umap_cpu_binary,Rtsne_full,KlugerLab_FItSNE,python_opentsne_fft,python_opentsne_fft_direct,umap_package,uwot_default,uwot_fast_sgd,python_umap_learn,python_umap_learn_direct}"
 
 export OMP_NUM_THREADS="${THREADS}"
 export OPENBLAS_NUM_THREADS="${THREADS}"

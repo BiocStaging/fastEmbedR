@@ -11,17 +11,26 @@ These scripts run publication-style embedding benchmarks on the HPC datasets in
   when available, saves layouts, saves per-method plots, computes embedding
   quality metrics, and continues after failed/OOM/timeout methods.
 
+- `benchmark_python_direct.py`
+  Native Python subprocess helper for Python reference methods. Rows ending in
+  `_direct` use this file and report Python-side fit time separately from the
+  R/reticulate-mediated rows.
+
 - `benchmark_embeddings_float32_cpu12.sh`
   CPU-only Slurm wrapper using 12 CPU cores. It runs:
   `fastEmbedR_opentsne_cpu`, `fastEmbedR_umap_cpu_fuzzy`,
   `fastEmbedR_umap_cpu_binary`, `Rtsne_full`, `KlugerLab_FItSNE`,
-  `umap_package`, `uwot_default`, and `uwot_fast_sgd`.
+  `python_opentsne_fft`, `python_opentsne_fft_direct`, `umap_package`,
+  `uwot_default`, `uwot_fast_sgd`, `python_umap_learn`, and
+  `python_umap_learn_direct`.
 
 - `benchmark_embeddings_float32_cuda.sh`
   CUDA-only Slurm wrapper using one L40S GPU. It runs:
   `fastEmbedR_opentsne_cuda`, `fastEmbedR_umap_cuda_fuzzy`, and
-  `fastEmbedR_umap_cuda_binary`. It prints CUDA/faissR/fastEmbedR diagnostics
-  before the benchmark so a missing CUDA backend is visible immediately.
+  `fastEmbedR_umap_cuda_binary`, plus reticulate-mediated and native Python
+  subprocess RAPIDS/cuML UMAP and t-SNE rows. It prints CUDA/faissR/fastEmbedR
+  diagnostics before the benchmark so a missing CUDA backend is visible
+  immediately.
 
 ## Input Rule
 
@@ -34,6 +43,8 @@ From the local machine:
 
 ```bash
 cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_embeddings_float32_publication.R \
+   /Users/stefano/HPC-firenze/NN/
+cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_python_direct.py \
    /Users/stefano/HPC-firenze/NN/
 cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_embeddings_float32_cpu12.sh \
    /Users/stefano/HPC-firenze/NN/
@@ -110,6 +121,14 @@ distance metric, thread count, random seed, whether KNN was precomputed, and
 whether the KNN path was approximate, exact, or package-internal. The benchmark
 still compares total elapsed user-level runtime because the reference packages
 do not expose identical KNN/affinity/optimization boundaries.
+
+Python reference methods are reported in two timing modes. Method names without
+the `_direct` suffix are called from R through `reticulate`. Method names with
+the `_direct` suffix run inside a native Python subprocess using
+`benchmark_python_direct.py`. For `_direct` rows, `elapsed_sec` is the
+Python-side fit time measured by `time.perf_counter()`, while
+`process_elapsed_sec` records the whole subprocess wall time including Python
+startup and NPZ input loading.
 
 The reproducibility manifest records the Git commit, release tag field,
 archival DOI field, command lines, random seed, k/perplexity, thread count,

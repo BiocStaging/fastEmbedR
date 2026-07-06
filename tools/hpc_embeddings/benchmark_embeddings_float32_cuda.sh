@@ -39,7 +39,7 @@ export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${OUT_DIR}/numba_cache}"
 export CUPY_CACHE_DIR="${CUPY_CACHE_DIR:-${OUT_DIR}/cupy_cache}"
 
 export DATASETS="${DATASETS:-COIL20,USPS,FashionMNIST,FlowRepository_FR-FCM-ZYRM_files,flow18,MNIST,imagenet,MetRef,mass41,TabulaMuris}"
-export METHODS="${METHODS:-fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary,rapids_cuml_umap_full,rapids_cuml_tsne_full}"
+export METHODS="${METHODS:-fastEmbedR_opentsne_cuda,fastEmbedR_umap_cuda_fuzzy,fastEmbedR_umap_cuda_binary,rapids_cuml_umap_full,rapids_cuml_tsne_full,rapids_cuml_umap_full_direct,rapids_cuml_tsne_full_direct}"
 
 export OMP_NUM_THREADS="${THREADS}"
 export OPENBLAS_NUM_THREADS="${THREADS}"

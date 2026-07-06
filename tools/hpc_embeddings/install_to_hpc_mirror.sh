@@ -26,6 +26,9 @@ copy_file() {
 copy_file "${SRC_ROOT}/tools/hpc_embeddings/benchmark_embeddings_float32_publication.R" \
           "${HPC_ROOT}/benchmark_embeddings_float32_publication.R"
 
+copy_file "${SRC_ROOT}/tools/hpc_embeddings/benchmark_python_direct.py" \
+          "${HPC_ROOT}/benchmark_python_direct.py"
+
 copy_file "${SRC_ROOT}/tools/hpc_embeddings/benchmark_embeddings_float32_cpu12.sh" \
           "${HPC_ROOT}/benchmark_embeddings_float32_cpu12.sh"
 
@@ -42,6 +45,7 @@ copy_file "${STAGED_RDATA}/FlowRepository_FR-FCM-ZYRM_files/van_unen_FR-FCM-ZYRM
           "${HPC_ROOT}/Data/FlowRepository_FR-FCM-ZYRM_files/van_unen_FR-FCM-ZYRM.RData"
 
 chmod +x "${HPC_ROOT}/benchmark_embeddings_float32_cpu12.sh" \
-         "${HPC_ROOT}/benchmark_embeddings_float32_cuda.sh"
+         "${HPC_ROOT}/benchmark_embeddings_float32_cuda.sh" \
+         "${HPC_ROOT}/benchmark_python_direct.py"
 
 echo "Done. Now sync ${HPC_ROOT} to /scratch/firenze/NN on the HPC."
