@@ -4,6 +4,7 @@
 [Installation](docs/installation.md) |
 [Bioconductor](docs/bioconductor.md) |
 [Implementation](docs/implementation.md) |
+[Performance Engineering](docs/backend-performance-engineering.md) |
 [Examples](docs/examples.md) |
 [Benchmarks](docs/benchmarks.md) |
 [API](docs/usage-api.md) |

@@ -4,6 +4,7 @@
 [Installation](installation.md) |
 [Bioconductor](bioconductor.md) |
 **Implementation** |
+[Performance Engineering](backend-performance-engineering.md) |
 [Examples](examples.md) |
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
@@ -278,6 +279,15 @@ for tree-based t-SNE acceleration [2].
 The Metal implementation includes package-native FFT kernels. Standalone
 MPSGraph FFT diagnostics were tested and then removed because they did not
 provide enough benefit to justify another user-facing backend.
+
+The current CPU FFT-grid path reuses a scoped worker team, FFT bit-reversal and
+root tables, and per-thread column scratch. The current Metal path encodes 16
+unchanged optimization iterations per command buffer. The current CUDA path
+captures chunks of 25 unchanged iterations in CUDA Graphs. These are
+implementation-only optimizations: they do not reduce perplexity, grid size,
+or iteration counts. Their profiling results, output-agreement gates, rejected
+experiments, and exact benchmark artifacts are documented in
+[Backend Performance Engineering](backend-performance-engineering.md).
 
 ## Landmarking
 

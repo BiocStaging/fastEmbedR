@@ -6,10 +6,14 @@
 #include <cfloat>
 #include <cmath>
 #include <complex>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <exception>
+#include <functional>
 #include <limits>
+#include <mutex>
 #include <numeric>
 #include <random>
 #include <string>
@@ -106,10 +110,163 @@ int resolve_threads(int n_threads, int n) {
   return std::max(1, std::min(n_threads, std::max(1, n)));
 }
 
+class ParallelExecutor {
+ public:
+  explicit ParallelExecutor(const int max_threads) :
+    max_threads_(std::max(1, max_threads)) {
+    workers_.reserve(static_cast<std::size_t>(max_threads_ - 1));
+    for (int thread_id = 1; thread_id < max_threads_; ++thread_id) {
+      workers_.emplace_back([this, thread_id]() { worker_loop(thread_id); });
+    }
+  }
+
+  ParallelExecutor(const ParallelExecutor&) = delete;
+  ParallelExecutor& operator=(const ParallelExecutor&) = delete;
+
+  ~ParallelExecutor() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+      ++generation_;
+    }
+    start_cv_.notify_all();
+    for (std::thread& worker : workers_) worker.join();
+  }
+
+  int max_threads() const {
+    return max_threads_;
+  }
+
+  template <typename Function>
+  void run(const int n, const int requested_threads, Function& fn) {
+    const int active_threads = std::max(
+      1,
+      std::min(std::min(requested_threads, max_threads_), std::max(1, n))
+    );
+    if (active_threads <= 1 || n < 2) {
+      fn(0, n, 0);
+      return;
+    }
+
+    const int chunk = (n + active_threads - 1) / active_threads;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      task_ = [&fn](const int begin, const int end, const int thread_id) {
+        fn(begin, end, thread_id);
+      };
+      n_ = n;
+      active_threads_ = active_threads;
+      chunk_ = chunk;
+      completed_workers_ = 0;
+      worker_error_ = nullptr;
+      ++generation_;
+    }
+    start_cv_.notify_all();
+
+    std::exception_ptr main_error;
+    try {
+      fn(0, std::min(n, chunk), 0);
+    } catch (...) {
+      main_error = std::current_exception();
+    }
+
+    std::exception_ptr worker_error;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      done_cv_.wait(lock, [this]() {
+        return completed_workers_ == static_cast<int>(workers_.size());
+      });
+      worker_error = worker_error_;
+      task_ = nullptr;
+    }
+    if (main_error != nullptr) std::rethrow_exception(main_error);
+    if (worker_error != nullptr) std::rethrow_exception(worker_error);
+  }
+
+ private:
+  void worker_loop(const int thread_id) {
+    std::uint64_t observed_generation = 0;
+    while (true) {
+      std::function<void(int, int, int)> task;
+      int begin = 0;
+      int end = 0;
+      bool active = false;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        start_cv_.wait(lock, [this, observed_generation]() {
+          return stop_ || generation_ != observed_generation;
+        });
+        if (stop_) return;
+        observed_generation = generation_;
+        task = task_;
+        active = thread_id < active_threads_;
+        if (active) {
+          begin = thread_id * chunk_;
+          end = std::min(n_, begin + chunk_);
+          active = begin < end;
+        }
+      }
+
+      if (active) {
+        try {
+          task(begin, end, thread_id);
+        } catch (...) {
+          std::lock_guard<std::mutex> lock(mutex_);
+          if (worker_error_ == nullptr) worker_error_ = std::current_exception();
+        }
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++completed_workers_;
+        if (completed_workers_ == static_cast<int>(workers_.size())) {
+          done_cv_.notify_one();
+        }
+      }
+    }
+  }
+
+  int max_threads_ = 1;
+  std::vector<std::thread> workers_;
+  std::mutex mutex_;
+  std::condition_variable start_cv_;
+  std::condition_variable done_cv_;
+  std::function<void(int, int, int)> task_;
+  std::uint64_t generation_ = 0;
+  int n_ = 0;
+  int active_threads_ = 1;
+  int chunk_ = 0;
+  int completed_workers_ = 0;
+  std::exception_ptr worker_error_;
+  bool stop_ = false;
+};
+
+thread_local ParallelExecutor* active_parallel_executor = nullptr;
+
+class ParallelExecutorScope {
+ public:
+  explicit ParallelExecutorScope(ParallelExecutor* executor) :
+    previous_(active_parallel_executor) {
+    active_parallel_executor = executor;
+  }
+
+  ~ParallelExecutorScope() {
+    active_parallel_executor = previous_;
+  }
+
+ private:
+  ParallelExecutor* previous_;
+};
+
 template <typename Function>
 void parallel_for(const int n, const int n_threads, Function fn) {
   if (n_threads <= 1 || n < 2) {
     fn(0, n, 0);
+    return;
+  }
+  if (active_parallel_executor != nullptr &&
+      n_threads <= active_parallel_executor->max_threads()) {
+    active_parallel_executor->run(n, n_threads, fn);
     return;
   }
   std::vector<std::thread> workers;
@@ -801,19 +958,67 @@ void compute_gradient_pair_symmetric(const SparseProbabilities& p,
 }
 
 template <typename T>
-void fft_1d_t(std::complex<T>* a, const int n, const bool inverse) {
-  for (int i = 1, j = 0; i < n; ++i) {
-    int bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
+struct FftPlanT {
+  int size = 0;
+  int thread_capacity = 0;
+  std::vector<int> bit_reverse;
+  std::vector<std::complex<T>> forward_roots;
+  std::vector<std::complex<T>> inverse_roots;
+  std::vector<std::complex<T>> column_scratch;
+
+  void ensure(const int requested_size, const int requested_threads) {
+    const int threads = std::max(1, requested_threads);
+    if (size == requested_size) {
+      if (thread_capacity < threads) {
+        thread_capacity = threads;
+        column_scratch.resize(static_cast<std::size_t>(size) * thread_capacity);
+      }
+      return;
+    }
+    size = requested_size;
+    thread_capacity = threads;
+    bit_reverse.resize(static_cast<std::size_t>(size));
+    int bits = 0;
+    for (int value = size; value > 1; value >>= 1) ++bits;
+    for (int i = 0; i < size; ++i) {
+      unsigned int value = static_cast<unsigned int>(i);
+      unsigned int reversed = 0u;
+      for (int bit = 0; bit < bits; ++bit) {
+        reversed = (reversed << 1u) | (value & 1u);
+        value >>= 1u;
+      }
+      bit_reverse[static_cast<std::size_t>(i)] = static_cast<int>(reversed);
+    }
+
+    forward_roots.clear();
+    inverse_roots.clear();
+    forward_roots.reserve(static_cast<std::size_t>(bits));
+    inverse_roots.reserve(static_cast<std::size_t>(bits));
+    for (int len = 2; len <= size; len <<= 1) {
+      const T angle = static_cast<T>(6.283185307179586476925286766559) /
+        static_cast<T>(len);
+      forward_roots.emplace_back(std::cos(angle), std::sin(angle));
+      inverse_roots.emplace_back(std::cos(-angle), std::sin(-angle));
+    }
+    column_scratch.resize(static_cast<std::size_t>(size) * thread_capacity);
+  }
+};
+
+template <typename T>
+void fft_1d_t(std::complex<T>* a,
+              const int n,
+              const bool inverse,
+              const FftPlanT<T>& plan) {
+  for (int i = 1; i < n; ++i) {
+    const int j = plan.bit_reverse[static_cast<std::size_t>(i)];
     if (i < j) std::swap(a[i], a[j]);
   }
 
-  const T direction = inverse ? static_cast<T>(-1.0) : static_cast<T>(1.0);
-  for (int len = 2; len <= n; len <<= 1) {
-    const T angle = direction * static_cast<T>(6.283185307179586476925286766559) /
-      static_cast<T>(len);
-    const std::complex<T> root(std::cos(angle), std::sin(angle));
+  const std::vector<std::complex<T>>& roots = inverse ?
+    plan.inverse_roots : plan.forward_roots;
+  int stage = 0;
+  for (int len = 2; len <= n; len <<= 1, ++stage) {
+    const std::complex<T> root = roots[static_cast<std::size_t>(stage)];
     for (int i = 0; i < n; i += len) {
       std::complex<T> w(static_cast<T>(1.0), static_cast<T>(0.0));
       const int half = len >> 1;
@@ -837,24 +1042,26 @@ template <typename T>
 void fft_2d_t(std::vector<std::complex<T>>& values,
               const int size,
               const bool inverse,
-              const int n_threads) {
+              const int n_threads,
+              FftPlanT<T>& plan) {
   parallel_for(size, n_threads, [&](const int begin, const int end, const int) {
     for (int row = begin; row < end; ++row) {
-      fft_1d_t<T>(values.data() + static_cast<std::size_t>(row) * size, size, inverse);
+      fft_1d_t<T>(values.data() + static_cast<std::size_t>(row) * size, size, inverse, plan);
     }
   });
 
-  parallel_for(size, n_threads, [&](const int begin, const int end, const int) {
-    std::vector<std::complex<T>> column(static_cast<std::size_t>(size));
+  parallel_for(size, n_threads, [&](const int begin, const int end, const int thread_id) {
+    std::complex<T>* column = plan.column_scratch.data() +
+      static_cast<std::size_t>(thread_id) * size;
     for (int col = begin; col < end; ++col) {
       for (int row = 0; row < size; ++row) {
-        column[static_cast<std::size_t>(row)] =
+        column[row] =
           values[static_cast<std::size_t>(row) * size + col];
       }
-      fft_1d_t<T>(column.data(), size, inverse);
+      fft_1d_t<T>(column, size, inverse, plan);
       for (int row = 0; row < size; ++row) {
         values[static_cast<std::size_t>(row) * size + col] =
-          column[static_cast<std::size_t>(row)];
+          column[row];
       }
     }
   });
@@ -912,6 +1119,7 @@ struct FftGridWorkspaceT {
   std::vector<std::complex<T>> kernel_q;
   std::vector<std::complex<T>> kernel_q2;
   std::vector<std::complex<T>> work;
+  FftPlanT<T> fft_plan;
 
   void ensure(const int requested_grid_size,
               const int requested_n,
@@ -938,6 +1146,7 @@ struct FftGridWorkspaceT {
     kernel_q.resize(fft_total);
     kernel_q2.resize(fft_total);
     work.resize(fft_total);
+    fft_plan.ensure(fft_size, n_threads);
   }
 
   void clear_grid_mass() {
@@ -951,28 +1160,38 @@ template <typename T>
 void copy_grid_to_fft_t(const std::vector<T>& grid,
                         const int grid_size,
                         const int fft_size,
-                        std::vector<std::complex<T>>& out) {
-  std::fill(out.begin(), out.end(), std::complex<T>(static_cast<T>(0.0), static_cast<T>(0.0)));
-  for (int y_cell = 0; y_cell < grid_size; ++y_cell) {
-    for (int x_cell = 0; x_cell < grid_size; ++x_cell) {
-      out[static_cast<std::size_t>(y_cell) * fft_size + x_cell] =
-        grid[static_cast<std::size_t>(y_cell) * grid_size + x_cell];
+                        std::vector<std::complex<T>>& out,
+                        const int n_threads) {
+  parallel_for(fft_size, n_threads, [&](const int begin, const int end, const int) {
+    const std::complex<T> zero(static_cast<T>(0.0), static_cast<T>(0.0));
+    for (int y_cell = begin; y_cell < end; ++y_cell) {
+      std::complex<T>* output_row = out.data() + static_cast<std::size_t>(y_cell) * fft_size;
+      std::fill(output_row, output_row + fft_size, zero);
+      if (y_cell < grid_size) {
+        const T* input_row = grid.data() + static_cast<std::size_t>(y_cell) * grid_size;
+        for (int x_cell = 0; x_cell < grid_size; ++x_cell) {
+          output_row[x_cell] = input_row[x_cell];
+        }
+      }
     }
-  }
+  });
 }
 
 template <typename T>
 void copy_fft_to_grid_t(const std::vector<std::complex<T>>& values,
                         const int grid_size,
                         const int fft_size,
-                        std::vector<T>& out) {
+                        std::vector<T>& out,
+                        const int n_threads) {
   out.resize(static_cast<std::size_t>(grid_size) * grid_size);
-  for (int y_cell = 0; y_cell < grid_size; ++y_cell) {
-    for (int x_cell = 0; x_cell < grid_size; ++x_cell) {
-      out[static_cast<std::size_t>(y_cell) * grid_size + x_cell] =
-        values[static_cast<std::size_t>(y_cell) * fft_size + x_cell].real();
+  parallel_for(grid_size, n_threads, [&](const int begin, const int end, const int) {
+    for (int y_cell = begin; y_cell < end; ++y_cell) {
+      for (int x_cell = 0; x_cell < grid_size; ++x_cell) {
+        out[static_cast<std::size_t>(y_cell) * grid_size + x_cell] =
+          values[static_cast<std::size_t>(y_cell) * fft_size + x_cell].real();
+      }
     }
-  }
+  });
 }
 
 template <typename T>
@@ -986,39 +1205,51 @@ void compute_fft_grid_convolution_workspace_t(const std::vector<T>& mass,
   const int fft_size = grid_size << 1;
   const std::size_t fft_total = static_cast<std::size_t>(fft_size) * fft_size;
 
-  copy_grid_to_fft_t<T>(mass, grid_size, fft_size, ws.mass_fft);
-  copy_grid_to_fft_t<T>(mass_x, grid_size, fft_size, ws.mass_x_fft);
-  copy_grid_to_fft_t<T>(mass_y, grid_size, fft_size, ws.mass_y_fft);
-  std::fill(ws.kernel_q.begin(), ws.kernel_q.end(), std::complex<T>(static_cast<T>(0.0), static_cast<T>(0.0)));
-  std::fill(ws.kernel_q2.begin(), ws.kernel_q2.end(), std::complex<T>(static_cast<T>(0.0), static_cast<T>(0.0)));
+  copy_grid_to_fft_t<T>(mass, grid_size, fft_size, ws.mass_fft, n_threads);
+  copy_grid_to_fft_t<T>(mass_x, grid_size, fft_size, ws.mass_x_fft, n_threads);
+  copy_grid_to_fft_t<T>(mass_y, grid_size, fft_size, ws.mass_y_fft, n_threads);
+  parallel_for(static_cast<int>(fft_total), n_threads, [&](const int begin, const int end, const int) {
+    const std::complex<T> zero(static_cast<T>(0.0), static_cast<T>(0.0));
+    std::fill(ws.kernel_q.begin() + begin, ws.kernel_q.begin() + end, zero);
+    std::fill(ws.kernel_q2.begin() + begin, ws.kernel_q2.begin() + end, zero);
+  });
 
-  for (int dy = -(grid_size - 1); dy <= grid_size - 1; ++dy) {
-    const int yy = dy < 0 ? dy + fft_size : dy;
-    const T y_offset = static_cast<T>(dy) * spacing;
-    for (int dx = -(grid_size - 1); dx <= grid_size - 1; ++dx) {
-      const int xx = dx < 0 ? dx + fft_size : dx;
-      const T x_offset = static_cast<T>(dx) * spacing;
-      const T d2 = x_offset * x_offset + y_offset * y_offset;
-      const T q = static_cast<T>(1.0) / (static_cast<T>(1.0) + d2);
-      const T q2 = q * q;
-      const std::size_t pos = static_cast<std::size_t>(yy) * fft_size + xx;
-      ws.kernel_q[pos] = q;
-      ws.kernel_q2[pos] = q2;
+  const int kernel_rows = 2 * grid_size - 1;
+  parallel_for(kernel_rows, n_threads, [&](const int begin, const int end, const int) {
+    for (int row = begin; row < end; ++row) {
+      const int dy = row - (grid_size - 1);
+      const int yy = dy < 0 ? dy + fft_size : dy;
+      const T y_offset = static_cast<T>(dy) * spacing;
+      for (int dx = -(grid_size - 1); dx <= grid_size - 1; ++dx) {
+        const int xx = dx < 0 ? dx + fft_size : dx;
+        const T x_offset = static_cast<T>(dx) * spacing;
+        const T d2 = x_offset * x_offset + y_offset * y_offset;
+        const T q = static_cast<T>(1.0) / (static_cast<T>(1.0) + d2);
+        const T q2 = q * q;
+        const std::size_t pos = static_cast<std::size_t>(yy) * fft_size + xx;
+        ws.kernel_q[pos] = q;
+        ws.kernel_q2[pos] = q2;
+      }
     }
-  }
+  });
 
-  fft_2d_t<T>(ws.mass_fft, fft_size, false, n_threads);
-  fft_2d_t<T>(ws.mass_x_fft, fft_size, false, n_threads);
-  fft_2d_t<T>(ws.mass_y_fft, fft_size, false, n_threads);
-  fft_2d_t<T>(ws.kernel_q, fft_size, false, n_threads);
-  fft_2d_t<T>(ws.kernel_q2, fft_size, false, n_threads);
+  fft_2d_t<T>(ws.mass_fft, fft_size, false, n_threads, ws.fft_plan);
+  fft_2d_t<T>(ws.mass_x_fft, fft_size, false, n_threads, ws.fft_plan);
+  fft_2d_t<T>(ws.mass_y_fft, fft_size, false, n_threads, ws.fft_plan);
+  fft_2d_t<T>(ws.kernel_q, fft_size, false, n_threads, ws.fft_plan);
+  fft_2d_t<T>(ws.kernel_q2, fft_size, false, n_threads, ws.fft_plan);
 
   auto convolve = [&](const std::vector<std::complex<T>>& mass_values,
                       const std::vector<std::complex<T>>& kernel_values,
                       std::vector<T>& out) {
-    for (std::size_t i = 0; i < fft_total; ++i) ws.work[i] = mass_values[i] * kernel_values[i];
-    fft_2d_t<T>(ws.work, fft_size, true, n_threads);
-    copy_fft_to_grid_t<T>(ws.work, grid_size, fft_size, out);
+    parallel_for(static_cast<int>(fft_total), n_threads, [&](const int begin, const int end, const int) {
+      for (int i = begin; i < end; ++i) {
+        ws.work[static_cast<std::size_t>(i)] =
+          mass_values[static_cast<std::size_t>(i)] * kernel_values[static_cast<std::size_t>(i)];
+      }
+    });
+    fft_2d_t<T>(ws.work, fft_size, true, n_threads, ws.fft_plan);
+    copy_fft_to_grid_t<T>(ws.work, grid_size, fft_size, out, n_threads);
   };
 
   convolve(ws.mass_fft, ws.kernel_q, ws.q_grid);
@@ -1972,6 +2203,8 @@ List knn_tsne_opentsne_cpp(IntegerMatrix indices,
   if (theta < 0.0 || theta > 1.0) Rcpp::stop("`theta` must lie in [0, 1].");
 
   const int threads = resolve_threads(n_threads, n);
+  ParallelExecutor parallel_executor(threads);
+  ParallelExecutorScope parallel_scope(&parallel_executor);
   if (verbose) {
     Rcpp::Rcout << "fastEmbedR openTSNE-style t-SNE from KNN: n=" << n
                 << ", k=" << k
@@ -2228,6 +2461,8 @@ List knn_tsne_opentsne_float_cpp(IntegerMatrix indices,
   if (theta < 0.0 || theta > 1.0) Rcpp::stop("`theta` must lie in [0, 1].");
 
   const int threads = resolve_threads(n_threads, n);
+  ParallelExecutor parallel_executor(threads);
+  ParallelExecutorScope parallel_scope(&parallel_executor);
   if (verbose) {
     Rcpp::Rcout << "fastEmbedR openTSNE-style float32 t-SNE from KNN: n=" << n
                 << ", k=" << k
@@ -2487,6 +2722,8 @@ List transform_tsne_cpp(NumericMatrix reference_layout,
   }
 
   const int threads = resolve_threads(n_threads, n_query);
+  ParallelExecutor parallel_executor(threads);
+  ParallelExecutorScope parallel_scope(&parallel_executor);
   if (n_negatives > n_reference) n_negatives = n_reference;
   const bool exact_repulsion = n_reference <= exact_repulsion_threshold ||
     n_negatives >= n_reference;

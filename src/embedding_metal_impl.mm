@@ -5599,7 +5599,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         1,
         metal_env_positive_int("FASTEMBEDR_METAL_OPENTSNE_SYNC_INTERVAL", 32)
       );
-      const int fft_iterations_per_command = 4;
+      const int fft_iterations_per_command = 16;
       std::vector<id<MTLCommandBuffer>> pending_fft_commands;
       id<MTLCommandBuffer> fft_batch_command = nil;
       int fft_batch_iterations = 0;
