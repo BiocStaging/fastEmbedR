@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
 #include <Rcpp.h>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <string>
 #include <thread>
@@ -4116,6 +4118,460 @@ NumericMatrix float_to_numeric_matrix(const std::vector<float>& values,
   return out;
 }
 
+NSUInteger mps_float_stride(const NSUInteger columns) {
+  return [MPSMatrixDescriptor rowBytesForColumns:columns
+                                        dataType:MPSDataTypeFloat32] / sizeof(float);
+}
+
+MPSMatrix* make_mps_float_matrix(id<MTLBuffer> buffer,
+                                 const NSUInteger rows,
+                                 const NSUInteger columns,
+                                 const NSUInteger stride) {
+  MPSMatrixDescriptor* descriptor = [MPSMatrixDescriptor
+    matrixDescriptorWithRows:rows
+                     columns:columns
+                    rowBytes:stride * sizeof(float)
+                    dataType:MPSDataTypeFloat32];
+  return [[MPSMatrix alloc] initWithBuffer:buffer descriptor:descriptor];
+}
+
+void orthonormalize_float_columns(float* values,
+                                  const int rows,
+                                  const int columns,
+                                  const int stride) {
+  constexpr float kMinNorm = 1.0e-12f;
+  for (int column = 0; column < columns; ++column) {
+    for (int reorthogonalize = 0; reorthogonalize < 2; ++reorthogonalize) {
+      for (int previous = 0; previous < column; ++previous) {
+        float projection = 0.0f;
+        for (int row = 0; row < rows; ++row) {
+          projection += values[static_cast<std::size_t>(row) * stride + previous] *
+                        values[static_cast<std::size_t>(row) * stride + column];
+        }
+        for (int row = 0; row < rows; ++row) {
+          values[static_cast<std::size_t>(row) * stride + column] -=
+            projection * values[static_cast<std::size_t>(row) * stride + previous];
+        }
+      }
+    }
+    float norm_squared = 0.0f;
+    for (int row = 0; row < rows; ++row) {
+      const float value = values[static_cast<std::size_t>(row) * stride + column];
+      norm_squared += value * value;
+    }
+    if (!(norm_squared > kMinNorm) || !std::isfinite(norm_squared)) {
+      for (int row = 0; row < rows; ++row) {
+        values[static_cast<std::size_t>(row) * stride + column] =
+          row == (column % rows) ? 1.0f : 0.0f;
+      }
+      for (int previous = 0; previous < column; ++previous) {
+        float projection = 0.0f;
+        for (int row = 0; row < rows; ++row) {
+          projection += values[static_cast<std::size_t>(row) * stride + previous] *
+                        values[static_cast<std::size_t>(row) * stride + column];
+        }
+        for (int row = 0; row < rows; ++row) {
+          values[static_cast<std::size_t>(row) * stride + column] -=
+            projection * values[static_cast<std::size_t>(row) * stride + previous];
+        }
+      }
+      norm_squared = 0.0f;
+      for (int row = 0; row < rows; ++row) {
+        const float value = values[static_cast<std::size_t>(row) * stride + column];
+        norm_squared += value * value;
+      }
+    }
+    const float inverse_norm = 1.0f / std::sqrt(std::max(norm_squared, kMinNorm));
+    for (int row = 0; row < rows; ++row) {
+      values[static_cast<std::size_t>(row) * stride + column] *= inverse_norm;
+    }
+  }
+}
+
+void symmetric_jacobi_float(std::vector<float> matrix,
+                            const int size,
+                            std::vector<float>& eigenvalues,
+                            std::vector<float>& eigenvectors) {
+  eigenvectors.assign(static_cast<std::size_t>(size) * size, 0.0f);
+  for (int i = 0; i < size; ++i) eigenvectors[static_cast<std::size_t>(i) * size + i] = 1.0f;
+
+  const int max_iterations = std::max(64, 40 * size * size);
+  for (int iteration = 0; iteration < max_iterations; ++iteration) {
+    int pivot_row = 0;
+    int pivot_column = 1;
+    float largest = 0.0f;
+    for (int row = 0; row < size; ++row) {
+      for (int column = row + 1; column < size; ++column) {
+        const float value = std::abs(matrix[static_cast<std::size_t>(row) * size + column]);
+        if (value > largest) {
+          largest = value;
+          pivot_row = row;
+          pivot_column = column;
+        }
+      }
+    }
+    if (largest <= 1.0e-6f) break;
+
+    const float app = matrix[static_cast<std::size_t>(pivot_row) * size + pivot_row];
+    const float aqq = matrix[static_cast<std::size_t>(pivot_column) * size + pivot_column];
+    const float apq = matrix[static_cast<std::size_t>(pivot_row) * size + pivot_column];
+    const float angle = 0.5f * std::atan2(2.0f * apq, aqq - app);
+    const float cosine = std::cos(angle);
+    const float sine = std::sin(angle);
+
+    for (int index = 0; index < size; ++index) {
+      if (index == pivot_row || index == pivot_column) continue;
+      const float aip = matrix[static_cast<std::size_t>(index) * size + pivot_row];
+      const float aiq = matrix[static_cast<std::size_t>(index) * size + pivot_column];
+      const float rotated_p = cosine * aip - sine * aiq;
+      const float rotated_q = sine * aip + cosine * aiq;
+      matrix[static_cast<std::size_t>(index) * size + pivot_row] = rotated_p;
+      matrix[static_cast<std::size_t>(pivot_row) * size + index] = rotated_p;
+      matrix[static_cast<std::size_t>(index) * size + pivot_column] = rotated_q;
+      matrix[static_cast<std::size_t>(pivot_column) * size + index] = rotated_q;
+    }
+    matrix[static_cast<std::size_t>(pivot_row) * size + pivot_row] =
+      cosine * cosine * app - 2.0f * sine * cosine * apq + sine * sine * aqq;
+    matrix[static_cast<std::size_t>(pivot_column) * size + pivot_column] =
+      sine * sine * app + 2.0f * sine * cosine * apq + cosine * cosine * aqq;
+    matrix[static_cast<std::size_t>(pivot_row) * size + pivot_column] = 0.0f;
+    matrix[static_cast<std::size_t>(pivot_column) * size + pivot_row] = 0.0f;
+
+    for (int row = 0; row < size; ++row) {
+      const float vip = eigenvectors[static_cast<std::size_t>(row) * size + pivot_row];
+      const float viq = eigenvectors[static_cast<std::size_t>(row) * size + pivot_column];
+      eigenvectors[static_cast<std::size_t>(row) * size + pivot_row] = cosine * vip - sine * viq;
+      eigenvectors[static_cast<std::size_t>(row) * size + pivot_column] = sine * vip + cosine * viq;
+    }
+  }
+
+  std::vector<int> order(size);
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [&](const int left, const int right) {
+    return matrix[static_cast<std::size_t>(left) * size + left] >
+           matrix[static_cast<std::size_t>(right) * size + right];
+  });
+  eigenvalues.resize(size);
+  std::vector<float> sorted_vectors(static_cast<std::size_t>(size) * size);
+  for (int column = 0; column < size; ++column) {
+    const int source = order[column];
+    eigenvalues[column] = matrix[static_cast<std::size_t>(source) * size + source];
+    for (int row = 0; row < size; ++row) {
+      sorted_vectors[static_cast<std::size_t>(row) * size + column] =
+        eigenvectors[static_cast<std::size_t>(row) * size + source];
+    }
+  }
+  eigenvectors.swap(sorted_vectors);
+}
+
+List run_tsvd_pca_metal(SEXP data_sexp,
+                        int n_components,
+                        bool center,
+                        bool scale,
+                        int seed) {
+  using Clock = std::chrono::steady_clock;
+  const auto started = Clock::now();
+  const std::pair<int, int> dims = metal_matrix_dims(data_sexp, "data");
+  const int n = dims.first;
+  const int p = dims.second;
+  const int max_rank = std::min(n - 1, p);
+  n_components = std::min(n_components, max_rank);
+  if (n < 2 || p < 1 || n_components < 1) {
+    Rcpp::stop("Metal TSVD PCA requires at least two rows and one usable component.");
+  }
+  const int block_rank = max_rank <= 64 ? max_rank :
+    std::min(max_rank, std::max(12, n_components + 10));
+  const int power_iterations = 2;
+
+  @autoreleasepool {
+    MetalEmbeddingState& state = metal_embedding_state();
+    const NSUInteger data_stride = mps_float_stride(static_cast<NSUInteger>(n));
+    const NSUInteger basis_stride = mps_float_stride(static_cast<NSUInteger>(block_rank));
+    const NSUInteger score_stride = mps_float_stride(static_cast<NSUInteger>(n_components));
+    const NSUInteger gram_stride = mps_float_stride(static_cast<NSUInteger>(block_rank));
+
+    id<MTLBuffer> data_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(p) * data_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    if (data_buffer == nil) Rcpp::stop("Failed to allocate the Metal PCA input buffer.");
+    float* data_values = static_cast<float*>([data_buffer contents]);
+    std::memset(data_values, 0, static_cast<std::size_t>(p) * data_stride * sizeof(float));
+
+    const bool float_input = metal_is_float32_s4(data_sexp);
+    const int* float_bits = nullptr;
+    const double* double_values = nullptr;
+    if (float_input) {
+      Rcpp::S4 object(data_sexp);
+      IntegerVector payload(object.slot("Data"));
+      float_bits = INTEGER(payload);
+    } else {
+      NumericMatrix numeric(data_sexp);
+      double_values = REAL(numeric);
+    }
+    NumericVector centers(p);
+    NumericVector scales(p, 1.0);
+    for (int column = 0; column < p; ++column) {
+      double sum = 0.0;
+      double sum_squares = 0.0;
+      const std::size_t input_offset = static_cast<std::size_t>(column) * n;
+      for (int row = 0; row < n; ++row) {
+        const std::size_t position = input_offset + row;
+        const float value = float_input ? metal_int_bits_to_float(float_bits[position]) :
+                                          static_cast<float>(double_values[position]);
+        if (!std::isfinite(value)) Rcpp::stop("`data` must contain only finite values.");
+        sum += value;
+        sum_squares += static_cast<double>(value) * value;
+      }
+      const double raw_mean = sum / static_cast<double>(n);
+      const double variance = n > 1 ?
+        std::max(0.0, (sum_squares - sum * raw_mean) / static_cast<double>(n - 1)) : 0.0;
+      const double column_scale = scale && variance > 0.0 ? std::sqrt(variance) : 1.0;
+      const double column_center = center ? raw_mean : 0.0;
+      centers[column] = column_center;
+      scales[column] = column_scale;
+      float* destination = data_values + static_cast<std::size_t>(column) * data_stride;
+      for (int row = 0; row < n; ++row) {
+        const std::size_t position = input_offset + row;
+        const float value = float_input ? metal_int_bits_to_float(float_bits[position]) :
+                                          static_cast<float>(double_values[position]);
+        destination[row] = static_cast<float>((value - column_center) / column_scale);
+      }
+    }
+    const auto converted = Clock::now();
+
+    id<MTLBuffer> basis_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(p) * basis_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> next_basis_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(p) * basis_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> projected_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(n) * basis_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> gram_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(block_rank) * gram_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    if (basis_buffer == nil || next_basis_buffer == nil || projected_buffer == nil || gram_buffer == nil) {
+      Rcpp::stop("Failed to allocate Metal TSVD work buffers.");
+    }
+    std::memset([basis_buffer contents], 0, static_cast<std::size_t>(p) * basis_stride * sizeof(float));
+    std::memset([next_basis_buffer contents], 0, static_cast<std::size_t>(p) * basis_stride * sizeof(float));
+    std::memset([projected_buffer contents], 0, static_cast<std::size_t>(n) * basis_stride * sizeof(float));
+    std::memset([gram_buffer contents], 0, static_cast<std::size_t>(block_rank) * gram_stride * sizeof(float));
+
+    float* basis_values = static_cast<float*>([basis_buffer contents]);
+    std::mt19937 random(static_cast<std::uint32_t>(seed));
+    std::normal_distribution<float> normal(0.0f, 1.0f);
+    for (int row = 0; row < p; ++row) {
+      for (int column = 0; column < block_rank; ++column) {
+        basis_values[static_cast<std::size_t>(row) * basis_stride + column] = normal(random);
+      }
+    }
+    orthonormalize_float_columns(basis_values, p, block_rank, static_cast<int>(basis_stride));
+
+    MPSMatrix* data_matrix = make_mps_float_matrix(
+      data_buffer, static_cast<NSUInteger>(p), static_cast<NSUInteger>(n), data_stride
+    );
+    MPSMatrix* basis_matrix = make_mps_float_matrix(
+      basis_buffer, static_cast<NSUInteger>(p), static_cast<NSUInteger>(block_rank), basis_stride
+    );
+    MPSMatrix* next_basis_matrix = make_mps_float_matrix(
+      next_basis_buffer, static_cast<NSUInteger>(p), static_cast<NSUInteger>(block_rank), basis_stride
+    );
+    MPSMatrix* projected_matrix = make_mps_float_matrix(
+      projected_buffer, static_cast<NSUInteger>(n), static_cast<NSUInteger>(block_rank), basis_stride
+    );
+    MPSMatrix* gram_matrix = make_mps_float_matrix(
+      gram_buffer, static_cast<NSUInteger>(block_rank), static_cast<NSUInteger>(block_rank), gram_stride
+    );
+
+    MPSMatrixMultiplication* project = [[MPSMatrixMultiplication alloc]
+      initWithDevice:state.device
+      transposeLeft:YES
+      transposeRight:NO
+      resultRows:static_cast<NSUInteger>(n)
+      resultColumns:static_cast<NSUInteger>(block_rank)
+      interiorColumns:static_cast<NSUInteger>(p)
+      alpha:1.0
+      beta:0.0];
+    MPSMatrixMultiplication* back_project = [[MPSMatrixMultiplication alloc]
+      initWithDevice:state.device
+      transposeLeft:NO
+      transposeRight:NO
+      resultRows:static_cast<NSUInteger>(p)
+      resultColumns:static_cast<NSUInteger>(block_rank)
+      interiorColumns:static_cast<NSUInteger>(n)
+      alpha:1.0
+      beta:0.0];
+    MPSMatrixMultiplication* gram_product = [[MPSMatrixMultiplication alloc]
+      initWithDevice:state.device
+      transposeLeft:YES
+      transposeRight:NO
+      resultRows:static_cast<NSUInteger>(block_rank)
+      resultColumns:static_cast<NSUInteger>(block_rank)
+      interiorColumns:static_cast<NSUInteger>(n)
+      alpha:1.0
+      beta:0.0];
+
+    for (int iteration = 0; iteration < power_iterations; ++iteration) {
+      id<MTLCommandBuffer> command = [state.queue commandBuffer];
+      [project encodeToCommandBuffer:command
+                          leftMatrix:data_matrix
+                         rightMatrix:basis_matrix
+                        resultMatrix:projected_matrix];
+      [back_project encodeToCommandBuffer:command
+                               leftMatrix:data_matrix
+                              rightMatrix:projected_matrix
+                             resultMatrix:next_basis_matrix];
+      wait_for_command(command, "Metal TSVD subspace iteration");
+      float* next_values = static_cast<float*>([next_basis_buffer contents]);
+      orthonormalize_float_columns(next_values, p, block_rank, static_cast<int>(basis_stride));
+      std::swap(basis_buffer, next_basis_buffer);
+      std::swap(basis_matrix, next_basis_matrix);
+    }
+
+    id<MTLCommandBuffer> gram_command = [state.queue commandBuffer];
+    [project encodeToCommandBuffer:gram_command
+                        leftMatrix:data_matrix
+                       rightMatrix:basis_matrix
+                      resultMatrix:projected_matrix];
+    [gram_product encodeToCommandBuffer:gram_command
+                             leftMatrix:projected_matrix
+                            rightMatrix:projected_matrix
+                           resultMatrix:gram_matrix];
+    wait_for_command(gram_command, "Metal TSVD Rayleigh projection");
+    const auto subspace_done = Clock::now();
+
+    const float* gram_values = static_cast<const float*>([gram_buffer contents]);
+    std::vector<float> gram(static_cast<std::size_t>(block_rank) * block_rank);
+    for (int row = 0; row < block_rank; ++row) {
+      for (int column = 0; column < block_rank; ++column) {
+        const float left = gram_values[static_cast<std::size_t>(row) * gram_stride + column];
+        const float right = gram_values[static_cast<std::size_t>(column) * gram_stride + row];
+        gram[static_cast<std::size_t>(row) * block_rank + column] = 0.5f * (left + right);
+      }
+    }
+    std::vector<float> eigenvalues;
+    std::vector<float> eigenvectors;
+    symmetric_jacobi_float(gram, block_rank, eigenvalues, eigenvectors);
+
+    const NSUInteger loading_stride = mps_float_stride(static_cast<NSUInteger>(n_components));
+    id<MTLBuffer> loading_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(p) * loading_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> score_buffer = [state.device
+      newBufferWithLength:static_cast<std::size_t>(n) * score_stride * sizeof(float)
+                 options:MTLResourceStorageModeShared];
+    if (loading_buffer == nil || score_buffer == nil) {
+      Rcpp::stop("Failed to allocate final Metal PCA buffers.");
+    }
+    std::memset([loading_buffer contents], 0, static_cast<std::size_t>(p) * loading_stride * sizeof(float));
+    std::memset([score_buffer contents], 0, static_cast<std::size_t>(n) * score_stride * sizeof(float));
+    const float* final_basis = static_cast<const float*>([basis_buffer contents]);
+    float* loading_values = static_cast<float*>([loading_buffer contents]);
+    for (int component = 0; component < n_components; ++component) {
+      for (int row = 0; row < p; ++row) {
+        float value = 0.0f;
+        for (int column = 0; column < block_rank; ++column) {
+          value += final_basis[static_cast<std::size_t>(row) * basis_stride + column] *
+                   eigenvectors[static_cast<std::size_t>(column) * block_rank + component];
+        }
+        loading_values[static_cast<std::size_t>(row) * loading_stride + component] = value;
+      }
+      int pivot = 0;
+      float largest = 0.0f;
+      for (int row = 0; row < p; ++row) {
+        const float magnitude = std::abs(
+          loading_values[static_cast<std::size_t>(row) * loading_stride + component]
+        );
+        if (magnitude > largest) { largest = magnitude; pivot = row; }
+      }
+      if (loading_values[static_cast<std::size_t>(pivot) * loading_stride + component] < 0.0f) {
+        for (int row = 0; row < p; ++row) {
+          loading_values[static_cast<std::size_t>(row) * loading_stride + component] *= -1.0f;
+        }
+      }
+    }
+    MPSMatrix* loading_matrix = make_mps_float_matrix(
+      loading_buffer, static_cast<NSUInteger>(p), static_cast<NSUInteger>(n_components), loading_stride
+    );
+    MPSMatrix* score_matrix = make_mps_float_matrix(
+      score_buffer, static_cast<NSUInteger>(n), static_cast<NSUInteger>(n_components), score_stride
+    );
+    MPSMatrixMultiplication* final_projection = [[MPSMatrixMultiplication alloc]
+      initWithDevice:state.device
+      transposeLeft:YES
+      transposeRight:NO
+      resultRows:static_cast<NSUInteger>(n)
+      resultColumns:static_cast<NSUInteger>(n_components)
+      interiorColumns:static_cast<NSUInteger>(p)
+      alpha:1.0
+      beta:0.0];
+    id<MTLCommandBuffer> score_command = [state.queue commandBuffer];
+    [final_projection encodeToCommandBuffer:score_command
+                                  leftMatrix:data_matrix
+                                 rightMatrix:loading_matrix
+                                resultMatrix:score_matrix];
+    wait_for_command(score_command, "Metal TSVD score projection");
+    const auto scores_done = Clock::now();
+
+    NumericMatrix scores(n, n_components);
+    NumericMatrix loadings(p, n_components);
+    NumericVector singular_values(n_components);
+    const float* score_values = static_cast<const float*>([score_buffer contents]);
+    for (int component = 0; component < n_components; ++component) {
+      singular_values[component] = std::sqrt(std::max(0.0f, eigenvalues[component]));
+      for (int row = 0; row < n; ++row) {
+        scores(row, component) = score_values[static_cast<std::size_t>(row) * score_stride + component];
+      }
+      for (int row = 0; row < p; ++row) {
+        loadings(row, component) = loading_values[static_cast<std::size_t>(row) * loading_stride + component];
+      }
+    }
+    const auto returned = Clock::now();
+
+    [final_projection release];
+    [score_matrix release];
+    [loading_matrix release];
+    [gram_product release];
+    [back_project release];
+    [project release];
+    [gram_matrix release];
+    [projected_matrix release];
+    [next_basis_matrix release];
+    [basis_matrix release];
+    [data_matrix release];
+    [score_buffer release];
+    [loading_buffer release];
+    [gram_buffer release];
+    [projected_buffer release];
+    [next_basis_buffer release];
+    [basis_buffer release];
+    [data_buffer release];
+
+    return List::create(
+      Rcpp::Named("scores") = scores,
+      Rcpp::Named("loadings") = loadings,
+      Rcpp::Named("singular_values") = singular_values,
+      Rcpp::Named("center") = centers,
+      Rcpp::Named("scale") = scales,
+      Rcpp::Named("backend") = "metal_mps_tsvd",
+      Rcpp::Named("method") = "metal_mps_tsvd",
+      Rcpp::Named("precision") = "float32",
+      Rcpp::Named("oversample") = block_rank - n_components,
+      Rcpp::Named("power") = power_iterations,
+      Rcpp::Named("seed") = seed,
+      Rcpp::Named("timing") = NumericVector::create(
+        Rcpp::Named("convert_center_upload") = std::chrono::duration<double>(converted - started).count(),
+        Rcpp::Named("subspace") = std::chrono::duration<double>(subspace_done - converted).count(),
+        Rcpp::Named("scores") = std::chrono::duration<double>(scores_done - subspace_done).count(),
+        Rcpp::Named("return") = std::chrono::duration<double>(returned - scores_done).count(),
+        Rcpp::Named("total") = std::chrono::duration<double>(returned - started).count()
+      )
+    );
+  }
+}
+
 NumericMatrix run_rsvd_multiply_metal(NumericMatrix left,
                                       NumericMatrix right,
                                       bool transpose_left) {
@@ -4569,6 +5025,14 @@ NumericMatrix rsvd_multiply_metal_impl(NumericMatrix left,
                                        NumericMatrix right,
                                        bool transpose_left) {
   return run_rsvd_multiply_metal(left, right, transpose_left);
+}
+
+List pca_tsvd_metal_impl(SEXP data,
+                         int n_components,
+                         bool center,
+                         bool scale,
+                         int seed) {
+  return run_tsvd_pca_metal(data, n_components, center, scale, seed);
 }
 
 bool embedding_metal_available_impl() {
@@ -5135,7 +5599,10 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         1,
         metal_env_positive_int("FASTEMBEDR_METAL_OPENTSNE_SYNC_INTERVAL", 32)
       );
+      const int fft_iterations_per_command = 4;
       std::vector<id<MTLCommandBuffer>> pending_fft_commands;
+      id<MTLCommandBuffer> fft_batch_command = nil;
+      int fft_batch_iterations = 0;
       auto flush_pending_fft_commands = [&](const char* context) {
         for (id<MTLCommandBuffer> command_buffer : pending_fft_commands) {
           [command_buffer waitUntilCompleted];
@@ -5662,7 +6129,11 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
           continue;
         }
 
-        id<MTLCommandBuffer> fft_command = [state.queue commandBuffer];
+        if (fft_batch_command == nil) {
+          fft_batch_command = [state.queue commandBuffer];
+          fft_batch_iterations = 0;
+        }
+        id<MTLCommandBuffer> fft_command = fft_batch_command;
         {
           id<MTLComputeCommandEncoder> encoder = [fft_command computeCommandEncoder];
           [encoder setComputePipelineState:state.opentsne_fft_layout_stats_blocks_pipeline];
@@ -5828,19 +6299,29 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
             threadsPerThreadgroup:MTLSizeMake(threads_center, 1, 1)];
           [center_encoder endEncoding];
         }
-        [fft_command commit];
         const bool defer_fft_sync = !record_costs && !metal_auto_kld_stop;
-        if (defer_fft_sync) {
-          [fft_command retain];
-          pending_fft_commands.push_back(fft_command);
-          if (static_cast<int>(pending_fft_commands.size()) >= fft_sync_interval) {
-            flush_pending_fft_commands("batched synchronization");
+        ++fft_batch_iterations;
+        const int command_iteration_limit = defer_fft_sync ? fft_iterations_per_command : 1;
+        const bool finish_command =
+          fft_batch_iterations >= command_iteration_limit ||
+          iter + 1 >= target_total_iter ||
+          iter + 1 >= requested_total_iter;
+        if (finish_command) {
+          [fft_command commit];
+          if (defer_fft_sync) {
+            [fft_command retain];
+            pending_fft_commands.push_back(fft_command);
+            if (static_cast<int>(pending_fft_commands.size()) >= fft_sync_interval) {
+              flush_pending_fft_commands("batched synchronization");
+            }
+          } else {
+            [fft_command waitUntilCompleted];
+            if (fft_command.status == MTLCommandBufferStatusError) {
+              Rcpp::stop("Metal openTSNE FFT-grid command failed: %s", ns_error_message(fft_command.error).c_str());
+            }
           }
-        } else {
-          [fft_command waitUntilCompleted];
-          if (fft_command.status == MTLCommandBufferStatusError) {
-            Rcpp::stop("Metal openTSNE FFT-grid command failed: %s", ns_error_message(fft_command.error).c_str());
-          }
+          fft_batch_command = nil;
+          fft_batch_iterations = 0;
         }
         std::swap(current_buffer, next_buffer);
         if (in_early) {
@@ -6002,6 +6483,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         Rcpp::Named("repulsion") = use_mpsgraph_convolution ?
           "fft_grid_mpsgraph_metal" : "fft_grid_metal",
         Rcpp::Named("probabilities") = "symmetric_sparse_knn_cpu_prepared_for_metal",
+        Rcpp::Named("precision") = "float32",
         Rcpp::Named("n_threads") = NA_INTEGER,
 	        Rcpp::Named("learning_rate") = learning_rate_auto ? NA_REAL : learning_rate,
 	        Rcpp::Named("learning_rate_early") = static_cast<double>(n) / std::max(early_exaggeration, std::numeric_limits<double>::min()),
@@ -6134,6 +6616,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       Rcpp::Named("optimizer") = "opentsne_exact_sparse_native_metal",
       Rcpp::Named("repulsion") = "exact_metal",
       Rcpp::Named("probabilities") = "symmetric_sparse_knn_cpu_prepared_for_metal",
+      Rcpp::Named("precision") = "float32",
       Rcpp::Named("n_threads") = NA_INTEGER,
       Rcpp::Named("learning_rate") = learning_rate_auto ? NA_REAL : learning_rate,
       Rcpp::Named("learning_rate_early") = static_cast<double>(n) / std::max(early_exaggeration, std::numeric_limits<double>::min()),
@@ -6994,6 +7477,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
   @autoreleasepool {
     MetalEmbeddingState& state = metal_embedding_state();
 
+    const bool clean_sampler = sampler_mode == 1;
     std::vector<std::int32_t> neighbors;
     std::vector<float> csr_weight_values = metal_copy_float_vector(csr_weights, "CSR weights");
     std::vector<float> weights;
@@ -7015,10 +7499,13 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
     const int k = static_cast<int>(neighbors.size() / static_cast<std::size_t>(n));
     std::vector<float> current = init_to_float_2d(init);
     const auto ab = find_ab_params(1.0, min_dist);
-    std::vector<float> epochs_per_sample(weights.size(), 0.0f);
-    for (std::size_t i = 0; i < weights.size(); ++i) {
-      const float w = weights[i];
-      epochs_per_sample[i] = w > 0.0f ? max_weight / std::max(w, 1.0e-6f) : 0.0f;
+    std::vector<float> epochs_per_sample;
+    if (!clean_sampler) {
+      epochs_per_sample.resize(weights.size(), 0.0f);
+      for (std::size_t i = 0; i < weights.size(); ++i) {
+        const float w = weights[i];
+        epochs_per_sample[i] = w > 0.0f ? max_weight / std::max(w, 1.0e-6f) : 0.0f;
+      }
     }
 
     EmbedParams params{
@@ -7051,18 +7538,19 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
     id<MTLBuffer> weights_buffer = [state.device newBufferWithBytes:weights.data()
                                                              length:weights.size() * sizeof(float)
                                                             options:MTLResourceStorageModeShared];
-    id<MTLBuffer> epochs_buffer = [state.device newBufferWithBytes:epochs_per_sample.data()
-                                                            length:epochs_per_sample.size() * sizeof(float)
-                                                           options:MTLResourceStorageModeShared];
+    id<MTLBuffer> epochs_buffer = clean_sampler ? nil :
+      [state.device newBufferWithBytes:epochs_per_sample.data()
+                                length:epochs_per_sample.size() * sizeof(float)
+                               options:MTLResourceStorageModeShared];
+    id<MTLBuffer> schedule_buffer = clean_sampler ? weights_buffer : epochs_buffer;
     id<MTLBuffer> params_buffer = [state.device newBufferWithBytes:&params
                                                             length:sizeof(EmbedParams)
                                                            options:MTLResourceStorageModeShared];
     if (fixed_layout_buffer == nil || neighbors_buffer == nil ||
-        weights_buffer == nil || epochs_buffer == nil || params_buffer == nil) {
+        weights_buffer == nil || schedule_buffer == nil || params_buffer == nil) {
       Rcpp::stop("Failed to allocate Metal CSR embedding buffers.");
     }
 
-    const bool clean_sampler = sampler_mode == 1;
     const char* metal_optimizer = clean_sampler ? "clean_atomic_inplace" : "atomic_inplace";
     const MTLSize grid_size = MTLSizeMake(static_cast<NSUInteger>(n), 1, 1);
     const std::uint32_t epochs_per_command = kMetalEmbeddingEpochsPerCommand;
@@ -7083,7 +7571,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
         [encoder setBuffer:fixed_layout_buffer offset:0 atIndex:0];
         [encoder setBuffer:neighbors_buffer offset:0 atIndex:1];
         [encoder setBuffer:weights_buffer offset:0 atIndex:2];
-        [encoder setBuffer:epochs_buffer offset:0 atIndex:3];
+        [encoder setBuffer:schedule_buffer offset:0 atIndex:3];
         [encoder setBuffer:params_buffer offset:0 atIndex:4];
         [encoder setBytes:&epoch length:sizeof(std::uint32_t) atIndex:5];
         [encoder dispatchThreads:grid_size threadsPerThreadgroup:embed_threadgroup_size];
@@ -7107,7 +7595,8 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
       out(i, 0) = static_cast<double>(current[static_cast<std::size_t>(i) * 2u]);
       out(i, 1) = static_cast<double>(current[static_cast<std::size_t>(i) * 2u + 1u]);
     }
-    out.attr("metal_epoch_schedule") = "precomputed_epochs_per_sample";
+    out.attr("metal_epoch_schedule") = clean_sampler ?
+      "bernoulli_weight_sampling" : "precomputed_epochs_per_sample";
     out.attr("metal_optimizer") = metal_optimizer;
     out.attr("metal_graph_input") = "cpu_csr_fuzzy_graph";
     out.attr("metal_csr_width") = k;
@@ -7115,7 +7604,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
     [fixed_layout_buffer release];
     [neighbors_buffer release];
     [weights_buffer release];
-    [epochs_buffer release];
+    if (epochs_buffer != nil) [epochs_buffer release];
     [params_buffer release];
     return out;
   }

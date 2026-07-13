@@ -1,6 +1,5 @@
-if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
-
 test_that("transform_tsne places query rows from supplied reference neighbours", {
+  skip_if_not_installed("faissR")
   set.seed(401)
   x <- matrix(rnorm(70L * 5L), 70L, 5L)
   ref <- x[1:50, , drop = FALSE]
@@ -130,6 +129,7 @@ test_that("transform_tsne CPU batching preserves fixed-reference results", {
 })
 
 test_that("transform_tsne reports GPU transform backends honestly", {
+  skip_if_not_installed("faissR")
   set.seed(403)
   x <- matrix(rnorm(60L * 4L), 60L, 4L)
   ref <- x[1:42, , drop = FALSE]
@@ -196,6 +196,7 @@ test_that("transform_tsne reports GPU transform backends honestly", {
 })
 
 test_that("landmark_tsne returns a compact full embedding object", {
+  skip_if_not_installed("faissR")
   set.seed(402)
   x <- rbind(
     matrix(rnorm(60L, 0, 0.25), 20L, 3L),
@@ -302,6 +303,7 @@ test_that("native affine landmark projection returns finite local placements", {
 })
 
 test_that("landmark_tsne can use projection-specific approximate KNN", {
+  skip_if_not_installed("faissR")
   old <- options(
     fastEmbedR.landmark_projection = "auto",
     fastEmbedR.landmark_projection_min_rows = 1L,
@@ -340,6 +342,7 @@ test_that("landmark_tsne can use projection-specific approximate KNN", {
 })
 
 test_that("landmark_tsne uses fused Metal projection when requested", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
   old_fused <- getOption("fastEmbedR.landmark_projection_fused", NULL)
@@ -383,6 +386,7 @@ test_that("landmark_tsne uses fused Metal projection when requested", {
 })
 
 test_that("landmark_tsne keeps Metal projection and transform native when intermediates are not requested", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
 

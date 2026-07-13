@@ -338,20 +338,48 @@ Ideas reviewed:
 - Maintaining package-local optimizer code rather than adapting GPL-only
   implementation details from benchmark reference packages.
 
+## FAISS And Faiss-mlx Nearest-Neighbour Search
+
+- FAISS repository: <https://github.com/facebookresearch/faiss>
+- FAISS source: release 1.14.3, commit
+  `0ca9df4792b173d573044ee14ca0704780176e82`
+- FAISS license: MIT
+- Faiss-mlx repository: <https://github.com/MLXPorts/Faiss-mlx>
+- Faiss-mlx source commit: `d092af559375144fc719cd88a10e414f92c625fa`
+- Faiss-mlx license: Apache-2.0
+- Current use in `fastEmbedR`: package-native float32 CPU HNSW distilled from
+  FAISS's HNSW organization, plus native Metal exact and IVF-Flat search. The
+  Metal fused list-scan/top-k structure was informed by FAISS and Faiss-mlx.
+  The package does not link the FAISS or MLX libraries for these CPU/Metal
+  paths.
+
+Implemented locations:
+
+- `src/native_knn_hnsw.cpp`: compact hierarchical graph construction,
+  diversity pruning, reciprocal links, and parallel query search.
+- `src/native_knn_metal_impl.mm`: 128-dimensional signed coarse projection,
+  four-pass Metal centroid assignment/update, adaptive 288/384/512-candidate
+  shortlist construction, exact full-dimensional reranking, four-stratum
+  pilot validation, and recall-aware `nprobe` selection.
+- `inst/LICENSES/`: full upstream licenses, copyright notices, and pinned
+  provenance.
+
 ## RAPIDS cuML / cuVS
 
 - cuML repository: <https://github.com/rapidsai/cuml>
 - cuVS repository: <https://github.com/rapidsai/cuvs>
 - License: Apache-2.0
-- Current use in `fastEmbedR`: cuVS is an optional external KNN backend. cuML
-  and cuVS UMAP material were studied as design references for GPU-resident
-  KNN/graph/optimizer pipelines, but fastEmbedR does not vendor RAPIDS source
-  or call cuML UMAP/openTSNE at runtime.
+- Current use in `fastEmbedR`: optional CUDA builds link directly to the cuVS
+  C API for exact and IVF-Flat KNN. cuML/cuVS UMAP and RAFT TSVD material were
+  studied as design references for GPU-resident KNN, decomposition, graph, and
+  optimizer pipelines. The native Metal TSVD transfers the resident-workspace
+  and block-subspace organization, not RAPIDS source code. fastEmbedR does not
+  vendor RAPIDS source or call cuML UMAP/openTSNE at runtime.
 
 Implemented locations:
 
-- KNN is supplied through the companion `faissR` package when FAISS/cuVS
-  support is available; fastEmbedR itself does not vendor RAPIDS source.
+- `src/native_knn_cuda_impl.cpp` calls the installed cuVS C API and owns the
+  resulting device buffers; fastEmbedR does not vendor RAPIDS source.
 - `src/embedding_cuda_impl.cpp` and `src/embedding_cuda_kernels.cpp`:
   package-native CUDA UMAP and openTSNE kernels when CUDA support is compiled.
 
@@ -359,35 +387,46 @@ Implemented locations:
 
 - Repository: <https://github.com/hanxiao/mlx-vis>
 - License: Apache-2.0
-- Current use in `fastEmbedR`: design reference for NN-descent candidate
-  scheduling and GPU-resident dimensionality-reduction pipelines. No mlx-vis
-  source files are vendored, linked, or called, and fastEmbedR does not depend
-  on Python/MLX at runtime.
+- Current use in `fastEmbedR`: design reference for GPU-resident
+  dimensionality-reduction pipelines. No mlx-vis source files are vendored,
+  linked, or called, and fastEmbedR does not depend on Python/MLX at runtime.
 
 Ideas used:
 
-- NEW/OLD candidate expansion and reverse-candidate pruning for NN-descent.
 - GPU-resident KNN/embedding pipeline structure as a Metal design reference.
 - FFT-grid/scatter/gather architecture as a reference while validating the
   native Metal openTSNE path.
 
 Implemented locations:
 
-- `src/nn.cpp::nndescent_candidate_matrix_mlx_cpp`
-- `src/nn_metal_impl.mm`: native Metal NN-descent implementation.
 - `src/embedding_metal_impl.mm`: native Metal UMAP/openTSNE kernels.
 
 ## fastPLS
 
 - Repository: <https://github.com/tkcaccia/fastPLS>
-- Current use in `fastEmbedR`: design reference for randomized SVD/PCA style
-  initialization and backend-aware linear algebra. fastEmbedR does not require
-  fastPLS at runtime.
+- Current use in `fastEmbedR`: optional runtime provider of randomized-SVD PCA
+  initialization and backend-aware linear algebra for CPU when fastPLS 0.99.3
+  or newer is installed. fastEmbedR retains a package-local CPU RSVD fallback;
+  Metal openTSNE initialization now uses the package-native MPS TSVD path.
 
 Implemented locations:
 
 - `R/fast_knn_tsne.R::make_opentsne_pca_init`
 - `R/fast_knn_tsne.R::make_opentsne_pca_init_from_data`
+- `R/embed.R::fastembedr_fastpls_pca`
+
+## Apple Metal Performance Shaders Matrix
+
+- Documentation: <https://developer.apple.com/documentation/metalperformanceshaders/matrices_and_vectors>
+- Current use in `fastEmbedR`: package-native float32 block-subspace TSVD for
+  Metal PCA and openTSNE initialization. MPS matrix multiplication executes the
+  large forward/back projections while buffers remain resident in Apple unified
+  memory. A package-native float32 Jacobi eigensolver handles only the small
+  projected Gram matrix.
+
+Implemented location:
+
+- `src/embedding_metal_impl.mm::run_tsvd_pca_metal`
 
 ## Apple MPSGraph
 

@@ -15,17 +15,20 @@ openTSNE-style t-SNE. UMAP follows the fuzzy simplicial-set graph formulation
 introduced by McInnes and colleagues [7,13]. The t-SNE path follows the
 probabilistic neighbour-embedding objective of van der Maaten and Hinton [1],
 with modern openTSNE/FIt-SNE-style optimization and interpolation ideas [3-4].
-The package is intentionally KNN-first. Nearest-neighbour search is delegated
-to the companion `faissR` package, while `fastEmbedR` performs graph/affinity
-construction, initialization, stochastic optimization, native fixed-reference
-transforms, backend reporting, and quality metrics.
+The package is intentionally KNN-first. fastEmbedR implements its CPU HNSW and
+Apple Metal exact/IVF-Flat one-call KNN paths natively. CUDA builds link
+directly to FAISS GPU for exact search and to the Apache-2.0 RAPIDS cuVS C API
+for IVF-Flat; they do not call `faissR`, Python, or `reticulate`. Graph/affinity construction,
+initialization, stochastic optimization, native fixed-reference transforms,
+backend reporting, and quality metrics remain inside fastEmbedR.
 
 The public package surface is deliberately small:
 
 - `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
-- `opentsne()` and `umap()` compute KNN through `faissR` and then call the KNN
-  entry point.
-- `pca()` computes fastPLS-style randomized SVD PCA scores and loadings.
+- `opentsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
+  then call the corresponding KNN entry point.
+- `pca()` computes backend-native truncated PCA scores and loadings, including
+  a resident float32 Metal/MPS TSVD path.
 - `backend` is limited to `"cpu"`, `"metal"`, and `"cuda"`.
 - GPU requests fail clearly if native GPU code is unavailable. CPU fallback is
   never reported as Metal or CUDA work.
@@ -60,23 +63,57 @@ the final layout.
 ## Nearest-Neighbour Layer
 
 `fastEmbedR` does not re-export neighbour-search functions. Users call
-`faissR::nn()` directly when they want explicit control over KNN search, and
-the one-call embedding functions call `faissR` internally. The neighbour layer
-uses FAISS/cuVS concepts for high-throughput vector search [8-9].
+`faissR::nn()` directly when they want an independently reusable KNN object.
+The one-call embedding functions own a deliberately smaller internal search
+surface.
+
+The CPU implementation distils the HNSW organization in FAISS 1.14.3 [8]:
+exponentially sampled hierarchy levels, greedy descent through upper layers,
+bounded `efConstruction` expansion at each insertion layer, diversity-aware
+neighbour pruning, reciprocal graph links, and independent parallel queries.
+All vectors, graph distances, and search buffers are float32; indices are
+int32. A large/high-dimensional target-0.99 policy uses `M = 10`,
+`efConstruction = 40`, and `efSearch = 40`, selected only after comparison
+against the original FAISS HNSW output. Other shapes use a more conservative
+graph. The package records the selected values and does not claim bitwise
+identity with FAISS.
+
+The Metal implementation has two routes. Exact search assigns one SIMD group
+to each candidate distance and merges per-group top-k lists on device. IVF-Flat
+first forms a deterministic 128-dimensional signed float32 projection for
+coarse routing. Four native centroid-assignment/update passes then pack the
+inverted lists. For large, high-dimensional inputs, a four-SIMD-group kernel
+scans selected lists in projected space and retains an internal shortlist. It
+starts at 288 candidates and can expand to 384 or 512 candidates. A second
+kernel exact-reranks only that shortlist using the original full-dimensional
+vectors, in bounded query batches. Four deterministic 64-row pilot strata
+spread across the dataset jointly select shortlist size and `nprobe`. If no
+shortlist reaches the requested recall tier plus a generalization margin, the
+same Metal backend uses direct exact reranking of selected lists. Candidate
+routing is approximate; every returned neighbour and distance is based on
+full-dimensional exact reranking. This fused list-scan/top-k organization was
+informed by FAISS [8] and MLXPorts/Faiss-mlx. Their exact commits and
+permissive licenses are retained under `inst/LICENSES/`.
 
 For reproducibility, the one-call API fixes only the requested KNN device class
 and a small/large data policy:
 
-- CPU/Metal one-call embedding requests exact KNN below 100,000 samples and IVF
-  above that threshold through `faissR::nn()`.
-- CUDA one-call openTSNE can request GPU-resident exact KNN below 100,000
-  samples and resident IVF above 100,000 samples when exposed by the installed
-  `faissR` build.
-- CUDA one-call UMAP requests CUDA faissR KNN, then materializes the KNN result
-  for the validated host-prepared graph path before native CUDA optimization.
-  This path is the default because it matches the visually validated binary and
-  fuzzy graph behaviour; the fully GPU-resident UMAP graph path is kept for
-  explicit `umap_knn()` experiments until parity is restored.
+- CPU one-call embeddings use native HNSW. Metal uses native exact KNN below
+  4,096 observations and recall-tuned IVF-Flat for larger inputs.
+- CUDA one-call embeddings use direct FAISS GPU `bfKnn` below 100,000 samples
+  and recall-tuned cuVS IVF-Flat at or above 100,000 samples. Exact float32
+  Euclidean/IP input is uploaded in its existing R column-major layout because
+  FAISS accepts column-major vectors; this removes a full host transpose and
+  its temporary buffer without changing distances or neighbours. IVF starts from a
+  deterministic shape rule, compares evenly spaced pilot queries against a
+  cuVS exact oracle, and expands `nprobe` until it reaches the requested recall
+  tier with a small safety margin. It records pilot recall, `nlist`, `nprobe`,
+  and the number of tuning attempts.
+- FAISS/cuVS write int64 row-major search output on the device. One package CUDA
+  kernel removes self-neighbours, converts indices to int32/one-based form,
+  transforms squared distances, and packs the result directly into the
+  column-major device layout consumed by UMAP and openTSNE. No KNN matrix is
+  materialized in R during a one-call CUDA embedding.
 - KNN-input functions accept the index and distance matrices as already
   measured data and do not repeat neighbour search.
 
@@ -84,32 +121,37 @@ This separation makes benchmark timing interpretable: KNN time, affinity/graph
 construction time, embedding time, and projection/transform time can be
 reported separately.
 
-## PCA And RSVD Initialization
+## PCA And Truncated-SVD Initialization
 
 `fastEmbedR::pca()` provides a small PCA API for reusable scores, loadings, and
-openTSNE initialization. The implementation follows the fastPLS-style
-randomized SVD structure: draw a Gaussian sketch, multiply by the data matrix,
-apply optional power iterations, orthogonalize the sketch, compute the SVD of
-the projected small matrix, and form scores from the left singular vectors and
-singular values. The full data matrix is not passed to `irlba`, ARPACK, or a
-method-selection layer. The only exact SVD is the small projected-matrix SVD
-that is intrinsic to RSVD.
+openTSNE initialization. The API has no method-selection layer and does not
+call `irlba`, ARPACK, Python, or `reticulate`.
 
-The general `pca()` helper uses the same RSVD family across backends:
+The backend implementations share a randomized subspace objective but use
+hardware-appropriate execution:
 
 | Backend | PCA implementation |
 | --- | --- |
 | CPU | Native R/C++ RSVD matrix products using BLAS-backed `%*%`/`crossprod`. |
-| Metal | The same RSVD algorithm with package-native Metal matrix-multiply steps when compiled. |
+| Metal | Package-native float32 block-subspace TSVD using MPS matrix multiplication and a resident unified-memory workspace. |
 | CUDA | Native C++/CUDA initialization through RAPIDS RAFT TSVD compiled into the CUDA backend. |
 
-For openTSNE initialization, the input is mean-centered before RSVD and the
-resulting scores are centered and scaled to the small t-SNE initialization
-scale. CUDA acceleration for this step is native C++/CUDA through RAPIDS RAFT
-TSVD compiled in the package CUDA translation unit; the package does not call
-Python, `reticulate`, or Python cuML from public functions. If RAFT/cuML TSVD
-support is not compiled in, CUDA PCA initialization fails loudly rather than
-falling back to a different implementation.
+The Metal path is deliberately different from the former R-orchestrated RSVD.
+It converts and centers the input once into a float32 buffer whose column-major
+R layout is viewed as a row-major transposed matrix. A deterministic Gaussian
+feature-space block is orthonormalized, two block power iterations are encoded
+as MPS products, and only the small projected Gram matrix is returned to the
+CPU for a float32 symmetric eigensolve. Final loadings and scores are projected
+once on Metal. The input, projected block, basis, Gram matrix, loadings, and
+scores remain allocated for the complete call, eliminating the repeated
+full-matrix uploads and R intermediate matrices of the earlier Metal RSVD.
+
+For openTSNE initialization, the input is mean-centered before decomposition
+and the resulting scores are centered and scaled to the small t-SNE
+initialization scale. CUDA acceleration for this step is native C++/CUDA
+through RAPIDS RAFT TSVD compiled in the package CUDA translation unit. If
+RAFT TSVD support is not compiled in, CUDA PCA initialization fails loudly
+rather than falling back to a different implementation.
 
 `opentsne_pca_init()` is a thin initialization helper on top of this PCA
 family. It centers the PCA scores and rescales them so the maximum component
@@ -170,10 +212,13 @@ engineering references [12].
 ### CUDA UMAP
 
 The CUDA backend is compiled when `FASTEMBEDR_USE_CUDA=1` is enabled. The
-public CUDA path uses the pure atomic optimizer. KNN is supplied by `faissR`,
-and CUDA embedding consumes the graph in device-friendly buffers. The CUDA
-path is benchmarked separately from CPU and Metal and reports the backend that
-actually ran.
+public CUDA path uses the pure atomic optimizer. When
+`FASTEMBEDR_USE_CUVS=1`, exact/IVF-Flat search is invoked through the native
+cuVS C API, its KNN buffers remain on the selected CUDA device, and graph or
+affinity construction consumes those pointers directly. The owning R object
+contains external pointers with a finalizer; copying to ordinary R matrices is
+an explicit diagnostic operation. No CPU or companion-package fallback is
+used for a CUDA request.
 
 ## openTSNE-Style t-SNE From KNN
 

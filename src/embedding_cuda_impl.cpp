@@ -1315,7 +1315,7 @@ NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix data,
 
 NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
                                        int n_components) {
-#ifndef FASTEMBEDR_HAS_CUML
+#ifndef FASTEMBEDR_HAS_RAFT
   Rcpp::stop("fastEmbedR was not built with native RAPIDS RAFT/cuML TSVD support.");
 #else
   if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
@@ -1601,13 +1601,13 @@ NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP gpu_knn,
                                            int seed,
                                            int optimizer_mode,
                                            bool binary_graph) {
-  if (!Rf_inherits(gpu_knn, "faissR_gpu_knn")) {
-    Rcpp::stop("CUDA GPU-resident UMAP requires a faissR_gpu_knn object.");
+  if (!Rf_isNewList(gpu_knn)) {
+    Rcpp::stop("CUDA GPU-resident UMAP requires a GPU KNN list contract.");
   }
   Rcpp::List src(gpu_knn);
   if (!src.containsElementNamed("indices_ptr") ||
       !src.containsElementNamed("distances_ptr")) {
-    Rcpp::stop("faissR_gpu_knn object is missing CUDA KNN device pointers.");
+    Rcpp::stop("GPU KNN object is missing CUDA KNN device pointers.");
   }
   const std::string distance_type = src.containsElementNamed("distance_type") ?
     Rcpp::as<std::string>(src["distance_type"]) : "float32";
@@ -1617,7 +1617,7 @@ NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP gpu_knn,
   const std::string layout = src.containsElementNamed("layout") ?
     Rcpp::as<std::string>(src["layout"]) : "column_major_query_by_k";
   if (layout != "column_major_query_by_k") {
-    Rcpp::stop("Unsupported faissR_gpu_knn layout for CUDA UMAP.");
+    Rcpp::stop("Unsupported GPU KNN layout for CUDA UMAP.");
   }
   const bool exclude_self = src.containsElementNamed("exclude_self") ?
     Rcpp::as<bool>(src["exclude_self"]) : true;
@@ -1632,7 +1632,7 @@ NumericMatrix knn_umap_cuda_fused_gpu_impl(SEXP gpu_knn,
   const int available_k = Rcpp::as<int>(src["k"]);
   const int k = requested_k > 0 ? requested_k : available_k;
   if (k < 1 || k > available_k) {
-    Rcpp::stop("Requested GPU KNN width exceeds the faissR_gpu_knn object width.");
+    Rcpp::stop("Requested GPU KNN width exceeds the GPU KNN object width.");
   }
   if (k > kMaxCudaNeighbors) {
     Rcpp::stop("CUDA fused UMAP currently supports at most %d neighbors.", kMaxCudaNeighbors);
@@ -2174,8 +2174,8 @@ List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
                                      int seed,
                                      bool record_costs) {
   (void)record_costs;
-  if (!Rf_inherits(gpu_knn, "faissR_gpu_knn")) {
-    Rcpp::stop("CUDA GPU-resident openTSNE requires a faissR_gpu_knn object.");
+  if (!Rf_isNewList(gpu_knn)) {
+    Rcpp::stop("CUDA GPU-resident openTSNE requires a GPU KNN list contract.");
   }
   Rcpp::List src(gpu_knn);
   std::transform(
@@ -2196,7 +2196,7 @@ List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
   }
   if (!src.containsElementNamed("indices_ptr") ||
       !src.containsElementNamed("distances_ptr")) {
-    Rcpp::stop("faissR_gpu_knn object is missing CUDA KNN device pointers.");
+    Rcpp::stop("GPU KNN object is missing CUDA KNN device pointers.");
   }
   const std::string distance_type = src.containsElementNamed("distance_type") ?
     Rcpp::as<std::string>(src["distance_type"]) : "float32";
@@ -2206,14 +2206,14 @@ List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
   const std::string layout = src.containsElementNamed("layout") ?
     Rcpp::as<std::string>(src["layout"]) : "column_major_query_by_k";
   if (layout != "column_major_query_by_k") {
-    Rcpp::stop("Unsupported faissR_gpu_knn layout for CUDA openTSNE.");
+    Rcpp::stop("Unsupported GPU KNN layout for CUDA openTSNE.");
   }
   const bool exclude_self = src.containsElementNamed("exclude_self") ?
     Rcpp::as<bool>(src["exclude_self"]) : true;
   if (!exclude_self) {
     Rcpp::stop(
       "CUDA GPU-resident openTSNE requires non-self KNN. ",
-      "Call faissR::nn_gpu(..., exclude_self = TRUE) or use the host KNN path."
+      "Create the GPU KNN with `exclude_self = TRUE` or use the host KNN path."
     );
   }
   const int n = src.containsElementNamed("n_query") ?
@@ -2221,7 +2221,7 @@ List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
   const int available_k = Rcpp::as<int>(src["k"]);
   const int k = requested_k > 0 ? requested_k : available_k;
   if (k < 1 || k > available_k) {
-    Rcpp::stop("Requested GPU KNN width exceeds the faissR_gpu_knn object width.");
+    Rcpp::stop("Requested GPU KNN width exceeds the GPU KNN object width.");
   }
   if (n_components != 2) {
     Rcpp::stop("CUDA openTSNE FFT-grid currently supports exactly two output components.");

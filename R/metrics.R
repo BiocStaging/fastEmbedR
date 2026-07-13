@@ -1,5 +1,5 @@
 silhouette_score <- function(labels, layout) {
-  layout <- as.matrix(layout)
+  layout <- embedding_dense_double_matrix(layout)
   labels <- as.factor(labels)
   if (length(labels) != nrow(layout)) {
     stop("`labels` must have one entry per row of `layout`.", call. = FALSE)
@@ -61,7 +61,7 @@ structure_score_with_backend <- function(layout,
                                          labels_int,
                                          n_label_levels,
                                          backend = "cpu") {
-  if (!is.matrix(layout)) layout <- as.matrix(layout)
+  layout <- embedding_dense_double_matrix(layout)
   if (!is.matrix(indices)) indices <- as.matrix(indices)
   if (!is.integer(indices)) storage.mode(indices) <- "integer"
   keep <- as.integer(keep)
@@ -142,7 +142,7 @@ silhouette_score_with_backend <- function(labels_int,
   if (length(labels_int) == 0L || nrow(layout) < 2L || n_label_levels < 2L) {
     return(list(value = NA_real_, backend = "none", reason = NA_character_))
   }
-  layout <- as.matrix(layout)
+  layout <- embedding_dense_double_matrix(layout)
   labels_int <- as.integer(labels_int)
   reason <- NA_character_
   if (cuda_metric_requested(backend)) {
@@ -212,6 +212,7 @@ sample_indices <- function(n, sample_size = NULL, seed = 4L) {
   if (sample_size >= n) {
     return(seq_len(n))
   }
-  set.seed(seed)
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   sort(sample.int(n, sample_size))
 }

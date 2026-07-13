@@ -1,6 +1,5 @@
-if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
-
 test_that("embed_knn runs native openTSNE from supplied neighbours", {
+  skip_if_not_installed("faissR")
   set.seed(321)
   x <- matrix(rnorm(50L * 5L), 50L, 5L)
   knn <- faissR::nn(x, k = 16L, backend = "cpu")
@@ -58,6 +57,7 @@ test_that("openTSNE auto configuration exposes opt-SNE policy metadata", {
 })
 
 test_that("removed embedding methods fail at the public KNN dispatcher", {
+  skip_if_not_installed("faissR")
   set.seed(320)
   x <- matrix(rnorm(32L * 4L), 32L, 4L)
   knn <- faissR::nn(x, k = 10L, backend = "cpu")
@@ -67,6 +67,7 @@ test_that("removed embedding methods fail at the public KNN dispatcher", {
 })
 
 test_that("openTSNE exposes FFT and exact negative-gradient choices without Barnes-Hut or sampled GPU math", {
+  skip_if_not_installed("faissR")
   set.seed(312)
   x <- matrix(rnorm(42L * 4L), 42L, 4L)
   knn <- faissR::nn(x, k = 13L, backend = "cpu")
@@ -125,6 +126,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
 })
 
 test_that("opentsne has direct KNN input functions", {
+  skip_if_not_installed("faissR")
   set.seed(322)
   x <- matrix(rnorm(54L * 5L), 54L, 5L)
   labels <- rep(1:3, length.out = nrow(x))
@@ -163,6 +165,7 @@ test_that("opentsne has direct KNN input functions", {
 })
 
 test_that("native Metal openTSNE runs FFT-grid without CPU fallback", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
 
@@ -198,6 +201,7 @@ test_that("native Metal openTSNE runs FFT-grid without CPU fallback", {
 })
 
 test_that("openTSNE GPU optimizers are native and fail clearly when unavailable", {
+  skip_if_not_installed("faissR")
   set.seed(319)
   x <- matrix(rnorm(32L * 4L), 32L, 4L)
   knn <- faissR::nn(x, k = 10L, backend = "cpu")

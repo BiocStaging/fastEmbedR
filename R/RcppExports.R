@@ -141,12 +141,20 @@ rsvd_multiply_metal_cpp <- function(left, right, transpose_left) {
     .Call(`_fastEmbedR_rsvd_multiply_metal_cpp`, left, right, transpose_left)
 }
 
+pca_tsvd_metal_cpp <- function(data, n_components, center = TRUE, scale = FALSE, seed = 4L) {
+    .Call(`_fastEmbedR_pca_tsvd_metal_cpp`, data, n_components, center, scale, seed)
+}
+
 transform_tsne_metal_cpp <- function(reference_layout, indices, distances, y_init, init, initialization, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, seed) {
     .Call(`_fastEmbedR_transform_tsne_metal_cpp`, reference_layout, indices, distances, y_init, init, initialization, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, seed)
 }
 
 knn_tsne_opentsne_metal_cpp <- function(indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs, auto_config, auto_iter_end) {
     .Call(`_fastEmbedR_knn_tsne_opentsne_metal_cpp`, indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs, auto_config, auto_iter_end)
+}
+
+float32_all_finite_cpp <- function(data, n_threads = 0L) {
+    .Call(`_fastEmbedR_float32_all_finite_cpp`, data, n_threads)
 }
 
 standardize_cpu_cpp <- function(data) {
@@ -187,6 +195,10 @@ sampled_pair_distances_cpp <- function(x, a, b, n_threads) {
 
 knn_structure_score_cpp <- function(layout, indices, keep, preserve_k, labels, n_label_levels) {
     .Call(`_fastEmbedR_knn_structure_score_cpp`, layout, indices, keep, preserve_k, labels, n_label_levels)
+}
+
+exact_structure_metrics_cpp <- function(high, low, requested_k, n_threads) {
+    .Call(`_fastEmbedR_exact_structure_metrics_cpp`, high, low, requested_k, n_threads)
 }
 
 silhouette_score_cpp <- function(layout, labels) {
@@ -289,6 +301,33 @@ umap_auto_parameters_cpp <- function(distances, n_neighbors, backend) {
     .Call(`_fastEmbedR_umap_auto_parameters_cpp`, distances, n_neighbors, backend)
 }
 
+native_hnsw_knn_cpp <- function(data, k, n_threads = 1L, metric = "euclidean", target_recall = 0.99) {
+    .Call(`_fastEmbedR_native_hnsw_knn_cpp`, data, k, n_threads, metric, target_recall)
+}
+
+native_metal_knn_available_cpp <- function() {
+    .Call(`_fastEmbedR_native_metal_knn_available_cpp`)
+}
+
+native_metal_knn_cpp <- function(data, k, method = "auto", metric = "euclidean", target_recall = 0.99) {
+    .Call(`_fastEmbedR_native_metal_knn_cpp`, data, k, method, metric, target_recall)
+}
+
+native_cuda_knn_available_cpp <- function() {
+    .Call(`_fastEmbedR_native_cuda_knn_available_cpp`)
+}
+
+native_cuda_faiss_gpu_available_cpp <- function() {
+    .Call(`_fastEmbedR_native_cuda_faiss_gpu_available_cpp`)
+}
+
+native_cuda_knn_cpp <- function(data, k, method = "auto", metric = "euclidean", target_recall = 0.99, keep_gpu = TRUE) {
+    .Call(`_fastEmbedR_native_cuda_knn_cpp`, data, k, method, metric, target_recall, keep_gpu)
+}
+
+native_cuda_knn_to_host_cpp <- function(knn) {
+    .Call(`_fastEmbedR_native_cuda_knn_to_host_cpp`, knn)
+}
 tsne_auto_parameters_cpp <- function(n, k, perplexity, perplexity_missing, backend, negative_gradient_method) {
     .Call(`_fastEmbedR_tsne_auto_parameters_cpp`, n, k, perplexity, perplexity_missing, backend, negative_gradient_method)
 }

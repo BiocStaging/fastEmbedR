@@ -1,24 +1,30 @@
 Package: fastEmbedR
 Type: Package
 Title: Fast Native UMAP and openTSNE from Precomputed KNN Matrices
-Version: 0.1.0
+Version: 0.99.0
 Authors@R: person(given = "Stefano",
     family = "Caccia",
     role = c("aut", "cre"),
     email = "tkcaccia@gmail.com")
 Author: Stefano Caccia [aut, cre]
 Maintainer: Stefano Caccia <tkcaccia@gmail.com>
+Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN
+    components.
 Description: A compact UMAP and openTSNE-style implementation focused on fast
-    embeddings from precomputed nearest-neighbor index and distance matrices.
-    Nearest-neighbor search can be provided by the optional companion faissR package, while
-    fastEmbedR keeps preprocessing helpers, fixed-reference transform, and
-    stochastic layout optimization in native code with explicit CPU/Metal/CUDA
-    backend reporting.
+    embeddings from data matrices or precomputed nearest-neighbor index and
+    distance matrices. Native float32 CPU HNSW and Apple Metal exact/IVF-Flat
+    search support one-call workflows. Optional package-native CUDA search
+    links directly to FAISS GPU for exact search and to the RAPIDS cuVS C API
+    for IVF-Flat, keeping results on the device for CUDA embedding. Preprocessing, graph or affinity
+    construction, fixed-reference transform, and stochastic layout
+    optimization use native code with explicit CPU, Metal, and CUDA backend
+    reporting.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
 biocViews:
     Software,
+    Preprocessing,
     DimensionReduction,
     Visualization,
     Clustering,
@@ -28,7 +34,9 @@ biocViews:
     GPU
 Encoding: UTF-8
 Imports:
-    Rcpp
+    methods,
+    Rcpp,
+    withr
 Suggests:
     BiocStyle,
     float,
@@ -43,14 +51,13 @@ Suggests:
     uwot
 Enhances:
     faissR,
-    fastPLS
+    fastPLS (>= 0.99.3)
 LinkingTo:
     Rcpp
-SystemRequirements: C++17, Fortran; optional Apple Metal framework on
+SystemRequirements: C++17; optional Apple Metal framework on
     macOS for native Metal embedding backends; optional CUDA Toolkit with
-    cuFFT, cuBLAS, cuSOLVER, and RAPIDS RAFT/cuML headers/libraries for native
-    CUDA embedding backends; optional FAISS/cuVS nearest-neighbor support is
-    provided by the companion faissR package and is not vendored in fastEmbedR
+    FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT, and RAPIDS cuVS C libraries for native
+    CUDA embedding, PCA initialization, and nearest-neighbor backends
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
 Config/testthat/edition: 3

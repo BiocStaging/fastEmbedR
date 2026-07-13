@@ -818,7 +818,8 @@ auto_pilot_sample_indices <- function(n,
     return(sample_indices(n, sample_size, seed))
   }
   groups <- split(seq_len(n), labels)
-  set.seed(seed + 1409L)
+  restore_seed <- set_local_seed(seed + 1409L)
+  on.exit(restore_seed(), add = TRUE)
   group_sizes <- lengths(groups)
   if (isTRUE(rare_protect)) {
     weights <- sqrt(group_sizes)
@@ -1325,7 +1326,8 @@ auto_knn_pilot_rows <- function(indices,
   idx <- auto_knn_indices_one_based(indices)
   selected <- rep(FALSE, n)
   rows <- integer(0L)
-  set.seed(seed + 1709L)
+  restore_seed <- set_local_seed(seed + 1709L)
+  on.exit(restore_seed(), add = TRUE)
   queue <- sample.int(n, min(32L, n))
   cursor <- 1L
   while (length(rows) < sample_size) {

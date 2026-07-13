@@ -39,7 +39,7 @@ from the supplied matrix.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. KNN is delegated to faissR through an internal bridge. The current default asks for exact KNN below 100,000 samples and IVF above that threshold. CUDA requests CUDA faissR KNN, then materializes the KNN result for the validated host-prepared graph path before native CUDA UMAP optimization. This preserves the visually validated binary/fuzzy graph behaviour while the fully GPU-resident UMAP graph path remains available only for explicit \code{umap_knn()} experiments. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. CPU KNN uses package-native HNSW. Metal uses package-native exact or recall-tuned IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct RAPIDS cuVS IVF-Flat above that threshold; the KNN result stays on the device through graph construction and optimization. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
 
 \item{n_threads}{Number of CPU worker threads for KNN and CPU UMAP.}
 

@@ -17,6 +17,17 @@
 #'   controls.
 #' @return A numeric embedding matrix with resolved settings stored in
 #'   `attr(layout, "fastEmbedR_config")`.
+#' @examples
+#' x <- scale(as.matrix(iris[1:30, 1:4]))
+#' d <- as.matrix(stats::dist(x))
+#' diag(d) <- Inf
+#' k <- 5L
+#' indices <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+#' distances <- matrix(
+#'   d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
+#'   nrow = nrow(d), byrow = TRUE
+#' )
+#' layout <- embed_knn(indices, distances, method = "umap", seed = 1)
 #' @export
 embed_knn <- function(indices,
                       distances = NULL,

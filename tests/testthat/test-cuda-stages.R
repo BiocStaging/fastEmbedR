@@ -1,9 +1,8 @@
-if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
-
 test_that("CUDA preprocessing, projection, interpolation, and scoring match CPU", {
   if (!isTRUE(fastEmbedR:::embedding_cuda_available_cpp())) {
     skip("CUDA embedding backend is not available in this build.")
   }
+  skip_if_not_installed("faissR")
 
   set.seed(71)
   x <- matrix(rnorm(160), nrow = 40L, ncol = 4L)

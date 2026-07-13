@@ -19,6 +19,7 @@ __pycache__/
 .venv/
 venv/
 .r-lib/
+.r-lib-test/
 
 # Downloaded data and generated outputs
 data/
@@ -60,6 +61,10 @@ unit_schedule_fastpath/
 
 # Local remote-build scratch
 singularity/
+tmp/
+tmp_chiamaka_rdata/
+tools/adhoc/
+tools/benchmark_embeddings_float32_*/
 hpc_faissR_corrected/
 hpc_faissR_method_scripts/
 tools/chiamaka_singularity/

@@ -18,7 +18,7 @@ opentsne_pca_init(
 
 \item{n_components}{Output dimensionality, usually `2`.}
 
-\item{seed}{Random seed used by the randomized SVD PCA helper.}
+\item{seed}{Random seed used by the truncated PCA subspace sketch.}
 
 \item{backend}{Backend used for PCA when available: `"cpu"`, `"metal"`,
 or `"cuda"`.}
@@ -37,16 +37,15 @@ A numeric initialization matrix suitable for `Y_init`.
 [opentsne()] and [opentsne_knn()]. Supplying `cache_file` stores the result
 as an RDS file; later calls with the same path reuse the saved matrix instead
 of recomputing PCA. This is useful when comparing several KNN backends with
-exactly the same initialization.
-For \code{backend = "cuda"}, fastEmbedR requires native RAPIDS RAFT/cuML TSVD
-support compiled into the CUDA backend and fails loudly if that backend is
-unavailable. CPU and Metal use the native RSVD family available to the package
-build, including fastPLS when installed. The public package does not call
-Python or \code{reticulate} for PCA initialization.
+exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
+native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
+loudly if that backend is unavailable. Metal uses fastEmbedR's native
+float32 block-subspace TSVD with Metal Performance Shaders matrix products
+and one resident GPU workspace. CPU prefers `fastPLS >= 0.99.3` RSVD when it
+is installed and otherwise uses the package-local RSVD helper. The package
+does not call Python or `reticulate` for PCA initialization.
 }
 \examples{
-x <- scale(as.matrix(iris[, 1:4]))
-init <- opentsne_pca_init(x, seed = 1)
-dim(init)
-range(init)
+init <- opentsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)
+plot(init, pch = 21, bg = iris$Species)
 }

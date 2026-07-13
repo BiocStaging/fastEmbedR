@@ -35,7 +35,7 @@ opentsne(
 }
 \arguments{
 \item{data}{Numeric matrix/data frame with observations in rows, or a KNN
-object with `indices` and `distances` fields.}
+object returned by [faissR::nn()].}
 
 \item{perplexity}{t-SNE perplexity. The one-call API uses
 `ceiling(perplexity)` non-self neighbours internally. If `NULL`, uses the
@@ -55,19 +55,18 @@ so one-call results match a KNN object computed from the supplied matrix.}
 
 \item{pca_dims}{Optional PCA dimension before KNN.}
 
-\item{metric}{KNN distance metric for one-call matrix input: \code{"euclidean"},
-\code{"cosine"}, \code{"correlation"}, or \code{"inner_product"}.}
+\item{metric}{KNN distance metric for one-call matrix input: `"euclidean"`,
+`"cosine"`, `"correlation"`, or `"inner_product"`.}
 
 \item{nn}{Optional precomputed KNN output when `data` is a data matrix.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. For
-matrix input, KNN is delegated to faissR through an internal bridge. The current
-default asks for exact KNN below 100,000 samples and IVF above that threshold.
-CUDA requests GPU-resident faissR KNN; if resident IVF is not exposed by the
-installed faissR build, CUDA large-data runs use faissR's tuned
-\code{method = "auto"} instead of materializing the KNN result on the host.
+\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
+uses package-native HNSW. Metal uses package-native exact or recall-tuned
+IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
+rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
+device pointers directly to native CUDA openTSNE.
 Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
 \item{keep_knn}{If `TRUE`, retain KNN matrices in the returned object.}
@@ -125,17 +124,11 @@ matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
 }
 \examples{
-pkg <- "faissR"
-if (requireNamespace(pkg, quietly = TRUE)) {
-  x <- scale(as.matrix(iris[, 1:4]))
+if (requireNamespace("faissR", quietly = TRUE)) {
   fit <- opentsne(
-    x,
-    perplexity = 5,
-    early_exaggeration_iter = 10,
-    n_iter = 20,
-    n_threads = 1,
-    seed = 1
+    as.matrix(iris[, 1:4]), perplexity = 5,
+    early_exaggeration_iter = 10, n_iter = 20, seed = 1
   )
-  dim(fit$layout)
+  plot(fit, labels = iris$Species)
 }
 }

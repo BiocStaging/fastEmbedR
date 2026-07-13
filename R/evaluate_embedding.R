@@ -59,7 +59,8 @@ embedding_clusters <- function(embedding, labels = NULL, seed = 4L) {
   labels <- as.factor(labels)
   n_clusters <- length(levels(labels))
   if (n_clusters < 2L || n_clusters >= nrow(embedding)) return(rep(NA_integer_, nrow(embedding)))
-  set.seed(seed)
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   out <- tryCatch(
     stats::kmeans(embedding, centers = n_clusters, nstart = 5L, iter.max = 50L)$cluster,
     error = function(e) rep(NA_integer_, nrow(embedding))
@@ -167,10 +168,40 @@ evaluation_reference_cache_path <- function(cache_dir,
                                             n,
                                             p,
                                             max_k,
-                                            backend = "cpu") {
+                                            backend = "cpu",
+                                            data_fingerprint = "unknown",
+                                            metric = "euclidean") {
   dataset <- as.character(dataset)
   if (length(dataset) != 1L || is.na(dataset) || !nzchar(dataset)) dataset <- "dataset"
-  cache_file(cache_dir, "eval_nn", dataset, n, p, paste0("k", max_k, "_euclidean_", backend))
+  cache_file(
+    cache_dir,
+    "eval_nn",
+    dataset,
+    n,
+    p,
+    paste0("k", max_k, "_", metric, "_", backend, "_", data_fingerprint)
+  )
+}
+
+evaluation_data_fingerprint <- function(x) {
+  nr <- nrow(x)
+  nc <- ncol(x)
+  rows <- unique(as.integer(round(seq.int(1L, nr, length.out = min(17L, nr)))))
+  cols <- unique(as.integer(round(seq.int(1L, nc, length.out = min(17L, nc)))))
+  payload <- list(
+    dim = c(nr, nc),
+    sample = as.numeric(x[rows, cols, drop = FALSE]),
+    row_sums = as.numeric(rowSums(x[rows, , drop = FALSE])),
+    col_sums = as.numeric(colSums(x[, cols, drop = FALSE]))
+  )
+  path <- tempfile("fastembedr-eval-fingerprint-", fileext = ".bin")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, open = "wb")
+  tryCatch(
+    writeBin(serialize(payload, NULL, version = 2L), con),
+    finally = close(con)
+  )
+  as.character(unname(tools::md5sum(path)))
 }
 
 normalize_evaluation_reference <- function(reference_nn, n, max_k) {
@@ -211,7 +242,16 @@ get_or_compute_evaluation_reference <- function(x_high,
   if (length(max_k) != 1L || is.na(max_k) || max_k < 1L) {
     stop("`max_k` must be a positive integer smaller than `nrow(x_high)`.", call. = FALSE)
   }
-  cache_path <- evaluation_reference_cache_path(cache_dir, dataset, n, ncol(x_high), max_k, backend = backend)
+  data_fingerprint <- evaluation_data_fingerprint(x_high)
+  cache_path <- evaluation_reference_cache_path(
+    cache_dir,
+    dataset,
+    n,
+    ncol(x_high),
+    max_k,
+    backend = backend,
+    data_fingerprint = data_fingerprint
+  )
   if (isTRUE(use_cache) && !isTRUE(force_recompute) && file.exists(cache_path)) {
     cached <- readRDS(cache_path)
     cached$cache_hit <- TRUE
@@ -277,21 +317,23 @@ global_distance_metrics <- function(x_high, embedding, sample_size, seed, n_thre
     ))
   }
   sample_size <- min(as.integer(sample_size), n)
-  set.seed(seed)
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   keep <- if (sample_size < n) sort(sample.int(n, sample_size)) else seq_len(n)
+  x_sample <- embedding_dense_double_matrix(x_high[keep, , drop = FALSE])
+  embedding_sample <- embedding_dense_double_matrix(embedding[keep, , drop = FALSE])
   pair_total <- length(keep) * (length(keep) - 1L) / 2
   max_pairs <- min(pair_total, 250000L)
   if (pair_total <= max_pairs) {
-    high_dist <- as.numeric(stats::dist(x_high[keep, , drop = FALSE]))
-    low_dist <- as.numeric(stats::dist(embedding[keep, , drop = FALSE]))
+    high_dist <- as.numeric(stats::dist(x_sample))
+    low_dist <- as.numeric(stats::dist(embedding_sample))
   } else {
-    set.seed(seed + 104729L)
+    restore_pair_seed <- set_local_seed(seed + 104729L)
+    on.exit(restore_pair_seed(), add = TRUE)
     m <- as.integer(max_pairs)
     a <- sample.int(length(keep), m, replace = TRUE)
     b <- sample.int(length(keep) - 1L, m, replace = TRUE)
     b <- b + as.integer(b >= a)
-    x_sample <- x_high[keep, , drop = FALSE]
-    embedding_sample <- embedding[keep, , drop = FALSE]
     high_dist <- sampled_pair_distances(x_sample, a, b, n_threads = n_threads)
     low_dist <- sampled_pair_distances(embedding_sample, a, b, n_threads = n_threads)
   }
@@ -368,6 +410,11 @@ local_density_radius_metrics <- function(high_distances,
 
 #' Evaluate an embedding against high-dimensional structure
 #'
+#' Trustworthiness and continuity use their standard rank-penalty definitions.
+#' Local rank metrics are computed exactly on a deterministic subsample so the
+#' function does not allocate all-pairs matrices for the complete dataset.
+#' Float32 inputs are sampled before conversion to a dense double matrix.
+#'
 #' @param x_high High-dimensional input, usually scaled data or PCA scores.
 #' @param embedding Low-dimensional embedding matrix.
 #' @param labels Optional biological/class labels.
@@ -396,6 +443,14 @@ local_density_radius_metrics <- function(high_distances,
 #' @param dataset Dataset name recorded in the output.
 #' @return A one-row data frame with local, global, label-aware, batch-aware,
 #'   and metadata columns. Per-class recall is also attached as an attribute.
+#' @examples
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' metrics <- evaluate_embedding(
+#'   x, x[, 1:2], labels = iris$Species, k = 5,
+#'   sample_size_for_local_metrics = 100,
+#'   sample_size_for_global_metrics = 100,
+#'   seed = 1
+#' )
 #' @export
 evaluate_embedding <- function(x_high,
                                embedding,
@@ -405,7 +460,7 @@ evaluate_embedding <- function(x_high,
                                primary_k = NULL,
                                reference_nn = NULL,
                                sample_size_for_global_metrics = min(5000L, nrow(x_high)),
-                               sample_size_for_local_metrics = min(5000L, nrow(x_high)),
+                               sample_size_for_local_metrics = min(2000L, nrow(x_high)),
                                use_cache = FALSE,
                                cache_dir = file.path("results", "cache"),
                                force_recompute = FALSE,
@@ -414,10 +469,10 @@ evaluate_embedding <- function(x_high,
                                backend = NA_character_,
                                n_threads = NULL,
                                dataset = NA_character_) {
-  x_high <- as.matrix(x_high)
-  embedding <- as.matrix(embedding)
+  if (!is.matrix(x_high) && !is_float32_matrix(x_high)) x_high <- as.matrix(x_high)
+  if (!is.matrix(embedding) && !is_float32_matrix(embedding)) embedding <- as.matrix(embedding)
   if (nrow(x_high) != nrow(embedding)) stop("`x_high` and `embedding` must have the same row count.", call. = FALSE)
-  if (nrow(x_high) < 2L) stop("`x_high` must contain at least two rows.", call. = FALSE)
+  if (nrow(x_high) < 3L) stop("`x_high` must contain at least three rows.", call. = FALSE)
   if (!is.null(labels) && length(labels) != nrow(x_high)) stop("`labels` must have one entry per row.", call. = FALSE)
   if (!is.null(batch) && length(batch) != nrow(x_high)) stop("`batch` must have one entry per row.", call. = FALSE)
 
@@ -431,7 +486,21 @@ evaluate_embedding <- function(x_high,
     }
     requested_k <- unique(c(requested_k, primary_k))
   }
-  eval_k <- pmin(requested_k, nrow(x_high) - 1L)
+  metric_seed <- if (is.na(seed)) 4L else as.integer(seed)
+  requested_local_size <- finite_sample_size(sample_size_for_local_metrics, nrow(x_high))
+  minimum_rows_for_requested_k <- floor((3 * max(requested_k) + 1) / 2) + 1L
+  local_sample_size <- min(
+    nrow(x_high),
+    max(requested_local_size, minimum_rows_for_requested_k)
+  )
+  local_keep <- sample_indices(nrow(x_high), local_sample_size, metric_seed)
+  local_x <- embedding_dense_double_matrix(x_high[local_keep, , drop = FALSE])
+  local_embedding <- embedding_dense_double_matrix(embedding[local_keep, , drop = FALSE])
+  local_labels <- if (is.null(labels)) NULL else labels[local_keep]
+  local_batch <- if (is.null(batch)) NULL else batch[local_keep]
+  local_n <- nrow(local_x)
+  max_standard_k <- floor((2L * local_n - 2L) / 3L)
+  eval_k <- pmin(requested_k, max_standard_k)
   names(eval_k) <- paste0("knn_preservation_", requested_k)
   max_k <- max(eval_k)
   primary_k <- if (is.null(primary_k)) {
@@ -444,10 +513,17 @@ evaluate_embedding <- function(x_high,
   metric_backend <- metric_resolution$backend
   metric_backend_reason <- metric_resolution$reason
 
-  high_nn <- if (is.null(reference_nn)) {
+  reference_nn_used <- !is.null(reference_nn) && local_n == nrow(x_high)
+  if (!is.null(reference_nn) && !reference_nn_used) {
+    metric_backend_reason <- append_metric_backend_reason(
+      metric_backend_reason,
+      "reference_nn_recomputed_for_local_subsample"
+    )
+  }
+  high_nn <- if (!reference_nn_used) {
     tryCatch(
       get_or_compute_evaluation_reference(
-        x_high,
+        local_x,
         max_k = max_k,
         dataset = dataset,
         use_cache = use_cache,
@@ -463,7 +539,7 @@ evaluate_embedding <- function(x_high,
         )
         metric_backend <<- "cpu"
         get_or_compute_evaluation_reference(
-          x_high,
+          local_x,
           max_k = max_k,
           dataset = dataset,
           use_cache = use_cache,
@@ -475,12 +551,12 @@ evaluate_embedding <- function(x_high,
       }
     )
   } else {
-    normalize_evaluation_reference(reference_nn, nrow(x_high), max_k)
+    normalize_evaluation_reference(reference_nn, local_n, max_k)
   }
-  embed_nn <- tryCatch(
+  embed_nn_raw <- tryCatch(
     fastembedr_faissr_nn(
-      embedding,
-      embedding,
+      local_embedding,
+      local_embedding,
       max_k + 1L,
       backend = metric_backend,
       n_threads = n_threads
@@ -493,45 +569,40 @@ evaluate_embedding <- function(x_high,
       metric_backend <<- "cpu"
       tryCatch(
         fastembedr_faissr_nn(
-          embedding,
-          embedding,
+          local_embedding,
+          local_embedding,
           max_k + 1L,
           backend = "cpu",
           n_threads = n_threads
         ),
         error = function(e2) fastembedr_exact_knn_fallback(
-          embedding,
-          embedding,
+          local_embedding,
+          local_embedding,
           k = max_k + 1L,
           include_self = TRUE
         )
       )
     }
   )
+  embed_nn <- normalize_evaluation_reference(embed_nn_raw, local_n, max_k)
   high_indices <- high_nn$indices
-  embed_indices <- embed_nn$indices[, -1L, drop = FALSE]
-  embed_distances <- embed_nn$distances[, -1L, drop = FALSE]
-  local_sample_size <- finite_sample_size(sample_size_for_local_metrics, nrow(embedding))
-  local_keep <- sample_indices(nrow(embedding), local_sample_size, if (is.na(seed)) 4L else seed)
+  embed_indices <- embed_nn$indices
+  embed_distances <- embed_nn$distances
 
-  labels_factor <- if (is.null(labels)) NULL else as.factor(labels)
-  labels_int <- if (is.null(labels_factor)) integer(0L) else as.integer(labels_factor)
-  n_label_levels <- if (is.null(labels_factor)) 0L else length(levels(labels_factor))
+  local_labels_factor <- if (is.null(local_labels)) NULL else as.factor(local_labels)
+  labels_int <- if (is.null(local_labels_factor)) integer(0L) else as.integer(local_labels_factor)
+  n_label_levels <- if (is.null(local_labels_factor)) 0L else length(levels(local_labels_factor))
 
-  structure_by_k <- lapply(eval_k, function(kk) {
-    structure_score_with_backend(
-      embedding,
-      high_indices[, seq_len(kk), drop = FALSE],
-      as.integer(local_keep),
-      as.integer(kk),
-      labels_int,
-      as.integer(n_label_levels),
-      backend = metric_backend
-    )$values
-  })
+  structure_by_k <- exact_structure_metrics_cpp(
+    local_x,
+    local_embedding,
+    as.integer(eval_k),
+    as.integer(n_threads)
+  )
   primary_idx <- which.min(abs(eval_k - primary_k))
-  primary_structure <- structure_by_k[[primary_idx]]
-  preservation <- vapply(structure_by_k, function(z) unname(z["knn_preservation"]), numeric(1))
+  primary_structure <- structure_by_k[primary_idx, , drop = TRUE]
+  preservation <- structure_by_k[, "knn_preservation"]
+  names(preservation) <- names(eval_k)
 
   global <- global_distance_metrics(
     x_high,
@@ -544,15 +615,15 @@ evaluate_embedding <- function(x_high,
     high_nn$distances,
     embed_distances,
     primary_k,
-    keep = local_keep
+    keep = NULL
   )
 
-  silhouette <- if (is.null(labels_factor) || n_label_levels < 2L) {
+  silhouette <- if (is.null(local_labels_factor) || n_label_levels < 2L) {
     NA_real_
   } else {
     silhouette_score_with_backend(
       labels_int,
-      embedding,
+      local_embedding,
       n_label_levels,
       backend = metric_backend
     )$value
@@ -560,20 +631,20 @@ evaluate_embedding <- function(x_high,
   label_knn_accuracy <- NA_real_
   ari <- nmi <- rare_class_recall <- NA_real_
   per_class_recall <- data.frame(label = character(), n = integer(), recall = numeric(), stringsAsFactors = FALSE)
-  if (!is.null(labels_factor) && n_label_levels >= 2L) {
-    pred <- classification_from_embedding_nn(embed_indices, labels_factor, primary_k)
-    label_knn_accuracy <- mean(pred == labels_factor, na.rm = TRUE)
-    recalls <- class_recall_metrics(labels_factor, pred)
+  if (!is.null(local_labels_factor) && n_label_levels >= 2L) {
+    pred <- classification_from_embedding_nn(embed_indices, local_labels_factor, primary_k)
+    label_knn_accuracy <- mean(pred == local_labels_factor, na.rm = TRUE)
+    recalls <- class_recall_metrics(local_labels_factor, pred)
     rare_class_recall <- recalls$rare_class_recall
     per_class_recall <- recalls$table
-    clusters <- embedding_clusters(embedding, labels_factor, if (is.na(seed)) 4L else seed)
+    clusters <- embedding_clusters(local_embedding, local_labels_factor, metric_seed)
     if (!all(is.na(clusters))) {
-      ari <- adjusted_rand_index(labels_factor, clusters)
-      nmi <- normalized_mutual_info(labels_factor, clusters)
+      ari <- adjusted_rand_index(local_labels_factor, clusters)
+      nmi <- normalized_mutual_info(local_labels_factor, clusters)
     }
   }
 
-  batch_metrics <- batch_entropy_metrics(embed_indices, batch, primary_k)
+  batch_metrics <- batch_entropy_metrics(embed_indices, local_batch, primary_k)
   label_batch_tradeoff <- if (is.finite(label_knn_accuracy) && is.finite(batch_metrics$batch_mixing_score)) {
     0.5 * label_knn_accuracy + 0.5 * batch_metrics$batch_mixing_score
   } else {
@@ -586,19 +657,20 @@ evaluate_embedding <- function(x_high,
     backend = backend,
     metric_backend = metric_backend,
     metric_backend_reason = metric_backend_reason,
+    rank_metric_backend = "cpu_exact",
     high_nn_backend = if (is.null(high_nn$backend)) NA_character_ else as.character(high_nn$backend),
     embedding_nn_backend = knn_backend_label(embed_nn),
-    n_threads = if (identical(metric_backend, "cpu")) as.integer(n_threads) else NA_integer_,
+    n_threads = as.integer(n_threads),
     seed = as.integer(seed),
     primary_k = as.integer(primary_k),
-    local_sample_size = length(local_keep),
-    trustworthiness = unname(primary_structure["local_trustworthiness"]),
-    continuity = unname(primary_structure["local_continuity"]),
+    local_sample_size = local_n,
+    trustworthiness = unname(primary_structure["trustworthiness"]),
+    continuity = unname(primary_structure["continuity"]),
     knn_preservation = unname(primary_structure["knn_preservation"]),
     knn_preservation_15 = named_metric_or_na(preservation, "knn_preservation_15"),
     knn_preservation_30 = named_metric_or_na(preservation, "knn_preservation_30"),
     knn_preservation_50 = named_metric_or_na(preservation, "knn_preservation_50"),
-    mean_neighbor_rank_error = mean_neighbor_rank_error_cpp(high_indices, embed_indices, primary_k),
+    mean_neighbor_rank_error = unname(primary_structure["mean_neighbor_rank_error"]),
     distance_spearman = global$distance_spearman,
     distance_pearson = global$distance_pearson,
     stress = global$stress,
@@ -610,9 +682,14 @@ evaluate_embedding <- function(x_high,
     density_radius_high_mean = density$density_radius_high_mean,
     density_radius_embedding_mean = density$density_radius_embedding_mean,
     density_sample_size = density$density_sample_size,
+    evaluation_reference_supplied_used = reference_nn_used,
     evaluation_reference_cache_hit = isTRUE(high_nn$cache_hit),
     evaluation_reference_cache_path = if (is.null(high_nn$cache_path)) NA_character_ else as.character(high_nn$cache_path),
-    centroid_distance_correlation = centroid_distance_correlation(x_high, embedding, labels_factor),
+    centroid_distance_correlation = centroid_distance_correlation(
+      local_x,
+      local_embedding,
+      local_labels_factor
+    ),
     silhouette = silhouette,
     label_knn_accuracy = label_knn_accuracy,
     nn_accuracy = label_knn_accuracy,

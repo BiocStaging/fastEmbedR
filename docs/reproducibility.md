@@ -28,15 +28,15 @@ manuscript-response edits. Before journal submission, create and archive a
 clean release tag, for example:
 
 ```bash
-git tag -a v0.1.0-manuscript -m "fastEmbedR manuscript benchmark snapshot"
-git push origin v0.1.0-manuscript
+git tag -a v0.99.0-manuscript -m "fastEmbedR manuscript benchmark snapshot"
+git push origin v0.99.0-manuscript
 ```
 
 The release tag should then be archived on Zenodo or an equivalent repository.
 Record the minted DOI by setting:
 
 ```bash
-export FASTEMBEDR_MANUSCRIPT_TAG=v0.1.0-manuscript
+export FASTEMBEDR_MANUSCRIPT_TAG=v0.99.0-manuscript
 export FASTEMBEDR_ZENODO_DOI="10.xxxx/zenodo.xxxxxxx"
 ```
 

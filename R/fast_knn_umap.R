@@ -68,7 +68,7 @@ fast_knn_umap_core <- function(indices,
   if (fastembedr_is_gpu_knn(indices)) {
     indices <- fastembedr_as_gpu_knn(indices)
     if (!is.null(distances)) {
-      stop("Do not pass `distances` when `indices` is a faissR_gpu_knn object.", call. = FALSE)
+      stop("Do not pass `distances` when `indices` is a GPU-resident KNN object.", call. = FALSE)
     }
     if (!identical(backend, "cuda")) {
       stop("GPU-resident KNN input is currently supported only with `backend = \"cuda\"`.", call. = FALSE)
@@ -587,14 +587,14 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
   }
   cfg$graph_storage <- "native_cuda_device_coo_fused"
   cfg$sgd_loop <- "cuda_fused_device_knn_to_coo_atomic"
-  cfg$gpu_transfer_policy <- "faissR_gpu_knn_device_pointers_no_knn_host_copy"
+  cfg$gpu_transfer_policy <- "gpu_knn_device_pointers_no_knn_host_copy"
   cfg$gpu_optimizer_mode <- "atomic_coo"
   cfg$gpu_optimizer_update_rule <- "native_cuda_atomic_coo_umap_schedule"
   cfg$gpu_optimizer_schedule <- "coo_epochs_per_sample_device"
   cfg$gpu_initial_backend <- "cuda"
   cfg$optimizer_backend <- "cuda"
   cfg$init_backend <- "cuda_fused_diffusion"
-  cfg$init_backend_reason <- "CUDA UMAP consumes faissR GPU KNN pointers, builds the graph/schedule, initializes, and optimizes on device."
+  cfg$init_backend_reason <- "CUDA UMAP consumes native cuVS GPU KNN pointers, builds the graph/schedule, initializes, and optimizes on device."
   cfg$gpu_umap_path <- if (identical(graph_mode, "binary")) {
     "cuda_gpu_knn_binary_float32_atomic"
   } else {
@@ -631,15 +631,17 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
 #' [embed_knn()] repeatedly with different seeds without rebuilding the graph
 #' or recomputing `epochs_per_sample`.
 #'
-#' @inheritParams fast_knn_umap
+#' @inheritParams umap_knn
 #' @return A prepared UMAP object containing the KNN, CSR graph, and resolved
 #'   UMAP graph schedule.
 #' @examples
-#' x <- scale(as.matrix(iris[, 1:4]))
-#' knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-#' prep <- prepare_umap_knn(knn)
-#' y1 <- umap_knn(prep, seed = 1)
-#' y2 <- umap_knn(prep, seed = 2)
+#' if (requireNamespace("faissR", quietly = TRUE)) {
+#'   x <- scale(as.matrix(iris[, 1:4]))
+#'   knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
+#'   prep <- prepare_umap_knn(knn)
+#'   y1 <- umap_knn(prep, seed = 1)
+#'   y2 <- umap_knn(prep, seed = 2)
+#' }
 #' @export
 prepare_umap_knn <- function(indices,
                              distances = NULL,

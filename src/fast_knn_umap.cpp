@@ -3228,14 +3228,18 @@ NumericMatrix optimize_layout_csr(const int n,
       0.0f;
     const float eps = std::numeric_limits<float>::epsilon();
 
-    std::vector<float> emb_xf(static_cast<std::size_t>(n));
-    std::vector<float> emb_yf(static_cast<std::size_t>(n));
+    std::vector<std::atomic<float>> emb_xf(static_cast<std::size_t>(n));
+    std::vector<std::atomic<float>> emb_yf(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i) {
-      emb_xf[static_cast<std::size_t>(i)] = static_cast<float>(emb_x[i]);
-      emb_yf[static_cast<std::size_t>(i)] = static_cast<float>(emb_y[i]);
+      emb_xf[static_cast<std::size_t>(i)].store(
+        static_cast<float>(emb_x[i]), std::memory_order_relaxed
+      );
+      emb_yf[static_cast<std::size_t>(i)].store(
+        static_cast<float>(emb_y[i]), std::memory_order_relaxed
+      );
     }
-    float* x = emb_xf.data();
-    float* y = emb_yf.data();
+    std::atomic<float>* x = emb_xf.data();
+    std::atomic<float>* y = emb_yf.data();
 
     ReusableBarrier barrier(threads);
     std::vector<std::size_t> worker_begin(static_cast<std::size_t>(threads) + 1u, 0u);
@@ -3258,26 +3262,15 @@ NumericMatrix optimize_layout_csr(const int n,
     float alpha = alpha0;
     for (int epoch = 0; epoch < n_epochs; ++epoch) {
         TauPrng prng = make_tau_prng(seed, epoch, end, t);
-        int cached_head = -1;
-        float cached_head_x = 0.0f;
-        float cached_head_y = 0.0f;
         for (std::size_t i = begin; i < end; ++i) {
           if (epoch_of_next_sample[i] > epoch) continue;
           const int j = active_rows_ptr[i];
           const int k = active_tails_ptr[i];
 
-          float head_x;
-          float head_y;
-          if (j == cached_head) {
-            head_x = cached_head_x;
-            head_y = cached_head_y;
-          } else {
-            cached_head = j;
-            head_x = x[j];
-            head_y = y[j];
-          }
-          float tail_x = x[k];
-          float tail_y = y[k];
+          const float head_x = x[j].load(std::memory_order_relaxed);
+          const float head_y = y[j].load(std::memory_order_relaxed);
+          const float tail_x = x[k].load(std::memory_order_relaxed);
+          const float tail_y = y[k].load(std::memory_order_relaxed);
           const float dx = head_x - tail_x;
           const float dy = head_y - tail_y;
           const float dist_sq = std::max(eps, dx * dx + dy * dy);
@@ -3287,10 +3280,10 @@ NumericMatrix optimize_layout_csr(const int n,
             attraction_const * dist_pow / (dist_sq * (af * dist_pow + 1.0f));
           const float gx = clip4f(grad_coeff * dx) * alpha;
           const float gy = clip4f(grad_coeff * dy) * alpha;
-          head_x += gx;
-          head_y += gy;
-          tail_x -= gx;
-          tail_y -= gy;
+          atomic_add_float(x[j], gx);
+          atomic_add_float(y[j], gy);
+          atomic_add_float(x[k], -gx);
+          atomic_add_float(y[k], -gy);
           epoch_of_next_sample[i] += epochs_per_sample_ptr[i];
 
           int n_neg_samples = 0;
@@ -3304,23 +3297,19 @@ NumericMatrix optimize_layout_csr(const int n,
             const int neg = prng.vertex(n);
             if (neg == j) continue;
 
-            const float neg_x = neg == k ? tail_x : x[neg];
-            const float neg_y = neg == k ? tail_y : y[neg];
-            const float ndx = head_x - neg_x;
-            const float ndy = head_y - neg_y;
+            const float current_head_x = x[j].load(std::memory_order_relaxed);
+            const float current_head_y = y[j].load(std::memory_order_relaxed);
+            const float neg_x = x[neg].load(std::memory_order_relaxed);
+            const float neg_y = y[neg].load(std::memory_order_relaxed);
+            const float ndx = current_head_x - neg_x;
+            const float ndy = current_head_y - neg_y;
             const float neg_dist_sq = std::max(eps, ndx * ndx + ndy * ndy);
             const float neg_pow = umap_powf_fast(neg_dist_sq, bf);
             const float repulse =
               repulsion_const / ((0.001f + neg_dist_sq) * (af * neg_pow + 1.0f));
-            head_x += clip4f(repulse * ndx) * alpha;
-            head_y += clip4f(repulse * ndy) * alpha;
+            atomic_add_float(x[j], clip4f(repulse * ndx) * alpha);
+            atomic_add_float(y[j], clip4f(repulse * ndy) * alpha);
           }
-          x[j] = head_x;
-          y[j] = head_y;
-          cached_head_x = head_x;
-          cached_head_y = head_y;
-          x[k] = tail_x;
-          y[k] = tail_y;
           if (n_neg_samples > 0) {
             epoch_of_next_negative_sample[i] += n_neg_samples * epochs_per_negative_sample_ptr[i];
           }
@@ -3345,8 +3334,8 @@ NumericMatrix optimize_layout_csr(const int n,
     for (auto& worker : workers) worker.join();
 
     for (int i = 0; i < n; ++i) {
-      emb_x[i] = static_cast<double>(x[i]);
-      emb_y[i] = static_cast<double>(y[i]);
+      emb_x[i] = static_cast<double>(x[i].load(std::memory_order_relaxed));
+      emb_y[i] = static_cast<double>(y[i].load(std::memory_order_relaxed));
     }
 
     return embedding;
@@ -4770,27 +4759,23 @@ NumericMatrix fast_knn_umap_csr_clean_atomic_cpp(IntegerVector offsets,
   }
   const int index_offset = validate_csr_inputs(offsets, neighbors, weights_f);
 
-  std::vector<int> heads;
-  std::vector<int> tails;
-  std::vector<float> edge_weights;
-  heads.reserve(static_cast<std::size_t>(neighbors.size()));
-  tails.reserve(static_cast<std::size_t>(neighbors.size()));
-  edge_weights.reserve(static_cast<std::size_t>(neighbors.size()));
+  std::vector<int> active_row_offsets(static_cast<std::size_t>(n) + 1u, 0);
   float max_weight = 0.0f;
   for (int row = 0; row < n; ++row) {
+    int row_count = 0;
     const int begin = offsets[row];
     const int end = offsets[row + 1];
     for (int pos = begin; pos < end; ++pos) {
       const int nb = neighbors[pos] - index_offset;
       const float w = weights_f[static_cast<std::size_t>(pos)];
       if (nb < 0 || nb >= n || nb == row || !std::isfinite(w) || w <= 0.0f) continue;
-      heads.push_back(row);
-      tails.push_back(nb);
-      edge_weights.push_back(w);
+      ++row_count;
       max_weight = std::max(max_weight, w);
     }
+    active_row_offsets[static_cast<std::size_t>(row) + 1u] =
+      active_row_offsets[static_cast<std::size_t>(row)] + row_count;
   }
-  const int n_edges = static_cast<int>(heads.size());
+  const int n_edges = active_row_offsets.back();
   if (n_edges == 0 || max_weight <= 0.0f) {
     Rcpp::stop("The CSR graph has no usable UMAP edges");
   }
@@ -4815,10 +4800,8 @@ NumericMatrix fast_knn_umap_csr_clean_atomic_cpp(IntegerVector offsets,
   const int threads = effective_cpu_threads(n_threads, n_edges);
   ReusableBarrier barrier(threads);
   auto run_worker = [&](const int thread_id) {
-    const int begin_edge =
-      static_cast<int>(static_cast<long long>(n_edges) * thread_id / threads);
-    const int end_edge =
-      static_cast<int>(static_cast<long long>(n_edges) * (thread_id + 1) / threads);
+    const int begin_row = n * thread_id / threads;
+    const int end_row = n * (thread_id + 1) / threads;
 
     for (int epoch = 0; epoch < n_epochs; ++epoch) {
       const float progress = static_cast<float>(epoch) / std::max(1.0f, static_cast<float>(n_epochs - 1));
@@ -4830,49 +4813,61 @@ NumericMatrix fast_knn_umap_csr_clean_atomic_cpp(IntegerVector offsets,
         decay = std::sqrt(std::max(0.0f, 1.0f - progress));
       }
       const float alpha = learning_rate_f * decay;
-      for (int gid = begin_edge; gid < end_edge; ++gid) {
-        const int head = heads[static_cast<std::size_t>(gid)];
-        const int tail = tails[static_cast<std::size_t>(gid)];
-        const float edge_prob = std::min(1.0f, edge_weights[static_cast<std::size_t>(gid)] / max_weight);
-        if (edge_prob < 1.0f &&
-            clean_uniform01(seed, epoch, head, tail, static_cast<std::size_t>(gid), 0, 3ULL) >= edge_prob) {
-          continue;
-        }
+      for (int head = begin_row; head < end_row; ++head) {
+        int gid = active_row_offsets[static_cast<std::size_t>(head)];
+        for (int pos = offsets[head]; pos < offsets[head + 1]; ++pos) {
+          const int tail = neighbors[pos] - index_offset;
+          const float edge_weight = weights_f[static_cast<std::size_t>(pos)];
+          if (tail < 0 || tail >= n || tail == head ||
+              !std::isfinite(edge_weight) || edge_weight <= 0.0f) {
+            continue;
+          }
+          const int edge_id = gid++;
+          const float edge_prob = std::min(1.0f, edge_weight / max_weight);
+          if (edge_prob < 1.0f &&
+              clean_uniform01(
+                seed, epoch, head, tail, static_cast<std::size_t>(edge_id), 0, 3ULL
+              ) >= edge_prob) {
+            continue;
+          }
 
-        const std::size_t head_base = static_cast<std::size_t>(head) * 2u;
-        const std::size_t tail_base = static_cast<std::size_t>(tail) * 2u;
-        const float head_x = layout[head_base].load(std::memory_order_relaxed);
-        const float head_y = layout[head_base + 1u].load(std::memory_order_relaxed);
-        const float tail_x = layout[tail_base].load(std::memory_order_relaxed);
-        const float tail_y = layout[tail_base + 1u].load(std::memory_order_relaxed);
-        const float dx = head_x - tail_x;
-        const float dy = head_y - tail_y;
-        const float d2 = std::max(eps, dx * dx + dy * dy);
-        const float d2b = umap_powf_fast(d2, bf);
-        const float coeff = -2.0f * af * bf * (d2b / d2) / (af * d2b + 1.0f);
-        const float gx = clip4f(coeff * dx) * alpha;
-        const float gy = clip4f(coeff * dy) * alpha;
-        atomic_add_float(layout[head_base], gx);
-        atomic_add_float(layout[head_base + 1u], gy);
-        atomic_add_float(layout[tail_base], -gx);
-        atomic_add_float(layout[tail_base + 1u], -gy);
+          const std::size_t head_base = static_cast<std::size_t>(head) * 2u;
+          const std::size_t tail_base = static_cast<std::size_t>(tail) * 2u;
+          const float head_x = layout[head_base].load(std::memory_order_relaxed);
+          const float head_y = layout[head_base + 1u].load(std::memory_order_relaxed);
+          const float tail_x = layout[tail_base].load(std::memory_order_relaxed);
+          const float tail_y = layout[tail_base + 1u].load(std::memory_order_relaxed);
+          const float dx = head_x - tail_x;
+          const float dy = head_y - tail_y;
+          const float d2 = std::max(eps, dx * dx + dy * dy);
+          const float d2b = umap_powf_fast(d2, bf);
+          const float coeff = -2.0f * af * bf * (d2b / d2) / (af * d2b + 1.0f);
+          const float gx = clip4f(coeff * dx) * alpha;
+          const float gy = clip4f(coeff * dy) * alpha;
+          atomic_add_float(layout[head_base], gx);
+          atomic_add_float(layout[head_base + 1u], gy);
+          atomic_add_float(layout[tail_base], -gx);
+          atomic_add_float(layout[tail_base + 1u], -gy);
 
-        for (int s = 0; s < negative_sample_rate; ++s) {
-          const int neg = clean_negative_vertex(n, seed, epoch, head, tail, static_cast<std::size_t>(gid), s);
-          if (neg == head || neg == tail) continue;
-          const std::size_t neg_base = static_cast<std::size_t>(neg) * 2u;
-          const float current_head_x = layout[head_base].load(std::memory_order_relaxed);
-          const float current_head_y = layout[head_base + 1u].load(std::memory_order_relaxed);
-          const float neg_x = layout[neg_base].load(std::memory_order_relaxed);
-          const float neg_y = layout[neg_base + 1u].load(std::memory_order_relaxed);
-          const float ndx = current_head_x - neg_x;
-          const float ndy = current_head_y - neg_y;
-          const float nd2 = std::max(eps, ndx * ndx + ndy * ndy);
-          const float nd2b = umap_powf_fast(nd2, bf);
-          const float rcoeff = repulsion_strength_f * 2.0f * bf /
-            ((0.001f + nd2) * (af * nd2b + 1.0f));
-          atomic_add_float(layout[head_base], clip4f(rcoeff * ndx) * alpha);
-          atomic_add_float(layout[head_base + 1u], clip4f(rcoeff * ndy) * alpha);
+          for (int s = 0; s < negative_sample_rate; ++s) {
+            const int neg = clean_negative_vertex(
+              n, seed, epoch, head, tail, static_cast<std::size_t>(edge_id), s
+            );
+            if (neg == head || neg == tail) continue;
+            const std::size_t neg_base = static_cast<std::size_t>(neg) * 2u;
+            const float current_head_x = layout[head_base].load(std::memory_order_relaxed);
+            const float current_head_y = layout[head_base + 1u].load(std::memory_order_relaxed);
+            const float neg_x = layout[neg_base].load(std::memory_order_relaxed);
+            const float neg_y = layout[neg_base + 1u].load(std::memory_order_relaxed);
+            const float ndx = current_head_x - neg_x;
+            const float ndy = current_head_y - neg_y;
+            const float nd2 = std::max(eps, ndx * ndx + ndy * ndy);
+            const float nd2b = umap_powf_fast(nd2, bf);
+            const float rcoeff = repulsion_strength_f * 2.0f * bf /
+              ((0.001f + nd2) * (af * nd2b + 1.0f));
+            atomic_add_float(layout[head_base], clip4f(rcoeff * ndx) * alpha);
+            atomic_add_float(layout[head_base + 1u], clip4f(rcoeff * ndy) * alpha);
+          }
         }
       }
 

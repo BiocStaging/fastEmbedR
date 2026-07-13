@@ -35,7 +35,7 @@ transform_tsne(
 `fastEmbedR_embedding` object.}
 
 \item{knn}{Optional query-to-reference KNN list with `indices` and
-`distances`, usually returned by a query-to-reference KNN search.}
+`distances`, usually returned by `faissR::nn(reference_data, new_data, k)`.}
 
 \item{reference_data}{Reference observations in the same preprocessing space
 used to fit `reference_layout`. Required only when `knn` is `NULL`.}
@@ -84,9 +84,9 @@ below this reference count.}
 \item{seed}{Random seed.}
 
 \item{backend}{Backend used for query KNN when `knn` is `NULL`; `"metal"`
-also runs the fixed-reference transform optimizer in native Metal. CUDA
-transform is planned but intentionally errors until implemented, so CPU
-work is never reported as CUDA.}
+and `"cuda"` run their native fixed-reference transform optimizers when
+those backends were compiled. Explicit unavailable GPU requests fail; CPU
+work is never reported as Metal or CUDA.}
 
 \item{verbose}{Print native optimizer progress.}
 }
@@ -101,19 +101,13 @@ are initialized from nearby reference points, and optimization moves only the
 query points.
 }
 \examples{
-set.seed(1)
-reference_layout <- matrix(rnorm(40), ncol = 2)
+reference <- matrix(c(0, 0, 1, 0, 0, 1, 1, 1), 4L, 2L, byrow = TRUE)
 query_knn <- list(
-  indices = matrix(sample(seq_len(20), 30, replace = TRUE), nrow = 5),
-  distances = matrix(runif(30, min = 0.01), nrow = 5)
+  indices = matrix(c(1L, 2L, 3L, 4L), 2L, 2L, byrow = TRUE),
+  distances = matrix(c(0.1, 0.2, 0.15, 0.25), 2L, 2L, byrow = TRUE)
 )
-y <- transform_tsne(
-  reference_layout,
-  knn = query_knn,
-  perplexity = 2,
-  n_iter = 5,
-  n_threads = 1,
-  seed = 1
+query_layout <- transform_tsne(
+  reference, knn = query_knn, perplexity = 0.5,
+  n_iter = 2, exact_repulsion_threshold = 10, seed = 1
 )
-dim(y)
 }

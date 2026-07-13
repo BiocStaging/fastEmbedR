@@ -5,7 +5,7 @@
  * Minimal DLPack C ABI header for the optional RAPIDS cuVS backend.
  *
  * This header follows the stable public DLPack tensor structs and enum names
- * from dmlc/dlpack (Apache-2.0).  fastEmbedR uses only these ABI definitions
+ * from dmlc/dlpack (Apache-2.0). fastEmbedR uses only these ABI definitions
  * to pass dense matrices to cuVS through its C API.
  */
 

@@ -82,6 +82,11 @@ NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
 NumericMatrix rsvd_multiply_metal_impl(NumericMatrix left,
                                        NumericMatrix right,
                                        bool transpose_left);
+List pca_tsvd_metal_impl(SEXP data,
+                         int n_components,
+                         bool center,
+                         bool scale,
+                         int seed);
 List transform_tsne_metal_impl(NumericMatrix reference_layout,
                                IntegerMatrix indices,
                                NumericMatrix distances,
@@ -303,6 +308,15 @@ NumericMatrix rsvd_multiply_metal_cpp(NumericMatrix left,
                                       NumericMatrix right,
                                       bool transpose_left) {
   return rsvd_multiply_metal_impl(left, right, transpose_left);
+}
+
+// [[Rcpp::export]]
+List pca_tsvd_metal_cpp(SEXP data,
+                        int n_components,
+                        bool center = true,
+                        bool scale = false,
+                        int seed = 4) {
+  return pca_tsvd_metal_impl(data, n_components, center, scale, seed);
 }
 
 // [[Rcpp::export]]

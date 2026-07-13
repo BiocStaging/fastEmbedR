@@ -1,5 +1,6 @@
 #include <Rcpp.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -232,6 +233,49 @@ void weighted_projection_row(const NumericMatrix& reference_layout,
 }
 
 } // namespace
+
+// [[Rcpp::export]]
+bool float32_all_finite_cpp(SEXP data, int n_threads = 0) {
+  if (!is_float32_s4(data)) {
+    Rcpp::stop("`data` must be a float::float32 object");
+  }
+  Rcpp::S4 object(data);
+  SEXP payload = object.slot("Data");
+  if (TYPEOF(payload) != INTSXP) {
+    Rcpp::stop("float32 data has an invalid payload");
+  }
+  const R_xlen_t length = Rf_xlength(payload);
+  const int* source = INTEGER(payload);
+  std::atomic<bool> finite(true);
+  const int threads = std::min(
+    4,
+    resolve_projection_threads(n_threads, static_cast<int>(std::min<R_xlen_t>(
+      length, static_cast<R_xlen_t>(std::numeric_limits<int>::max())
+    )))
+  );
+  if (threads <= 1 || length < 1000000) {
+    for (R_xlen_t i = 0; i < length; ++i) {
+      if (!std::isfinite(int_bits_to_float(source[i]))) return false;
+    }
+    return true;
+  }
+  std::vector<std::thread> workers;
+  workers.reserve(static_cast<std::size_t>(threads));
+  for (int thread = 0; thread < threads; ++thread) {
+    const R_xlen_t begin = length * thread / threads;
+    const R_xlen_t end = length * (thread + 1) / threads;
+    workers.emplace_back([&, begin, end]() {
+      for (R_xlen_t i = begin; i < end && finite.load(std::memory_order_relaxed); ++i) {
+        if (!std::isfinite(int_bits_to_float(source[i]))) {
+          finite.store(false, std::memory_order_relaxed);
+          break;
+        }
+      }
+    });
+  }
+  for (auto& worker : workers) worker.join();
+  return finite.load(std::memory_order_relaxed);
+}
 
 // [[Rcpp::export]]
 List standardize_cpu_cpp(NumericMatrix data) {
@@ -949,6 +993,173 @@ Rcpp::NumericVector knn_structure_score_cpp(NumericMatrix layout,
     Rcpp::Named("structure_score") = structure,
     Rcpp::Named("embedding_knn_accuracy") = label_accuracy
   );
+}
+
+// [[Rcpp::export]]
+Rcpp::NumericMatrix exact_structure_metrics_cpp(NumericMatrix high,
+                                                NumericMatrix low,
+                                                IntegerVector requested_k,
+                                                int n_threads) {
+  const int n = high.nrow();
+  if (low.nrow() != n) Rcpp::stop("high and low must have the same row count");
+  if (n < 3) Rcpp::stop("at least three observations are required");
+  if (high.ncol() < 1 || low.ncol() < 1) Rcpp::stop("input matrices must have columns");
+  if (n > 5000) {
+    Rcpp::stop("exact rank metrics support at most 5000 sampled observations");
+  }
+
+  const int nk = requested_k.size();
+  if (nk < 1) Rcpp::stop("requested_k must not be empty");
+  std::vector<int> ks(static_cast<std::size_t>(nk));
+  for (int q = 0; q < nk; ++q) {
+    const int k = requested_k[q];
+    if (k < 1 || k >= n || 2 * n - 3 * k - 1 <= 0) {
+      Rcpp::stop("each k must satisfy 1 <= k < (2 * n - 1) / 3");
+    }
+    ks[static_cast<std::size_t>(q)] = k;
+  }
+
+  const std::size_t matrix_size = static_cast<std::size_t>(n) * n;
+  std::vector<double> high_dist(matrix_size, 0.0);
+  std::vector<double> low_dist(matrix_size, 0.0);
+  n_threads = std::max(1, std::min(n_threads, n));
+
+  auto distance_range = [&](const int begin, const int end) {
+    for (int i = begin; i < end; ++i) {
+      for (int j = i + 1; j < n; ++j) {
+        double high_d2 = 0.0;
+        for (int c = 0; c < high.ncol(); ++c) {
+          const double delta = high(i, c) - high(j, c);
+          high_d2 += delta * delta;
+        }
+        double low_d2 = 0.0;
+        for (int c = 0; c < low.ncol(); ++c) {
+          const double delta = low(i, c) - low(j, c);
+          low_d2 += delta * delta;
+        }
+        const std::size_t ij = static_cast<std::size_t>(i) * n + j;
+        const std::size_t ji = static_cast<std::size_t>(j) * n + i;
+        high_dist[ij] = high_dist[ji] = high_d2;
+        low_dist[ij] = low_dist[ji] = low_d2;
+      }
+    }
+  };
+
+  if (n_threads == 1) {
+    distance_range(0, n);
+  } else {
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(n_threads));
+    for (int t = 0; t < n_threads; ++t) {
+      workers.emplace_back(distance_range, n * t / n_threads, n * (t + 1) / n_threads);
+    }
+    for (auto& worker : workers) worker.join();
+  }
+
+  struct RankAccum {
+    std::vector<double> shared;
+    std::vector<double> trust_penalty;
+    std::vector<double> continuity_penalty;
+    std::vector<double> rank_error;
+
+    explicit RankAccum(const int size) :
+      shared(static_cast<std::size_t>(size), 0.0),
+      trust_penalty(static_cast<std::size_t>(size), 0.0),
+      continuity_penalty(static_cast<std::size_t>(size), 0.0),
+      rank_error(static_cast<std::size_t>(size), 0.0) {}
+  };
+
+  std::vector<RankAccum> accumulators;
+  accumulators.reserve(static_cast<std::size_t>(n_threads));
+  for (int t = 0; t < n_threads; ++t) accumulators.emplace_back(nk);
+
+  auto rank_range = [&](const int thread_id, const int begin, const int end) {
+    RankAccum local(nk);
+    std::vector<int> high_order(static_cast<std::size_t>(n - 1));
+    std::vector<int> low_order(static_cast<std::size_t>(n - 1));
+    std::vector<int> high_rank(static_cast<std::size_t>(n));
+    std::vector<int> low_rank(static_cast<std::size_t>(n));
+
+    for (int i = begin; i < end; ++i) {
+      int pos = 0;
+      for (int j = 0; j < n; ++j) {
+        if (j == i) continue;
+        high_order[static_cast<std::size_t>(pos)] = j;
+        low_order[static_cast<std::size_t>(pos)] = j;
+        ++pos;
+      }
+      const double* high_row = high_dist.data() + static_cast<std::size_t>(i) * n;
+      const double* low_row = low_dist.data() + static_cast<std::size_t>(i) * n;
+      std::sort(high_order.begin(), high_order.end(), [&](const int lhs, const int rhs) {
+        return high_row[lhs] < high_row[rhs] ||
+          (high_row[lhs] == high_row[rhs] && lhs < rhs);
+      });
+      std::sort(low_order.begin(), low_order.end(), [&](const int lhs, const int rhs) {
+        return low_row[lhs] < low_row[rhs] ||
+          (low_row[lhs] == low_row[rhs] && lhs < rhs);
+      });
+      for (int r = 0; r < n - 1; ++r) {
+        high_rank[static_cast<std::size_t>(high_order[static_cast<std::size_t>(r)])] = r + 1;
+        low_rank[static_cast<std::size_t>(low_order[static_cast<std::size_t>(r)])] = r + 1;
+      }
+
+      for (int q = 0; q < nk; ++q) {
+        const int k = ks[static_cast<std::size_t>(q)];
+        for (int r = 0; r < k; ++r) {
+          const int low_nb = low_order[static_cast<std::size_t>(r)];
+          const int high_nb = high_order[static_cast<std::size_t>(r)];
+          const int rank_in_high = high_rank[static_cast<std::size_t>(low_nb)];
+          const int rank_in_low = low_rank[static_cast<std::size_t>(high_nb)];
+          if (rank_in_high <= k) local.shared[static_cast<std::size_t>(q)] += 1.0;
+          if (rank_in_high > k) {
+            local.trust_penalty[static_cast<std::size_t>(q)] += rank_in_high - k;
+          }
+          if (rank_in_low > k) {
+            local.continuity_penalty[static_cast<std::size_t>(q)] += rank_in_low - k;
+          }
+          local.rank_error[static_cast<std::size_t>(q)] +=
+            std::abs(rank_in_high - (r + 1));
+        }
+      }
+    }
+    accumulators[static_cast<std::size_t>(thread_id)] = std::move(local);
+  };
+
+  if (n_threads == 1) {
+    rank_range(0, 0, n);
+  } else {
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(n_threads));
+    for (int t = 0; t < n_threads; ++t) {
+      workers.emplace_back(rank_range, t, n * t / n_threads, n * (t + 1) / n_threads);
+    }
+    for (auto& worker : workers) worker.join();
+  }
+
+  NumericMatrix out(nk, 4);
+  for (int q = 0; q < nk; ++q) {
+    double shared = 0.0;
+    double trust_penalty = 0.0;
+    double continuity_penalty = 0.0;
+    double rank_error = 0.0;
+    for (const auto& acc : accumulators) {
+      shared += acc.shared[static_cast<std::size_t>(q)];
+      trust_penalty += acc.trust_penalty[static_cast<std::size_t>(q)];
+      continuity_penalty += acc.continuity_penalty[static_cast<std::size_t>(q)];
+      rank_error += acc.rank_error[static_cast<std::size_t>(q)];
+    }
+    const double k = static_cast<double>(ks[static_cast<std::size_t>(q)]);
+    const double normalizer = 2.0 /
+      (static_cast<double>(n) * k * (2.0 * n - 3.0 * k - 1.0));
+    out(q, 0) = std::max(0.0, std::min(1.0, 1.0 - normalizer * trust_penalty));
+    out(q, 1) = std::max(0.0, std::min(1.0, 1.0 - normalizer * continuity_penalty));
+    out(q, 2) = shared / (static_cast<double>(n) * k);
+    out(q, 3) = rank_error / (static_cast<double>(n) * k);
+  }
+  Rcpp::colnames(out) = Rcpp::CharacterVector::create(
+    "trustworthiness", "continuity", "knn_preservation", "mean_neighbor_rank_error"
+  );
+  return out;
 }
 
 // [[Rcpp::export]]

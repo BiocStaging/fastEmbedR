@@ -16,23 +16,27 @@ nearest-neighbour graphs. It focuses on:
 - UMAP from KNN input;
 - openTSNE-style t-SNE from KNN input;
 - native CPU, Apple Metal, and CUDA embedding backends where available;
+- float32 input/output support with float32 native optimizer buffers;
 - explicit backend reporting, with no silent CPU fallback labelled as GPU;
-- a small user API backed by the companion `faissR` package for FAISS/cuVS KNN.
+- native CPU HNSW and Apple Metal exact/IVF-Flat KNN for one-call embeddings;
+- optional GPU-resident CUDA KNN through direct FAISS GPU and RAPIDS cuVS APIs.
 
 The intended workflow is:
 
-1. compute nearest neighbours with `faissR::nn()`;
-2. reuse the same KNN object in `fastEmbedR::opentsne_knn()` or
+1. call `opentsne()` or `umap()` and let fastEmbedR select its native KNN path,
+   or compute a reusable graph with `faissR::nn()`;
+2. reuse a supplied KNN object in `fastEmbedR::opentsne_knn()` or
    `fastEmbedR::umap_knn()`;
 3. evaluate or plot the embedding.
 
 For the one-call functions `opentsne()` and `umap()`, the embedding backend is
 deliberately limited to `backend = "cpu"`, `"metal"`, or `"cuda"`. Internal
-KNN is delegated to `faissR`: the one-call embedding API currently asks for
-exact KNN below 100,000 samples and IVF above that threshold. CUDA openTSNE can
-consume GPU-resident KNN when the installed `faissR` build exposes it. CUDA UMAP
-uses CUDA faissR KNN, then materializes the KNN result for the validated
-host-prepared graph path before native CUDA optimization.
+CPU one-call embeddings use the package-native float32 HNSW path. Metal uses
+native exact search for small inputs and recall-tuned IVF-Flat for larger
+inputs. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct
+cuVS IVF-Flat above that threshold, then passes package-owned device pointers
+into UMAP or openTSNE. It does not call the faissR R API. No unavailable GPU
+backend is silently relabelled as CPU.
 
 ## Quick Start
 
@@ -62,16 +66,21 @@ plot(y_tsne, pch = 21, bg = labels)
 plot(y_umap, pch = 21, bg = labels)
 ```
 
+When a one-call function receives a `float::float32` matrix, its returned
+`layout` remains float32 to reduce host memory. Plot the embedding object
+directly with `plot(fit)`; fastEmbedR decodes the compact payload for graphics
+and quality metrics without changing the stored layout.
+
 ## Main Functions
 
 | Function | Purpose |
 | --- | --- |
-| `faissR::nn()` | FAISS/cuVS neighbour search supplied by the companion package. |
+| `faissR::nn()` | Optional reusable FAISS/cuVS neighbour search supplied by the companion package. |
 | `opentsne_knn()` | Native openTSNE-style t-SNE from a supplied KNN object. |
 | `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
-| `pca()` | fastPLS-style randomized SVD PCA for reusable scores and t-SNE initialization. |
+| `pca()` | Backend-native truncated PCA: CPU RSVD, resident Metal/MPS TSVD, or compiled CUDA RAFT TSVD. |
 | `landmark_tsne()` / `landmark_umap()` | Landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
 | `faissR::backend_info()` | Report FAISS/cuVS neighbour-search availability. |
@@ -82,19 +91,23 @@ For the development version:
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/faissR")
 remotes::install_github("tkcaccia/fastEmbedR")
 ```
 
+Install `faissR` separately only when its reusable public KNN API is needed.
+
 See [Installation](docs/installation.md) for `fastEmbedR` CPU, Metal, and CUDA
-embedding builds. FAISS/cuVS nearest-neighbour installation is documented in
-the companion [`faissR`](https://github.com/tkcaccia/faissR) project.
+embedding builds, including direct FAISS GPU and RAPIDS cuVS linkage for CUDA KNN. The
+companion [`faissR`](https://github.com/tkcaccia/faissR) project documents its
+broader reusable neighbour-search API.
 See [Bioconductor](docs/bioconductor.md) for the dependency split used for
-submission: core embedding code in `fastEmbedR`, optional KNN acceleration in
-`faissR`, and reference packages only in `Suggests`.
+submission: native CPU/Metal code in `fastEmbedR`, optional direct FAISS/cuVS CUDA
+KNN, and reference packages only in `Suggests`.
 
 ## License
 
 `fastEmbedR` is distributed under the MIT license. GPL packages such as `uwot`
 are used only as optional external benchmark/reference tools, not as required
-runtime dependencies or vendored source.
+runtime dependencies or vendored source. Native KNN derivatives and optional
+linked libraries retain the FAISS MIT, Faiss-mlx Apache-2.0, and RAPIDS cuVS
+Apache-2.0 notices under `inst/LICENSES/`.

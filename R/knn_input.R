@@ -185,16 +185,25 @@ set_embedding_colnames <- function(layout, prefix) {
   layout
 }
 
+embedding_dense_double_matrix <- function(x) {
+  if (is_float32_matrix(x)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to decode float32 matrices.", call. = FALSE)
+    }
+    x <- float::dbl(x)
+  } else {
+    x <- as.matrix(x)
+  }
+  storage.mode(x) <- "double"
+  x
+}
+
 finalize_embedding_layout <- function(layout, prefix, return_float32 = FALSE) {
   attrs <- attributes(layout)
   layout <- if (isTRUE(return_float32) && requireNamespace("float", quietly = TRUE)) {
     if (is_float32_matrix(layout)) layout else float::fl(as.matrix(layout))
   } else {
-    if (is_float32_matrix(layout)) {
-      matrix(as.numeric(layout), nrow = nrow(layout), ncol = ncol(layout))
-    } else {
-      if (!is.matrix(layout)) as.matrix(layout) else layout
-    }
+    embedding_dense_double_matrix(layout)
   }
   layout <- set_embedding_colnames(layout, prefix)
   keep <- setdiff(names(attrs), c("dim", "dimnames", "names", "class", "Data"))

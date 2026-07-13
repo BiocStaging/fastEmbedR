@@ -10,19 +10,25 @@
 [Reproducibility](reproducibility.md) |
 [References](references.md)
 
-`fastEmbedR` is split from the nearest-neighbour package `faissR`.
+`fastEmbedR` and `faissR` have separate responsibilities.
 
 - `faissR` provides FAISS/cuVS KNN, candidate KNN, graph construction,
   kNN prediction, and k-means.
-- `fastEmbedR` provides UMAP, openTSNE-style t-SNE, landmark transforms, and
-  embedding metrics.
+- `fastEmbedR` provides native CPU/Metal KNN for one-call embeddings, UMAP,
+  openTSNE-style t-SNE, landmark transforms, and embedding metrics.
 
 ## R Packages
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/faissR")
 remotes::install_github("tkcaccia/fastEmbedR")
+```
+
+Install `faissR` separately when its public KNN, graph,
+classifier, or k-means API is needed:
+
+```r
+remotes::install_github("tkcaccia/faissR")
 ```
 
 Suggested benchmark/reference packages:
@@ -44,28 +50,29 @@ required by the core `fastEmbedR` embedding functions.
 - R;
 - a C++17 compiler;
 - `Rcpp`;
-- the companion package `faissR` for one-call matrix-input KNN;
 - macOS Metal framework for native Metal embedding kernels on Apple Silicon;
-- CUDA toolkit for optional native CUDA embedding kernels.
+- CUDA toolkit plus RAPIDS cuVS/RAFT for optional native CUDA workflows.
 
-`faissR` owns FAISS/cuVS KNN installation. Install and validate `faissR` first
-using the instructions in the [`faissR` GitHub project](https://github.com/tkcaccia/faissR),
-then install `fastEmbedR`.
+`fastEmbedR` links directly to FAISS GPU and the RAPIDS cuVS C API for optional CUDA
+one-call KNN. Follow the [backend build guide](installation-backends.md) for
+native CUDA. Follow the [`faissR` GitHub project](https://github.com/tkcaccia/faissR)
+only when its broader public KNN functionality is required.
 
-For Bioconductor submission, `faissR` is treated as an optional enhancement
-rather than vendored source. The KNN-input functions `opentsne_knn()` and
-`umap_knn()` remain available when users provide neighbor matrices directly.
-The matrix-input convenience functions `opentsne()` and `umap()` require
-`faissR` and fail explicitly if it is not installed.
+For Bioconductor submission, `faissR` is an optional enhancement. CPU, Metal,
+and correctly compiled CUDA `opentsne()`/`umap()` work without it.
 
 ## CUDA Embedding Build
 
-CUDA KNN is provided by `faissR`. `fastEmbedR` only needs CUDA when compiling
-native CUDA embedding kernels for UMAP/openTSNE.
+CUDA KNN uses direct FAISS GPU exact search and direct cuVS IVF-Flat linkage.
+CUDA builds also compile the native UMAP/openTSNE kernels.
 
 ```sh
 CUDA_HOME=/usr/local/cuda \
+FAISS_HOME=/path/to/faiss-gpu \
+CUVS_HOME=/path/to/rapids \
 FASTEMBEDR_USE_CUDA=1 \
+FASTEMBEDR_USE_FAISS_GPU=1 \
+FASTEMBEDR_USE_CUVS=1 \
 R CMD INSTALL /path/to/fastEmbedR
 ```
 
@@ -77,6 +84,7 @@ clearly. It does not run on CPU while reporting CUDA.
 On Apple Silicon, `fastEmbedR` builds native Objective-C++/Metal embedding
 kernels for:
 
+- exact and recall-tuned IVF-Flat KNN;
 - UMAP layout optimization from KNN;
 - openTSNE FFT-grid optimization;
 - selected projection/refinement operations.
@@ -86,14 +94,14 @@ embedding paths.
 
 ## Backend Check
 
-After installation:
+For CUDA dependency diagnostics after installation:
 
 ```r
 library(fastEmbedR)
-faissR::backend_info()
+fastEmbedR:::backend_info()
 ```
 
-`faissR::backend_info()` reports nearest-neighbour backend availability.
+The diagnostic reports CUDA nearest-neighbour and embedding availability.
 `fastEmbedR` checks CPU, Metal, and CUDA embedding backends when a function is
 called with `backend = "cpu"`, `"metal"`, or `"cuda"`.
 

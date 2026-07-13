@@ -1,5 +1,3 @@
-if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
-
 make_cluster_data <- function(n = 18L, p = 5L) {
   labels <- rep(seq_len(3L), length.out = n)
   x <- matrix(rnorm(n * p, sd = 0.25), nrow = n, ncol = p)
@@ -38,6 +36,7 @@ test_that("public API is KNN and openTSNE focused", {
 })
 
 test_that("core exported functions have tiny openTSNE smoke tests", {
+  skip_if_not_installed("faissR")
   set.seed(101)
   fixture <- make_cluster_data()
   x <- fixture$x

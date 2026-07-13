@@ -31,11 +31,11 @@ opentsne_knn(
 )
 }
 \arguments{
-\item{indices}{A KNN object from an optional nearest-neighbour package, or an integer KNN index
+\item{indices}{A KNN object returned by [faissR::nn()], or an integer KNN index
 matrix.}
 
 \item{distances}{Numeric KNN distance matrix matching `indices`. Leave
-`NULL` when `indices` is a KNN object with `indices` and `distances` fields.}
+`NULL` when `indices` is a [faissR::nn()] result.}
 
 \item{n_neighbors}{Optional number of non-self neighbor columns to use from
 the supplied KNN graph. This lets you compute a wide KNN once and reuse
@@ -57,9 +57,11 @@ precompute and reuse a PCA initialization.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. For
-matrix input, KNN is delegated to faissR with
-automatic method/tuning selection through an internal bridge. CPU and Metal request faissR CPU HNSW with \code{target_recall = 0.99}; CUDA requests faissR CUDA \code{method = "auto"} with \code{target_recall = 0.99}.
+\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
+uses package-native HNSW. Metal uses package-native exact or recall-tuned
+IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
+rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
+device pointers directly to native CUDA openTSNE.
 Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
 \item{n_threads}{Number of CPU worker threads used by CPU KNN and CPU
@@ -108,21 +110,19 @@ A numeric embedding matrix with settings stored in
 }
 \description{
 `opentsne_knn()` is the direct KNN-input entry point for the native
-openTSNE-style optimizer. It accepts either a KNN object or separate KNN index
-and distance matrices. No neighbour search, scaling, or
+openTSNE-style optimizer. It accepts either an object returned by
+[faissR::nn()] or
+separate KNN index and distance matrices. No neighbour search, scaling, or
 PCA is done inside this function.
 }
 \examples{
-x <- scale(as.matrix(iris[, 1:4]))
-d <- as.matrix(stats::dist(x))
-diag(d) <- Inf
-k <- 15L
-idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
-dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
-  nrow = nrow(d), byrow = TRUE)
-layout <- opentsne_knn(idx, dst, init_data = x, perplexity = 5,
-  early_exaggeration_iter = 10, n_iter = 20)
-if (all(is.finite(layout))) {
-  plot(layout, pch = 21, bg = iris$Species)
+if (requireNamespace("faissR", quietly = TRUE)) {
+  x <- scale(as.matrix(iris[, 1:4]))
+  knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
+  layout <- opentsne_knn(knn, init_data = x, perplexity = 10,
+    early_exaggeration_iter = 100, n_iter = 250)
+  if (all(is.finite(layout))) {
+    plot(layout, pch = 21, bg = iris$Species)
+  }
 }
 }

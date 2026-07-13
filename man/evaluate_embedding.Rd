@@ -13,7 +13,7 @@ evaluate_embedding(
   primary_k = NULL,
   reference_nn = NULL,
   sample_size_for_global_metrics = min(5000L, nrow(x_high)),
-  sample_size_for_local_metrics = min(5000L, nrow(x_high)),
+  sample_size_for_local_metrics = min(2000L, nrow(x_high)),
   use_cache = FALSE,
   cache_dir = file.path("results", "cache"),
   force_recompute = FALSE,
@@ -42,7 +42,7 @@ possible.}
 
 \item{reference_nn}{Optional precomputed high-dimensional nearest-neighbor
 list. It may include a self-neighbor column, like
-a self-neighbour KNN object with at least \code{k + 1} columns.}
+\code{faissR::nn(x, x, k + 1)}.}
 
 \item{sample_size_for_global_metrics}{Maximum deterministic subsample size
 for all-pairs global distance metrics.}
@@ -73,25 +73,17 @@ A one-row data frame with local, global, label-aware, batch-aware,
   and metadata columns. Per-class recall is also attached as an attribute.
 }
 \description{
-Evaluate an embedding against high-dimensional structure
+Trustworthiness and continuity use their standard rank-penalty definitions.
+Local rank metrics are computed exactly on a deterministic subsample so the
+function does not allocate all-pairs matrices for the complete dataset.
+Float32 inputs are sampled before conversion to a dense double matrix.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
-d <- as.matrix(dist(x))
-diag(d) <- Inf
-k <- 10L
-idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
-dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
-  nrow = nrow(d), byrow = TRUE)
-embedding <- as.matrix(iris[, 1:2])
-evaluate_embedding(
-  x,
-  embedding,
-  labels = iris$Species,
-  k = 5,
-  reference_nn = list(indices = idx, distances = dst),
-  sample_size_for_global_metrics = nrow(x),
-  sample_size_for_local_metrics = nrow(x),
-  n_threads = 1
+metrics <- evaluate_embedding(
+  x, x[, 1:2], labels = iris$Species, k = 5,
+  sample_size_for_local_metrics = 100,
+  sample_size_for_global_metrics = 100,
+  seed = 1
 )
 }

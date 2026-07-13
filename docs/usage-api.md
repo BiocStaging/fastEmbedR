@@ -38,11 +38,9 @@ benchmarks easier to interpret.
 
 The one-call functions intentionally hide the KNN algorithm choice. For
 `opentsne()` and `umap()`, `backend` accepts only `"cpu"`, `"metal"`, or
-`"cuda"`. Matrix-input KNN is delegated to faissR through fastEmbedR's internal bridge:
-fastEmbedR asks for exact KNN below 100,000 samples and IVF above that threshold.
-CUDA openTSNE can consume GPU-resident KNN when available. CUDA UMAP uses CUDA
-faissR KNN but materializes the result for the validated graph-construction
-path before CUDA optimization. To benchmark another KNN algorithm, compute it
+`"cuda"`. CPU KNN uses native HNSW; Metal uses native exact/IVF-Flat; CUDA
+uses direct FAISS GPU exact search or RAPIDS cuVS IVF-Flat and keeps its output
+resident on the device. To benchmark another KNN algorithm, compute it
 explicitly with `faissR::nn()` or `faissR::nn_gpu()` and pass the result to
 `opentsne_knn()` or `umap_knn()`.
 
@@ -65,7 +63,7 @@ Current metric support is deliberately explicit:
 
 | metric | supported backends | notes |
 | --- | --- | --- |
-| `euclidean` | FAISS CPU and optional CUDA/cuVS through `faissR` | Recommended default for large UMAP/openTSNE benchmarks. |
+| `euclidean` | native CPU/Metal and optional direct CUDA/cuVS | Recommended default for large UMAP/openTSNE benchmarks. |
 | `cosine` / inner product | FAISS/candidate paths where enabled by `faissR` | Use normalized rows when treating inner product as cosine similarity. |
 
 ## Basic KNN-First UMAP
@@ -115,19 +113,20 @@ KNN-input runs and is not used for neighbour search or optimization.
 
 ## PCA API
 
-`fastEmbedR::pca()` exposes the same RSVD family used internally for
-openTSNE initialization:
+`fastEmbedR::pca()` exposes the backend-native truncated PCA used internally
+for openTSNE initialization:
 
 ```r
 pca_fit <- pca(x, ncomp = 2, backend = "cpu", seed = 1)
 Y_init <- opentsne_pca_init(x, backend = "cpu", seed = 1)
 ```
 
-The public `pca()` helper is intentionally simple: randomized SVD only, no
-`irlba`, no ARPACK method menu, and no Python bridge. For openTSNE
-initialization, CUDA uses native RAPIDS RAFT TSVD compiled into the package
-CUDA backend and fails loudly if that support is unavailable. CPU and Metal
-use the native RSVD family available to the package build.
+The public `pca()` helper is intentionally simple: there is no `irlba` or
+ARPACK method menu and no Python bridge. For openTSNE initialization, CUDA uses
+native RAPIDS RAFT TSVD compiled into the package CUDA backend and fails loudly
+if that support is unavailable. Metal uses a native float32 block-subspace TSVD
+with MPS matrix products and a resident workspace. CPU uses the fastPLS-style
+RSVD family available to the package build.
 
 ## Explicit GPU Use
 
@@ -210,7 +209,7 @@ supplied neighbour graph.
 | `faissR::nn()` | Companion-package KNN function for data/query matrices. |
 | `umap_knn()` | UMAP from a supplied KNN object or matrices. |
 | `umap()` | One-call preprocessing, KNN, and UMAP embedding. |
-| `pca()` | fastPLS-style randomized SVD PCA scores/loadings. |
+| `pca()` | Backend-native truncated PCA scores/loadings. |
 | `embed_knn()` | KNN dispatcher; UMAP by default, openTSNE with `method = "opentsne"`. |
 | `opentsne_knn()` | Direct native openTSNE-style optimizer from KNN. |
 | `opentsne()` | One-call preprocessing, KNN, and openTSNE-style embedding. |

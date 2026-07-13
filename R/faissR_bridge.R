@@ -8,6 +8,8 @@ normalize_nn_threads <- function(n_threads) {
 
 .fastembedr_faissr_cache <- new.env(parent = emptyenv())
 
+fastembedr_minimum_faissr_version <- function() numeric_version("0.99.3")
+
 fastembedr_optional_namespace_available <- function(package) {
   requireNamespace(package, quietly = TRUE)
 }
@@ -22,9 +24,19 @@ fastembedr_faissr_function <- function(name) {
   package <- "faissR"
   if (!fastembedr_optional_namespace_available(package)) {
     stop(
-      "Package `faissR` is required for one-call fastEmbedR embeddings. ",
-      "Install faissR or pass a precomputed KNN object to `opentsne_knn()` ",
+      "Package `faissR` is required for the validated one-call CUDA KNN route. ",
+      "Install faissR with FAISS GPU support, or pass a ",
+      "precomputed KNN object to `opentsne_knn()` ",
       "or `umap_knn()`.",
+      call. = FALSE
+    )
+  }
+  installed_version <- utils::packageVersion(package)
+  minimum_version <- fastembedr_minimum_faissr_version()
+  if (installed_version < minimum_version) {
+    stop(
+      "fastEmbedR requires faissR >= ", minimum_version,
+      " for the requested external KNN route; installed version is ", installed_version, ".",
       call. = FALSE
     )
   }
@@ -56,7 +68,7 @@ fastembedr_faissr_nn <- function(data,
     n_threads = n_threads,
     ...
   )
-  fastembedr_call_supported(fn, args)
+  do.call(fn, args)
 }
 
 fastembedr_exact_knn_fallback <- function(data,
@@ -69,6 +81,14 @@ fastembedr_exact_knn_fallback <- function(data,
   storage.mode(points) <- "double"
   if (ncol(data) != ncol(points)) {
     stop("KNN fallback requires data and query matrices with the same number of columns.", call. = FALSE)
+  }
+  pair_count <- as.double(nrow(data)) * as.double(nrow(points))
+  if (pair_count > 1e7) {
+    stop(
+      "The base exact-KNN fallback would allocate an unsafe dense distance matrix. ",
+      "Install faissR, provide precomputed neighbors, or evaluate a smaller subset.",
+      call. = FALSE
+    )
   }
   k <- as.integer(k)
   k <- min(max(1L, k), nrow(data))
@@ -119,24 +139,33 @@ fastembedr_has_gpu_knn_shape <- function(x) {
 }
 
 fastembedr_as_gpu_knn <- function(x) {
-  if (!fastembedr_has_gpu_knn_shape(x) || inherits(x, "faissR_gpu_knn")) {
+  if (!fastembedr_has_gpu_knn_shape(x) ||
+      inherits(x, "faissR_gpu_knn") ||
+      inherits(x, "fastEmbedR_gpu_knn")) {
     return(x)
   }
-  class(x) <- unique(c("faissR_gpu_knn", class(x), "list"))
+  class(x) <- unique(c("fastEmbedR_gpu_knn_contract", class(x), "list"))
   x
 }
 
 fastembedr_is_gpu_knn <- function(x) {
-  inherits(x, "faissR_gpu_knn") || fastembedr_has_gpu_knn_shape(x)
+  inherits(x, "faissR_gpu_knn") ||
+    inherits(x, "fastEmbedR_gpu_knn") ||
+    fastembedr_has_gpu_knn_shape(x)
 }
 
 fastembedr_gpu_knn_to_host <- function(knn) {
   if (!fastembedr_is_gpu_knn(knn)) return(knn)
   knn <- fastembedr_as_gpu_knn(knn)
-  to_host <- fastembedr_faissr_function("gpu_knn_to_host")
   gpu_backend <- knn$backend_used %||% attr(knn, "backend") %||% "cuda"
   gpu_metric <- knn$metric %||% attr(knn, "metric") %||% NA_character_
-  out <- to_host(knn)
+  native_provider <- inherits(knn, "fastEmbedR_gpu_knn") ||
+    identical(knn$gpu_provider %||% "", "fastEmbedR_native_cuvs")
+  out <- if (native_provider) {
+    native_cuda_knn_to_host_cpp(knn)
+  } else {
+    fastembedr_faissr_function("gpu_knn_to_host")(knn)
+  }
   attr(out, "gpu_resident_source") <- TRUE
   attr(out, "gpu_backend_used") <- gpu_backend
   attr(out, "backend") <- attr(out, "backend") %||% paste0(gpu_backend, "_host")
@@ -148,13 +177,13 @@ fastembedr_gpu_knn_to_host <- function(knn) {
 
 fastembedr_gpu_knn_info <- function(knn) {
   if (!fastembedr_is_gpu_knn(knn)) {
-    stop("Expected a `faissR_gpu_knn` object.", call. = FALSE)
+    stop("Expected a CUDA GPU-resident KNN object.", call. = FALSE)
   }
   n <- as.integer(knn$n_query %||% knn$n %||% NA_integer_)
   k <- as.integer(knn$k %||% NA_integer_)
   if (length(n) != 1L || is.na(n) || n < 2L ||
       length(k) != 1L || is.na(k) || k < 1L) {
-    stop("Invalid `faissR_gpu_knn` dimensions.", call. = FALSE)
+    stop("Invalid CUDA GPU-resident KNN dimensions.", call. = FALSE)
   }
   list(
     n = n,
@@ -185,10 +214,6 @@ fastembedr_embedding_nn_policy <- function(embedding_backend, n = NULL) {
   small_enough_for_exact <- length(n) == 1L && !is.na(n) && n < 100000L
   method <- if (isTRUE(small_enough_for_exact)) "exact" else "ivf"
   if (identical(embedding_backend, "cuda")) {
-    if (identical(method, "ivf") &&
-        !fastembedr_faissr_method_available("nn_gpu", "ivf")) {
-      method <- "auto"
-    }
     return(list(
       backend = "cuda",
       method = method,
@@ -196,9 +221,17 @@ fastembedr_embedding_nn_policy <- function(embedding_backend, n = NULL) {
       target_recall = 0.99
     ))
   }
+  if (identical(embedding_backend, "metal")) {
+    return(list(
+      backend = "metal",
+      method = if (length(n) == 1L && !is.na(n) && n < 4096L) "exact" else "ivf",
+      tuning = "auto",
+      target_recall = 0.99
+    ))
+  }
   list(
     backend = "cpu",
-    method = method,
+    method = "hnsw",
     tuning = "auto",
     target_recall = 0.99
   )
@@ -206,10 +239,21 @@ fastembedr_embedding_nn_policy <- function(embedding_backend, n = NULL) {
 
 fastembedr_nn_policy_engine <- function(policy, keep_gpu = FALSE) {
   if (is.list(policy) && identical(policy$backend, "cuda")) {
-    prefix <- if (isTRUE(keep_gpu)) "faissR_nn_gpu_" else "faissR_nn_cuda_host_"
+    provider <- if (identical(policy$method %||% "auto", "ivf")) {
+      "native_cuvs"
+    } else {
+      "native_faiss"
+    }
+    prefix <- if (isTRUE(keep_gpu)) {
+      paste0(provider, "_gpu_")
+    } else {
+      paste0(provider, "_cuda_host_")
+    }
     paste0(prefix, policy$method %||% "auto")
   } else if (is.list(policy) && identical(policy$backend, "cpu")) {
-    paste0("faissR_cpu_", policy$method %||% "auto")
+    paste0("native_cpu_", policy$method %||% "hnsw")
+  } else if (is.list(policy) && identical(policy$backend, "metal")) {
+    paste0("native_metal_", policy$method %||% "ivf")
   } else {
     "faissR"
   }
@@ -225,20 +269,86 @@ fastembedr_nn_without_self <- function(data,
                                        tuning = "auto",
                                        target_recall = NULL,
                                        keep_gpu = FALSE) {
-  use_gpu_resident <- isTRUE(keep_gpu) &&
-    identical(backend, "cuda") &&
-    fastembedr_faissr_function_available("nn_gpu")
-  if (isTRUE(keep_gpu) && identical(backend, "cuda") && !use_gpu_resident) {
-    stop(
-      "CUDA one-call embeddings require `faissR::nn_gpu()` so KNN indices ",
-      "and distances remain on the CUDA device. Reinstall faissR with CUDA/",
-      "cuVS support, or pass a precomputed host KNN object explicitly to ",
-      "`opentsne_knn()` or `umap_knn()`.",
-      call. = FALSE
-    )
-  }
-  fn <- fastembedr_faissr_function(if (use_gpu_resident) "nn_gpu" else "nn")
   k <- as.integer(k)
+  target_recall <- target_recall %||% 0.99
+  if (identical(backend, "cuda")) {
+    if (!method %in% c("auto", "exact", "flat", "bruteforce", "ivf")) {
+      stop(
+        "CUDA one-call KNN supports methods `auto`, `exact`, and `ivf`.",
+        call. = FALSE
+      )
+    }
+    data_n <- if (is_float32_matrix(data)) {
+      nrow(methods::slot(data, "Data"))
+    } else {
+      nrow(data)
+    }
+    exact_route <- method %in% c("exact", "flat", "bruteforce") ||
+      (identical(method, "auto") && data_n < 100000L)
+    if (!isTRUE(native_cuda_knn_available_cpp())) {
+      stop(
+        "Native CUDA KNN is unavailable in this fastEmbedR build; no CPU ",
+        "fallback was used.",
+        call. = FALSE
+      )
+    }
+    if (isTRUE(exact_route) && !isTRUE(native_cuda_faiss_gpu_available_cpp())) {
+      stop(
+        "The validated CUDA exact KNN route requires a fastEmbedR build linked ",
+        "directly to FAISS GPU. Reinstall with FASTEMBEDR_USE_FAISS_GPU=1; ",
+        "no slower cuVS or CPU fallback was used.",
+        call. = FALSE
+      )
+    }
+    out <- native_cuda_knn_cpp(
+      data,
+      k = k,
+      method = method,
+      metric = metric,
+      target_recall = target_recall,
+      keep_gpu = isTRUE(keep_gpu)
+    )
+    if (isTRUE(keep_gpu)) return(out)
+    return(fastembedr_convert_knn_distances(out, output))
+  }
+  if (identical(backend, "cpu") && method %in% c("auto", "hnsw") &&
+      metric %in% c("euclidean", "cosine", "correlation")) {
+    out <- native_hnsw_knn_cpp(
+      data,
+      k = k,
+      n_threads = normalize_nn_threads(n_threads),
+      metric = metric,
+      target_recall = target_recall
+    )
+    attr(out, "backend") <- "cpu"
+    attr(out, "method") <- "native_hnsw"
+    attr(out, "exclude_self") <- TRUE
+    return(fastembedr_convert_knn_distances(out, output))
+  }
+  if (identical(backend, "metal") && method %in% c("auto", "exact", "ivf") &&
+      metric %in% c("euclidean", "cosine", "correlation")) {
+    if (!isTRUE(native_metal_knn_available_cpp())) {
+      stop("Native Metal KNN was requested but is unavailable in this build.", call. = FALSE)
+    }
+    out <- native_metal_knn_cpp(
+      data,
+      k = k,
+      method = method,
+      metric = metric,
+      target_recall = target_recall
+    )
+    if (identical(out$method, "native_metal_ivf") && !isTRUE(out$target_met)) {
+      stop(
+        "Native Metal IVF could not meet the requested KNN recall target; ",
+        "no CPU fallback was used.",
+        call. = FALSE
+      )
+    }
+    attr(out, "backend") <- "metal"
+    attr(out, "exclude_self") <- TRUE
+    return(fastembedr_convert_knn_distances(out, output))
+  }
+  fn <- fastembedr_faissr_function("nn")
   use_exclude_self <- fastembedr_supports_formal(fn, "exclude_self")
   args <- list(
     data = data,
@@ -257,19 +367,6 @@ fastembedr_nn_without_self <- function(data,
     args$target_recall <- target_recall
   }
   out <- fastembedr_call_supported(fn, args)
-  if (fastembedr_is_gpu_knn(out)) {
-    out <- fastembedr_as_gpu_knn(out)
-  } else if (isTRUE(keep_gpu) && identical(backend, "cuda")) {
-    stop(
-      "faissR CUDA KNN did not return a GPU-resident KNN object. ",
-      "fastEmbedR refuses to silently copy CUDA KNN results back to host for ",
-      "one-call CUDA embeddings.",
-      call. = FALSE
-    )
-  }
-  if (!isTRUE(keep_gpu)) {
-    out <- fastembedr_gpu_knn_to_host(out)
-  }
   if (!use_exclude_self && is.list(out) && !is.null(out$indices) && !is.null(out$distances)) {
     idx <- out$indices
     dst <- out$distances

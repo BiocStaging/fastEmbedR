@@ -1,5 +1,3 @@
-if (!requireNamespace("faissR", quietly = TRUE)) testthat::skip("faissR integration tests require the optional faissR package")
-
 test_that("Metal public paths stay native and do not depend on Python bridges", {
   desc <- utils::packageDescription("fastEmbedR")
   dependency_fields <- paste(
@@ -23,6 +21,7 @@ test_that("GPU UMAP exposes one CUDA fused entry shape", {
 })
 
 test_that("Metal openTSNE FFT-grid exposes opt-in per-stage timing", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   old_timing <- Sys.getenv("FASTEMBEDR_METAL_STAGE_TIMING", unset = NA_character_)
@@ -84,6 +83,7 @@ test_that("GPU UMAP config records only the validated atomic paths", {
 })
 
 test_that("Metal UMAP landmark refinement stays native and reports its backend", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   old_refine <- getOption("fastEmbedR.landmark_umap_refine_epochs", NULL)
@@ -116,6 +116,7 @@ test_that("Metal UMAP landmark refinement stays native and reports its backend",
 })
 
 test_that("Metal affine landmark projection matches CPU local affine correction", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   set.seed(92)
@@ -157,6 +158,7 @@ test_that("Metal affine landmark projection matches CPU local affine correction"
 })
 
 test_that("Metal preprocessing, projection, interpolation, and scoring match CPU", {
+  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   set.seed(71)
@@ -318,4 +320,53 @@ test_that("Metal preprocessing, projection, interpolation, and scoring match CPU
   cpu_sil <- fastEmbedR:::silhouette_score_cpp(layout, as.integer(labels))
   metal_sil <- fastEmbedR:::silhouette_score_metal_cpp(layout, as.integer(labels), 3L)
   expect_equal(metal_sil, cpu_sil, tolerance = 1e-5)
+})
+
+test_that("native Metal MPS TSVD matches reference PCA", {
+  skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
+
+  set.seed(72)
+  x <- matrix(rnorm(240L * 20L), nrow = 240L, ncol = 20L)
+  reference <- stats::prcomp(x, center = TRUE, scale. = FALSE, rank. = 2L)$x
+  fit <- fastEmbedR::pca(
+    x,
+    ncomp = 2L,
+    center = TRUE,
+    scale = FALSE,
+    backend = "metal",
+    seed = 72L
+  )
+
+  expect_s3_class(fit, "fastEmbedR_pca")
+  expect_identical(fit$backend, "metal_mps_tsvd")
+  expect_identical(fit$method, "metal_mps_tsvd")
+  expect_identical(fit$precision, "float32")
+  expect_equal(dim(fit$scores), c(240L, 2L))
+  expect_equal(dim(fit$loadings), c(20L, 2L))
+  agreement <- abs(stats::cor(reference, fit$scores))
+  expect_gte(max(agreement[1L, ]), 0.99)
+  expect_gte(max(agreement[2L, ]), 0.99)
+
+  if (requireNamespace("float", quietly = TRUE)) {
+    float_fit <- fastEmbedR::pca(
+      float::fl(x),
+      ncomp = 2L,
+      center = TRUE,
+      scale = FALSE,
+      backend = "metal",
+      seed = 72L
+    )
+    expect_identical(float_fit$precision, "float32")
+    expect_equal(float_fit$scores, fit$scores, tolerance = 1e-5)
+  }
+
+  init <- fastEmbedR::opentsne_pca_init(
+    x,
+    n_components = 2L,
+    backend = "metal",
+    seed = 72L
+  )
+  expect_identical(attr(init, "fastEmbedR_init_backend"), "metal_mps_tsvd")
+  expect_identical(attr(init, "fastEmbedR_init_method"), "pca_metal_mps_tsvd")
+  expect_equal(max(apply(init, 2L, stats::sd)), 1e-4, tolerance = 1e-8)
 })

@@ -26,19 +26,21 @@ submission of `fastEmbedR`.
 | R package | `igraph`, `leidenbase` | Optional graph and clustering examples. | suggested |
 | R package | `Rtsne`, `uwot`, `umap` | Optional reference benchmarks only. | suggested |
 | Companion package | `faissR` | FAISS/cuVS nearest-neighbor search for matrix-input `opentsne()` and `umap()`. | optional enhancement |
-| Companion package | `fastPLS` | Optional external comparison for randomized SVD PCA. | optional enhancement |
-| System library | C++17 compiler, Fortran compiler | Native CPU code and numerical helper compilation. | yes |
-| System library | Apple Metal framework | Native Metal embedding backend on macOS. | optional |
-| System library | CUDA Toolkit, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT/cuML headers/libraries | Native CUDA embedding backend and CUDA TSVD initialization. | optional |
+| Companion package | `fastPLS >= 0.99.3` | Preferred optional randomized-SVD PCA provider for CPU; Metal and compiled CUDA initialization use native fastEmbedR backends. | optional enhancement |
+| System library | C++17 compiler | Native CPU code and numerical helper compilation. | yes |
+| System library | Apple Metal framework | Native Metal KNN and embedding backends on macOS. | optional |
+| System library | CUDA Toolkit, FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT and cuVS C libraries | Native CUDA KNN, embedding backend, and CUDA TSVD initialization. | optional |
 
-`fastEmbedR` does not vendor FAISS, cuVS, RAFT, cuML, `uwot`, `Rtsne`, or
-Python openTSNE source code.
+`fastEmbedR` does not vendor the full FAISS, cuVS, RAFT, or cuML libraries, or
+`uwot`, `Rtsne`, or Python openTSNE source. Its compact FAISS-derived HNSW and
+Faiss-mlx-informed Metal files retain their permissive licenses under
+`inst/LICENSES/`.
 
 ## Why faissR Is Not A Hard Import
 
-`faissR` owns nearest-neighbor search. `fastEmbedR` consumes `faissR` KNN output
-when it is available, but the KNN-input functions remain usable without
-`faissR`:
+`faissR` owns its public reusable KNN API. fastEmbedR owns the internal
+CPU/Metal KNN and direct FAISS/cuVS CUDA KNN used by one-call embeddings. The following remain usable
+without `faissR`:
 
 - `opentsne_knn()` works from supplied neighbor indices and distances;
 - `umap_knn()` works from supplied neighbor indices and distances;
@@ -46,9 +48,8 @@ when it is available, but the KNN-input functions remain usable without
   native embedding inputs;
 - `evaluate_embedding()` and plotting helpers do not require `faissR`.
 
-The one-call matrix functions `opentsne()` and `umap()` require a nearest
-neighbor provider. When `faissR` is not installed, they fail with an explicit
-message rather than silently changing backend or algorithm.
+CPU, Metal, and a correctly compiled CUDA one-call build work without faissR.
+CUDA requests fail explicitly when cuVS is not linked.
 
 For Bioconductor submission, this keeps the core package buildable with
 standard R/Bioconductor dependencies while still documenting the recommended
@@ -93,7 +94,7 @@ LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 R CMD build .
 
 LC_ALL=C \
-FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.1.0.tar.gz
+FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.0.tar.gz
 ```
 
 GPU-enabled builds should be validated separately on machines with the relevant
@@ -105,10 +106,10 @@ The local submission preflight used for this repository is:
 ```sh
 LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 \
-R CMD check --no-manual --no-build-vignettes fastEmbedR_0.1.0.tar.gz
+R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.0.tar.gz
 
 LC_ALL=C \
-Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.1.0.tar.gz", `quit-with-status`=FALSE)'
+Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.0.tar.gz", `quit-with-status`=FALSE)'
 ```
 
 The `--no-build-vignettes` check mode is useful during development, but it
