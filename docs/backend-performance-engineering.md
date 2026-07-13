@@ -197,6 +197,29 @@ is `1e-4`. PCA timing is not included in the embedding-only results below;
 the same precomputed initialization was supplied to every baseline and
 optimized run.
 
+The CPU and Metal implementations were also compared directly on all 70,000
+flattened MNIST observations using float32 input, two components, centering,
+no feature scaling, seed 4, and three repetitions:
+
+| Backend | Median PCA time, s | Precision | Engine |
+| --- | ---: | --- | --- |
+| CPU | 1.578 | float32 | Native RSVD |
+| Metal | 0.429 | float32 | Native MPS block-subspace TSVD |
+
+Metal was 3.68 times faster in this measurement. The CPU and Metal loading
+subspaces had a minimum canonical correlation of 0.9941 (maximum principal
+angle 6.20 degrees), while pairwise distances between a deterministic sample
+of 2,000 score rows had Pearson correlation 0.9977. The small-data test suite
+also compares Metal scores against `stats::prcomp()` and requires correlation
+of at least 0.99 for both components.
+
+The CUDA implementation is a distinct native RAFT TSVD path. In the accepted
+MNIST70k device-resident run, the complete CUDA initialization/preprocessing
+block required 0.279 seconds and produced a valid float32 initialization for
+the final openTSNE embedding. CUDA requests fail if RAFT TSVD is not compiled;
+they are not silently replaced by CPU PCA. The CPU/Metal comparison files are
+stored under `results/cpu_metal_optimization/pca_validation/`.
+
 ## Landmark Projection And Transform
 
 Landmark workflows embed a reference subset and then transform the remaining
@@ -240,6 +263,27 @@ The same final build produced the following UMAP regression timings from the
 cached MNIST KNN: 3.290 seconds for CPU fuzzy UMAP and 0.978 seconds for Metal
 fuzzy UMAP. These are smoke measurements, not a claim that the UMAP algorithm
 was optimized in this pass.
+
+### CPU thread scaling
+
+The retained build was measured separately with 1, 2, 4, and 8 CPU threads.
+The machine has four performance and four efficiency cores. KNN and PCA were
+cached, and every row used the same MNIST70k graph, initialization, seed, and
+optimizer settings:
+
+| Threads | openTSNE embedding, s | openTSNE speedup | Fuzzy UMAP embedding, s | UMAP speedup |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 46.988 | 1.00x | 13.151 | 1.00x |
+| 2 | 25.636 | 1.83x | 6.030 | 2.18x |
+| 4 | 14.304 | 3.28x | 3.299 | 3.99x |
+| 8 | 12.510 | 3.76x | 3.335 | 3.94x |
+
+The multicore implementation therefore performs well through four threads.
+UMAP is nearly linear to the four performance cores. openTSNE retains serial
+or memory-bound grid work and reaches 3.28x at four threads. Adding the four
+efficiency cores gives only a small openTSNE improvement and no UMAP benefit,
+so four threads are the sensible default on this Apple M3. Raw rows are stored
+in `results/cpu_metal_optimization/final_cpu_scaling/`.
 
 On MetRef, baseline and retained CPU/Metal layouts were exactly equal after the
 changes (coordinate correlation 1.0). Single-run elapsed times were 0.581 to
