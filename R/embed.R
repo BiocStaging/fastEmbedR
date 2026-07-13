@@ -57,7 +57,12 @@ prepare_embedding_data <- function(data,
   if (nrow(x) < 2L || ncol(x) < 1L) {
     stop("`data` must have at least two rows and one column.", call. = FALSE)
   }
-  if (any(!is.finite(x))) {
+  finite_input <- if (keep_float32) {
+    float32_all_finite_cpp(x)
+  } else {
+    all(is.finite(x))
+  }
+  if (!isTRUE(finite_input)) {
     stop("`data` must contain only finite values.", call. = FALSE)
   }
 
@@ -188,6 +193,46 @@ validate_pca_backend <- function(backend) {
   backend
 }
 
+fastembedr_metal_tsvd_pca <- function(data,
+                                      ncomp,
+                                      center = TRUE,
+                                      scale = FALSE,
+                                      seed = 4L) {
+  x <- if (is_float32_matrix(data)) {
+    data
+  } else {
+    x <- as.matrix(data)
+    storage.mode(x) <- "double"
+    x
+  }
+  fit <- pca_tsvd_metal_cpp(
+    x,
+    as.integer(ncomp),
+    isTRUE(center),
+    isTRUE(scale),
+    as.integer(seed)
+  )
+  out <- list(
+    scores = fit$scores,
+    loadings = fit$loadings,
+    singular_values = fit$singular_values,
+    center = fit$center,
+    scale = fit$scale,
+    ncomp = as.integer(ncol(fit$scores)),
+    method = fit$method,
+    backend = fit$backend,
+    backend_reason = NA_character_,
+    engine = "native_metal_mps",
+    precision = fit$precision,
+    oversample = as.integer(fit$oversample),
+    power = as.integer(fit$power),
+    seed = as.integer(seed),
+    timing = fit$timing
+  )
+  class(out) <- "fastEmbedR_pca"
+  out
+}
+
 prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
   x <- if (is_float32_matrix(data)) {
     if (!requireNamespace("float", quietly = TRUE)) {
@@ -219,26 +264,26 @@ prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
   list(data = x, center = center_values, scale = scale_values)
 }
 
-#' Randomized SVD PCA
+#' Backend-native truncated PCA
 #'
-#' `pca()` computes principal component scores using the fastPLS-style
-#' randomized SVD algorithm used internally by fastEmbedR. The implementation is
-#' intentionally restricted to RSVD: it does not use `irlba`, ARPACK, or a
-#' method-selection menu. The CUDA and Metal backends accelerate the RSVD
-#' matrix-multiply steps when the package was compiled with the corresponding
-#' native backend; otherwise explicit GPU requests fail and the function reports
-#' the fallback reason only when the lower-level backend itself falls back.
+#' `pca()` computes principal component scores with a backend-native truncated
+#' decomposition. CPU uses the fastPLS-style randomized SVD family. Metal uses
+#' a package-native float32 block-subspace TSVD whose large matrix products are
+#' executed with Metal Performance Shaders while data and work buffers remain
+#' resident in unified GPU memory. The API intentionally has no decomposition
+#' method menu and does not call Python. Explicit unavailable GPU requests fail
+#' instead of being reported as GPU work.
 #'
 #' @param data Numeric matrix/data frame with observations in rows.
 #' @param ncomp Number of principal components.
-#' @param center If `TRUE`, mean-center columns before RSVD.
+#' @param center If `TRUE`, mean-center columns before decomposition.
 #' @param scale If `TRUE`, scale centered columns to unit sample standard
-#'   deviation before RSVD.
+#'   deviation before decomposition.
 #' @param backend PCA backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param seed Random seed for the Gaussian RSVD sketch.
+#' @param seed Random seed for the Gaussian subspace sketch.
 #' @return A `fastEmbedR_pca` list with `scores`, `loadings`,
-#'   `singular_values`, centering/scaling vectors, backend metadata, and RSVD
-#'   tuning metadata.
+#'   `singular_values`, centering/scaling vectors, backend metadata, and
+#'   decomposition metadata.
 #' @examples
 #' fit <- pca(as.matrix(iris[, 1:4]), ncomp = 2, seed = 1)
 #' plot(fit$scores, pch = 21, bg = iris$Species)
@@ -254,6 +299,25 @@ pca <- function(data,
   if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) || ncomp < 1L) {
     stop("`ncomp` must be a positive integer.", call. = FALSE)
   }
+  if (identical(backend, "metal")) {
+    return(fastembedr_metal_tsvd_pca(
+      data,
+      ncomp = ncomp,
+      center = center,
+      scale = scale,
+      seed = seed
+    ))
+  }
+  fastpls_fit <- fastembedr_fastpls_pca(
+    data,
+    ncomp = ncomp,
+    center = center,
+    scale = scale,
+    backend = backend,
+    seed = seed
+  )
+  if (!is.null(fastpls_fit)) return(fastpls_fit)
+
   prepared <- prepare_pca_matrix(data, center = center, scale = scale)
   rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
   if (rank < 1L) {
@@ -285,6 +349,61 @@ pca <- function(data,
     backend_reason = fit$backend_reason,
     oversample = fit$oversample,
     power = fit$power,
+    seed = as.integer(seed)
+  )
+  class(out) <- "fastEmbedR_pca"
+  out
+}
+
+fastembedr_fastpls_pca <- function(data,
+                                   ncomp,
+                                   center,
+                                   scale,
+                                   backend,
+                                   seed) {
+  package <- "fastPLS"
+  if (!fastembedr_optional_namespace_available(package)) return(NULL)
+  installed_version <- utils::packageVersion(package)
+  if (installed_version < numeric_version("0.99.3")) return(NULL)
+  pca_fun <- tryCatch(
+    fastembedr_optional_export(package, "pca"),
+    error = function(e) NULL
+  )
+  if (is.null(pca_fun)) return(NULL)
+
+  fit <- tryCatch(
+    pca_fun(
+      data,
+      ncomp = as.integer(ncomp),
+      center = isTRUE(center),
+      scale = isTRUE(scale),
+      backend = backend,
+      method = "rsvd",
+      seed = as.integer(seed)
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(fit) || is.null(fit$scores) || is.null(fit$loadings)) return(NULL)
+
+  singular_values <- fit$svd$d %||% NULL
+  resolved_backend <- fit$svd.method %||% fit$svd$svd.method %||%
+    paste0(backend, "_rsvd")
+  out <- list(
+    scores = fit$scores,
+    loadings = fit$loadings,
+    singular_values = singular_values,
+    center = fit$center,
+    scale = fit$scale,
+    ncomp = as.integer(ncol(fit$scores)),
+    method = "rsvd",
+    backend = as.character(resolved_backend),
+    backend_reason = NA_character_,
+    engine = "fastPLS",
+    engine_version = as.character(installed_version),
+    precision = fit$precision %||%
+      if (is_float32_matrix(fit$scores)) "float32" else "double",
+    oversample = fit$svd$oversample %||% NA_integer_,
+    power = fit$svd$power %||% NA_integer_,
     seed = as.integer(seed)
   )
   class(out) <- "fastEmbedR_pca"
@@ -371,7 +490,8 @@ fastpls_rsvd_pca_scores_backend <- function(x,
                                             seed,
                                             power,
                                             backend) {
-  set.seed(as.integer(seed))
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   omega <- matrix(stats::rnorm(ncol(x) * sketch_rank), nrow = ncol(x), ncol = sketch_rank)
   multiply <- function(left, right, transpose_left = FALSE) {
     rsvd_matrix_multiply(left, right, transpose_left = transpose_left, backend = backend)
@@ -679,7 +799,8 @@ landmark_selection_features <- function(x, seed) {
   direct <- x[, seq_len(min(4L, p)), drop = FALSE]
   n_random <- min(4L, p)
 
-  set.seed(seed)
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   directions <- matrix(stats::rnorm(p * n_random), nrow = p, ncol = n_random)
   norms <- sqrt(colSums(directions * directions))
   norms[!is.finite(norms) | norms == 0] <- 1
@@ -754,7 +875,8 @@ fill_landmark_rows <- function(selected, n, count, seed) {
   if (length(selected) >= count) {
     return(selected[seq_len(count)])
   }
-  set.seed(seed + 1009L)
+  restore_seed <- set_local_seed(seed + 1009L)
+  on.exit(restore_seed(), add = TRUE)
   remaining <- setdiff(seq_len(n), selected)
   need <- count - length(selected)
   c(selected, sort(sample(remaining, need)))
@@ -834,7 +956,7 @@ plot.fastEmbedR_embedding <- function(x,
                                       ylab = "Component 2",
                                       main = NULL,
                                       ...) {
-  layout <- as.matrix(x$layout)
+  layout <- embedding_dense_double_matrix(x$layout)
   if (ncol(layout) < 2L) {
     stop("Plotting requires at least two embedding dimensions.", call. = FALSE)
   }

@@ -604,6 +604,21 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pca_tsvd_metal_cpp
+List pca_tsvd_metal_cpp(SEXP data, int n_components, bool center, bool scale, int seed);
+RcppExport SEXP _fastEmbedR_pca_tsvd_metal_cpp(SEXP dataSEXP, SEXP n_componentsSEXP, SEXP centerSEXP, SEXP scaleSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type n_components(n_componentsSEXP);
+    Rcpp::traits::input_parameter< bool >::type center(centerSEXP);
+    Rcpp::traits::input_parameter< bool >::type scale(scaleSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pca_tsvd_metal_cpp(data, n_components, center, scale, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // transform_tsne_metal_cpp
 List transform_tsne_metal_cpp(NumericMatrix reference_layout, IntegerMatrix indices, NumericMatrix distances, NumericMatrix y_init, bool init, std::string initialization, double perplexity, int n_iter, int early_exaggeration_iter, double learning_rate, double early_exaggeration, double exaggeration, double initial_momentum, double final_momentum, double max_grad_norm, double max_step_norm, int n_negatives, int exact_repulsion_threshold, int seed);
 RcppExport SEXP _fastEmbedR_transform_tsne_metal_cpp(SEXP reference_layoutSEXP, SEXP indicesSEXP, SEXP distancesSEXP, SEXP y_initSEXP, SEXP initSEXP, SEXP initializationSEXP, SEXP perplexitySEXP, SEXP n_iterSEXP, SEXP early_exaggeration_iterSEXP, SEXP learning_rateSEXP, SEXP early_exaggerationSEXP, SEXP exaggerationSEXP, SEXP initial_momentumSEXP, SEXP final_momentumSEXP, SEXP max_grad_normSEXP, SEXP max_step_normSEXP, SEXP n_negativesSEXP, SEXP exact_repulsion_thresholdSEXP, SEXP seedSEXP) {
@@ -661,6 +676,18 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type auto_config(auto_configSEXP);
     Rcpp::traits::input_parameter< double >::type auto_iter_end(auto_iter_endSEXP);
     rcpp_result_gen = Rcpp::wrap(knn_tsne_opentsne_metal_cpp(indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs, auto_config, auto_iter_end));
+    return rcpp_result_gen;
+END_RCPP
+}
+// float32_all_finite_cpp
+bool float32_all_finite_cpp(SEXP data, int n_threads);
+RcppExport SEXP _fastEmbedR_float32_all_finite_cpp(SEXP dataSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(float32_all_finite_cpp(data, n_threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -794,6 +821,20 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type labels(labelsSEXP);
     Rcpp::traits::input_parameter< int >::type n_label_levels(n_label_levelsSEXP);
     rcpp_result_gen = Rcpp::wrap(knn_structure_score_cpp(layout, indices, keep, preserve_k, labels, n_label_levels));
+    return rcpp_result_gen;
+END_RCPP
+}
+// exact_structure_metrics_cpp
+Rcpp::NumericMatrix exact_structure_metrics_cpp(NumericMatrix high, NumericMatrix low, IntegerVector requested_k, int n_threads);
+RcppExport SEXP _fastEmbedR_exact_structure_metrics_cpp(SEXP highSEXP, SEXP lowSEXP, SEXP requested_kSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type high(highSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type low(lowSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type requested_k(requested_kSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(exact_structure_metrics_cpp(high, low, requested_k, n_threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1253,6 +1294,93 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// native_hnsw_knn_cpp
+Rcpp::List native_hnsw_knn_cpp(SEXP data, int k, int n_threads, std::string metric, double target_recall);
+RcppExport SEXP _fastEmbedR_native_hnsw_knn_cpp(SEXP dataSEXP, SEXP kSEXP, SEXP n_threadsSEXP, SEXP metricSEXP, SEXP target_recallSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    Rcpp::traits::input_parameter< std::string >::type metric(metricSEXP);
+    Rcpp::traits::input_parameter< double >::type target_recall(target_recallSEXP);
+    rcpp_result_gen = Rcpp::wrap(native_hnsw_knn_cpp(data, k, n_threads, metric, target_recall));
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_metal_knn_available_cpp
+bool native_metal_knn_available_cpp();
+RcppExport SEXP _fastEmbedR_native_metal_knn_available_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(native_metal_knn_available_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_metal_knn_cpp
+Rcpp::List native_metal_knn_cpp(SEXP data, int k, std::string method, std::string metric, double target_recall);
+RcppExport SEXP _fastEmbedR_native_metal_knn_cpp(SEXP dataSEXP, SEXP kSEXP, SEXP methodSEXP, SEXP metricSEXP, SEXP target_recallSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< std::string >::type metric(metricSEXP);
+    Rcpp::traits::input_parameter< double >::type target_recall(target_recallSEXP);
+    rcpp_result_gen = Rcpp::wrap(native_metal_knn_cpp(data, k, method, metric, target_recall));
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_cuda_knn_available_cpp
+bool native_cuda_knn_available_cpp();
+RcppExport SEXP _fastEmbedR_native_cuda_knn_available_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(native_cuda_knn_available_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_cuda_faiss_gpu_available_cpp
+bool native_cuda_faiss_gpu_available_cpp();
+RcppExport SEXP _fastEmbedR_native_cuda_faiss_gpu_available_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(native_cuda_faiss_gpu_available_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_cuda_knn_cpp
+Rcpp::List native_cuda_knn_cpp(SEXP data, int k, std::string method, std::string metric, double target_recall, bool keep_gpu);
+RcppExport SEXP _fastEmbedR_native_cuda_knn_cpp(SEXP dataSEXP, SEXP kSEXP, SEXP methodSEXP, SEXP metricSEXP, SEXP target_recallSEXP, SEXP keep_gpuSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< std::string >::type metric(metricSEXP);
+    Rcpp::traits::input_parameter< double >::type target_recall(target_recallSEXP);
+    Rcpp::traits::input_parameter< bool >::type keep_gpu(keep_gpuSEXP);
+    rcpp_result_gen = Rcpp::wrap(native_cuda_knn_cpp(data, k, method, metric, target_recall, keep_gpu));
+    return rcpp_result_gen;
+END_RCPP
+}
+// native_cuda_knn_to_host_cpp
+Rcpp::List native_cuda_knn_to_host_cpp(SEXP knn);
+RcppExport SEXP _fastEmbedR_native_cuda_knn_to_host_cpp(SEXP knnSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type knn(knnSEXP);
+    rcpp_result_gen = Rcpp::wrap(native_cuda_knn_to_host_cpp(knn));
+    return rcpp_result_gen;
+END_RCPP
+}
 // tsne_auto_parameters_cpp
 List tsne_auto_parameters_cpp(const int n, const int k, const double perplexity, const bool perplexity_missing, const std::string backend, const std::string negative_gradient_method);
 RcppExport SEXP _fastEmbedR_tsne_auto_parameters_cpp(SEXP nSEXP, SEXP kSEXP, SEXP perplexitySEXP, SEXP perplexity_missingSEXP, SEXP backendSEXP, SEXP negative_gradient_methodSEXP) {
@@ -1405,8 +1533,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_knn_embed_metal_csr_cpp", (DL_FUNC) &_fastEmbedR_knn_embed_metal_csr_cpp, 12},
     {"_fastEmbedR_knn_umap_refine_rows_metal_cpp", (DL_FUNC) &_fastEmbedR_knn_umap_refine_rows_metal_cpp, 10},
     {"_fastEmbedR_rsvd_multiply_metal_cpp", (DL_FUNC) &_fastEmbedR_rsvd_multiply_metal_cpp, 3},
+    {"_fastEmbedR_pca_tsvd_metal_cpp", (DL_FUNC) &_fastEmbedR_pca_tsvd_metal_cpp, 5},
     {"_fastEmbedR_transform_tsne_metal_cpp", (DL_FUNC) &_fastEmbedR_transform_tsne_metal_cpp, 19},
     {"_fastEmbedR_knn_tsne_opentsne_metal_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_metal_cpp, 21},
+    {"_fastEmbedR_float32_all_finite_cpp", (DL_FUNC) &_fastEmbedR_float32_all_finite_cpp, 2},
     {"_fastEmbedR_standardize_cpu_cpp", (DL_FUNC) &_fastEmbedR_standardize_cpu_cpp, 1},
     {"_fastEmbedR_strip_self_neighbors_cpp", (DL_FUNC) &_fastEmbedR_strip_self_neighbors_cpp, 2},
     {"_fastEmbedR_strip_self_neighbors_float_cpp", (DL_FUNC) &_fastEmbedR_strip_self_neighbors_float_cpp, 2},
@@ -1417,6 +1547,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_batch_entropy_cpp", (DL_FUNC) &_fastEmbedR_batch_entropy_cpp, 4},
     {"_fastEmbedR_sampled_pair_distances_cpp", (DL_FUNC) &_fastEmbedR_sampled_pair_distances_cpp, 4},
     {"_fastEmbedR_knn_structure_score_cpp", (DL_FUNC) &_fastEmbedR_knn_structure_score_cpp, 6},
+    {"_fastEmbedR_exact_structure_metrics_cpp", (DL_FUNC) &_fastEmbedR_exact_structure_metrics_cpp, 4},
     {"_fastEmbedR_silhouette_score_cpp", (DL_FUNC) &_fastEmbedR_silhouette_score_cpp, 2},
     {"_fastEmbedR_interpolate_landmark_layout_cpp", (DL_FUNC) &_fastEmbedR_interpolate_landmark_layout_cpp, 5},
     {"_fastEmbedR_select_low_confidence_rows_cpp", (DL_FUNC) &_fastEmbedR_select_low_confidence_rows_cpp, 3},
@@ -1442,6 +1573,13 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_knn_umap_refine_rows_cpp", (DL_FUNC) &_fastEmbedR_knn_umap_refine_rows_cpp, 12},
     {"_fastEmbedR_fast_knn_umap_csr_cpp", (DL_FUNC) &_fastEmbedR_fast_knn_umap_csr_cpp, 14},
     {"_fastEmbedR_umap_auto_parameters_cpp", (DL_FUNC) &_fastEmbedR_umap_auto_parameters_cpp, 3},
+    {"_fastEmbedR_native_hnsw_knn_cpp", (DL_FUNC) &_fastEmbedR_native_hnsw_knn_cpp, 5},
+    {"_fastEmbedR_native_metal_knn_available_cpp", (DL_FUNC) &_fastEmbedR_native_metal_knn_available_cpp, 0},
+    {"_fastEmbedR_native_metal_knn_cpp", (DL_FUNC) &_fastEmbedR_native_metal_knn_cpp, 5},
+    {"_fastEmbedR_native_cuda_knn_available_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_available_cpp, 0},
+    {"_fastEmbedR_native_cuda_faiss_gpu_available_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_faiss_gpu_available_cpp, 0},
+    {"_fastEmbedR_native_cuda_knn_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_cpp, 6},
+    {"_fastEmbedR_native_cuda_knn_to_host_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_to_host_cpp, 1},
     {"_fastEmbedR_tsne_auto_parameters_cpp", (DL_FUNC) &_fastEmbedR_tsne_auto_parameters_cpp, 6},
     {"_fastEmbedR_knn_tsne_opentsne_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_cpp, 24},
     {"_fastEmbedR_knn_tsne_opentsne_float_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_float_cpp, 24},

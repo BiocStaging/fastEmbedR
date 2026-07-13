@@ -1,19 +1,19 @@
 # Installation And Backends
 
-This page describes `fastEmbedR` embedding backends. FAISS/cuVS
-nearest-neighbour installation belongs to the companion
-[`faissR`](https://github.com/tkcaccia/faissR) project.
+This page describes `fastEmbedR` embedding backends. The package contains its
+own CPU HNSW and Metal exact/IVF search code. CUDA builds link directly to the
+RAPIDS cuVS C API; they do not call `faissR` or Python for one-call KNN.
 
 ## Standard Installation
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/faissR")
 remotes::install_github("tkcaccia/fastEmbedR")
 ```
 
-Install and validate `faissR` first when using matrix-input `opentsne()` or
-`umap()`, because those functions call `faissR::nn()` internally.
+Install `faissR` separately only when its reusable public KNN/classification
+API is wanted. It is not a runtime dependency of one-call fastEmbedR
+embeddings.
 
 ## Backend Rule
 
@@ -50,18 +50,47 @@ FASTEMBEDR_USE_CUDA=1 \
 R CMD INSTALL /path/to/fastEmbedR
 ```
 
-CUDA KNN is still provided by `faissR`; see the `faissR` installation page for
-FAISS GPU and RAPIDS cuVS details.
+To compile the native cuVS KNN and RAFT TSVD initializer without requiring the
+full cuML library, point the build at compatible cuVS, RAFT, RMM, and CCCL
+prefixes:
+
+```sh
+CUDA_HOME=/usr/local/cuda \
+FAISS_HOME=/path/to/faiss-gpu \
+RAFT_HOME=/path/to/rapids \
+RMM_HOME=/path/to/rapids \
+RAPIDS_HOME=/path/to/rapids \
+CUVS_HOME=/path/to/rapids \
+CCCL_HOME=/path/to/compatible-cccl \
+FASTEMBEDR_USE_CUDA=1 \
+FASTEMBEDR_USE_FAISS_GPU=1 \
+FASTEMBEDR_USE_CUVS=1 \
+FASTEMBEDR_USE_RAFT=1 \
+R CMD INSTALL /path/to/fastEmbedR
+```
+
+The RAFT and CCCL releases must be mutually compatible. For example, RAPIDS
+26.06 requires CCCL 3.3 rather than the older CCCL headers bundled with some
+CUDA toolkit installations. Set `FASTEMBEDR_CUDA_ARCH` to the target compute
+capability when building for a specific GPU (for example, `75` for a Tesla
+T4).
+
+The FAISS build must provide `faiss/gpu/GpuDistance.h` and `libfaiss` with GPU
+support. The cuVS build must provide `cuvs/core/c_api.h`, `libcuvs_c`, and `libcuvs`.
+At run time those libraries must remain discoverable through the recorded
+rpath or `LD_LIBRARY_PATH`. `FASTEMBEDR_USE_CUVS=1` is strict: configuration
+fails if the headers or libraries are missing. `FASTEMBEDR_USE_FAISS_GPU=1` is
+also strict and prevents an exact CUDA request from being replaced by a slower
+provider.
 
 ## Diagnostics
 
 ```r
 library(fastEmbedR)
 
-faissR::backend_info()
+fastEmbedR:::backend_info()
 ```
 
-`faissR::backend_info()` reports FAISS/cuVS KNN availability. CUDA and Metal
-embedding support is checked by the `backend` argument at run time; if an
-optional embedding backend is unavailable, `fastEmbedR` reports the failure
-instead of silently falling back to CPU.
+The diagnostic reports native KNN and embedding availability separately. If
+an optional backend is unavailable, `fastEmbedR` reports the failure instead
+of silently falling back to CPU.

@@ -3,7 +3,7 @@
 #include <cub/cub.cuh>
 #include <thrust/iterator/counting_iterator.h>
 
-#ifdef FASTEMBEDR_HAS_CUML
+#ifdef FASTEMBEDR_HAS_RAFT
 #include <raft/core/device_mdspan.hpp>
 #include <raft/core/handle.hpp>
 #include <raft/linalg/tsvd.cuh>
@@ -869,6 +869,60 @@ __global__ void fill_float_kernel(float* values,
                                   float value) {
   const int gid = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
   if (gid < n) values[gid] = value;
+}
+
+__global__ void finalize_cuvs_knn_kernel(const int64_t* input_indices,
+                                         const float* input_distances,
+                                         int* output_indices,
+                                         float* output_distances,
+                                         int batch_n,
+                                         int search_k,
+                                         int output_k,
+                                         int exclude_self,
+                                         int distance_mode,
+                                         int row_offset,
+                                         int total_n,
+                                         int* invalid_rows) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= batch_n) return;
+  const int global_row = row_offset + row;
+
+  const std::size_t input_base = static_cast<std::size_t>(row) * search_k;
+  const float best_inner_product = input_distances[input_base];
+  int written = 0;
+  for (int column = 0; column < search_k && written < output_k; ++column) {
+    const std::size_t input_offset = input_base + column;
+    const int64_t candidate64 = input_indices[input_offset];
+    if (candidate64 < 0 || candidate64 >= static_cast<int64_t>(total_n)) continue;
+    const int candidate = static_cast<int>(candidate64);
+    if (exclude_self && candidate == global_row) continue;
+
+    const float raw = input_distances[input_offset];
+    float distance = raw;
+    if (distance_mode == 0) {
+      distance = sqrtf(fmaxf(raw, 0.0f));
+    } else if (distance_mode == 1) {
+      distance = 0.5f * fmaxf(raw, 0.0f);
+    } else if (distance_mode == 2) {
+      distance = fmaxf(best_inner_product - raw, 0.0f);
+    }
+
+    const std::size_t output_offset =
+      static_cast<std::size_t>(written) * total_n + global_row;
+    output_indices[output_offset] = candidate + 1;
+    output_distances[output_offset] = distance;
+    ++written;
+  }
+
+  if (written < output_k) {
+    atomicAdd(invalid_rows, 1);
+    for (; written < output_k; ++written) {
+      const std::size_t output_offset =
+        static_cast<std::size_t>(written) * total_n + global_row;
+      output_indices[output_offset] = 0;
+      output_distances[output_offset] = kCudaFloatInf;
+    }
+  }
 }
 
 __global__ void standardize_stats_kernel(const double* values,
@@ -2720,7 +2774,7 @@ int scale_tsne_pca_device_init(float* d_values,
   return check_cuda(cudaGetLastError(), "scale_tsne_pca_init_kernel launch");
 }
 
-#ifdef FASTEMBEDR_HAS_CUML
+#ifdef FASTEMBEDR_HAS_RAFT
 template <typename HostT>
 int raft_tsvd_scores_to_device(const HostT* values,
                                int n,
@@ -2873,13 +2927,84 @@ extern "C" bool fastembedr_cuda_available() {
   return count > 0;
 }
 
+extern "C" int fastembedr_cuda_finalize_cuvs_knn(
+    const int64_t* input_indices,
+    const float* input_distances,
+    int* output_indices,
+    float* output_distances,
+    int batch_n,
+    int search_k,
+    int output_k,
+    int exclude_self,
+    int distance_mode,
+    int row_offset,
+    int total_n) {
+  embedding_last_error.clear();
+  if (input_indices == nullptr || input_distances == nullptr ||
+      output_indices == nullptr || output_distances == nullptr) {
+    set_embedding_error("null CUDA KNN postprocessing pointer");
+    return 1;
+  }
+  if (batch_n < 1 || total_n < 2 || row_offset < 0 ||
+      row_offset + batch_n > total_n || output_k < 1 || search_k < output_k ||
+      (exclude_self && search_k <= output_k)) {
+    set_embedding_error("invalid CUDA KNN postprocessing dimensions");
+    return 1;
+  }
+  int* invalid_rows = nullptr;
+  if (check_cuda(cudaMalloc(reinterpret_cast<void**>(&invalid_rows), sizeof(int)),
+                 "cudaMalloc(cuVS invalid rows)")) {
+    return 1;
+  }
+  if (check_cuda(cudaMemset(invalid_rows, 0, sizeof(int)),
+                 "cudaMemset(cuVS invalid rows)")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  const int threads = 256;
+  const int blocks = (batch_n + threads - 1) / threads;
+  finalize_cuvs_knn_kernel<<<blocks, threads>>>(
+    input_indices,
+    input_distances,
+    output_indices,
+    output_distances,
+    batch_n,
+    search_k,
+    output_k,
+    exclude_self,
+    distance_mode,
+    row_offset,
+    total_n,
+    invalid_rows
+  );
+  if (check_cuda(cudaGetLastError(), "finalize_cuvs_knn_kernel launch")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  int invalid = 0;
+  if (check_cuda(cudaMemcpy(&invalid, invalid_rows, sizeof(int), cudaMemcpyDeviceToHost),
+                 "cudaMemcpy(cuVS invalid rows D2H)")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  cudaFree(invalid_rows);
+  if (invalid > 0) {
+    set_embedding_error(
+      "cuVS returned fewer non-self neighbors than requested for " +
+      std::to_string(invalid) + " rows"
+    );
+    return 1;
+  }
+  return 0;
+}
+
 extern "C" int fastembedr_cuda_raft_tsvd_pca_init(const double* values,
                                                    int n,
                                                    int p,
                                                    int n_components,
                                                    float* out) {
   embedding_last_error.clear();
-#ifndef FASTEMBEDR_HAS_CUML
+#ifndef FASTEMBEDR_HAS_RAFT
   set_embedding_error("fastEmbedR was not built with RAPIDS RAFT/cuML TSVD support.");
   return 1;
 #else
@@ -4662,7 +4787,7 @@ int fastembedr_cuda_opentsne_fft_from_knn_impl(const int* indices,
       return 1;
     }
   } else if (pca_init_double != nullptr || pca_init_float != nullptr) {
-#ifndef FASTEMBEDR_HAS_CUML
+#ifndef FASTEMBEDR_HAS_RAFT
     set_embedding_error("CUDA device-resident PCA initialization requires RAPIDS RAFT/cuML TSVD support.");
     cleanup();
     return 1;

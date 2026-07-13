@@ -38,11 +38,21 @@
 #' @param n_threads Number of CPU worker threads for the native optimizer.
 #' @param seed Random seed.
 #' @param backend Backend used for query KNN when `knn` is `NULL`; `"metal"`
-#'   also runs the fixed-reference transform optimizer in native Metal. CUDA
-#'   transform is planned but intentionally errors until implemented, so CPU
-#'   work is never reported as CUDA.
+#'   and `"cuda"` run their native fixed-reference transform optimizers when
+#'   those backends were compiled. Explicit unavailable GPU requests fail; CPU
+#'   work is never reported as Metal or CUDA.
 #' @param verbose Print native optimizer progress.
 #' @return A numeric matrix with one row per query observation.
+#' @examples
+#' reference <- matrix(c(0, 0, 1, 0, 0, 1, 1, 1), 4L, 2L, byrow = TRUE)
+#' query_knn <- list(
+#'   indices = matrix(c(1L, 2L, 3L, 4L), 2L, 2L, byrow = TRUE),
+#'   distances = matrix(c(0.1, 0.2, 0.15, 0.25), 2L, 2L, byrow = TRUE)
+#' )
+#' query_layout <- transform_tsne(
+#'   reference, knn = query_knn, perplexity = 0.5,
+#'   n_iter = 2, exact_repulsion_threshold = 10, seed = 1
+#' )
 #' @export
 transform_tsne <- function(reference_layout,
                            knn = NULL,
@@ -836,6 +846,15 @@ resident_projection_result <- function(backend, k) {
 #' @param n_threads Number of CPU worker threads used by CPU KNN and CPU
 #'   transform optimization. Native GPU stages ignore this argument.
 #' @return A `fastEmbedR_embedding` object.
+#' @examples
+#' if (requireNamespace("faissR", quietly = TRUE)) {
+#'   fit <- landmark_tsne(
+#'     as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
+#'     early_exaggeration_iter = 5, n_iter = 10,
+#'     transform_iter = 5, seed = 1
+#'   )
+#'   plot(fit, labels = iris$Species)
+#' }
 #' @export
 landmark_tsne <- function(data,
                           landmarks = TRUE,

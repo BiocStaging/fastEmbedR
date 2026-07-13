@@ -16,14 +16,11 @@
 #'   `"cosine"`, `"correlation"`, or `"inner_product"`.
 #' @param nn Optional precomputed KNN result when `data` is a matrix.
 #' @param seed Random seed.
-#' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. KNN is
-#'   delegated to faissR through an internal bridge. The current default asks
-#'   for exact KNN below 100,000 samples and IVF above that threshold. CUDA
-#'   requests CUDA faissR KNN, then materializes the KNN result for the
-#'   validated host-prepared graph path before native CUDA UMAP optimization.
-#'   This preserves the visually validated binary/fuzzy graph behaviour while
-#'   the fully GPU-resident UMAP graph path remains available only for explicit
-#'   `umap_knn()` experiments.
+#' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
+#'   uses package-native HNSW. Metal uses package-native exact or recall-tuned
+#'   IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
+#'   rows and direct RAPIDS cuVS IVF-Flat above that threshold; the KNN result
+#'   stays on the device through graph construction and optimization.
 #'   GPU requests must resolve to a real native backend; the package does not
 #'   relabel CPU work as GPU.
 #' @param n_threads Number of CPU worker threads for KNN and CPU UMAP.
@@ -134,7 +131,7 @@ umap <- function(data,
   knn_time <- system.time({
     knn_result <- if (is.null(nn)) {
       knn_policy <- fastembedr_embedding_nn_policy(backend, n = n)
-      keep_gpu_knn <- FALSE
+      keep_gpu_knn <- identical(backend, "cuda")
       knn_engine <- fastembedr_nn_policy_engine(knn_policy, keep_gpu = keep_gpu_knn)
       fastembedr_nn_without_self(
         x,
@@ -156,7 +153,7 @@ umap <- function(data,
         }
         gpu_info <- fastembedr_gpu_knn_info(nn)
         if (gpu_info$n != n || isTRUE(gpu_info$has_self)) {
-          stop("Supplied faissR GPU KNN output is incompatible with UMAP input.", call. = FALSE)
+          stop("Supplied GPU-resident KNN output is incompatible with UMAP input.", call. = FALSE)
         }
         nn
       } else {

@@ -31,10 +31,8 @@ observations by KNN interpolation against the fixed landmark embedding.
 \item{pca_dims}{Optional PCA dimension before KNN.}
 \item{seed}{Random seed.}
 \item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
-\code{"metal"}. KNN is delegated to faissR with
-automatic method and tuning selection. CPU and Metal request the faissR CPU
-backend, while CUDA requests faissR CUDA \code{method = "auto"} with
-\code{target_recall = 0.99}. GPU requests must use a
+\code{"metal"}. CPU uses native HNSW; Metal uses native exact/IVF-Flat;
+CUDA requests package-native RAPIDS cuVS KNN with \code{target_recall = 0.99}. GPU requests must use a
 real native backend and are not silently relabelled as CPU.}
 \item{transform_k}{Number of landmark neighbours used to project
 non-landmark observations. Defaults to \code{n_neighbors}.}

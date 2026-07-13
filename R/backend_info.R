@@ -1,76 +1,40 @@
 # Internal backend summary used by tests and diagnostics.
 backend_info <- function() {
-  nn_info <- tryCatch(
-    fastembedr_faissr_function("backend_info")(),
-    error = function(e) data.frame(
-      backend = c("cpu", "faiss", "cuvs", "cuda", "metal"),
-      available = c(TRUE, FALSE, FALSE, FALSE, FALSE),
-      knn_available = c(TRUE, FALSE, FALSE, FALSE, FALSE),
-      explicit_backend = c("cpu", "faiss", "cuda_cuvs", "cuda", "metal"),
-      device = c(cpu_summary(), NA_character_, NA_character_, NA_character_, NA_character_),
-      runtime = c(R.version$platform, conditionMessage(e), conditionMessage(e), conditionMessage(e), conditionMessage(e)),
-      note = c(
-        "Native CPU KNN path is available through faissR.",
-        "faissR backend_info() failed.",
-        "faissR backend_info() failed.",
-        "faissR backend_info() failed.",
-        "faissR backend_info() failed."
-      ),
-      stringsAsFactors = FALSE
-    )
-  )
+  cuda_knn <- backend_flag(native_cuda_knn_available_cpp)
+  cuda_embedding <- backend_flag(embedding_cuda_available_cpp)
+  metal_knn <- backend_flag(native_metal_knn_available_cpp)
+  metal_embedding <- backend_flag(embedding_metal_available_cpp)
+  knn_available <- c(TRUE, cuda_knn, cuda_knn, metal_knn)
+  embedding_available <- c(TRUE, FALSE, cuda_embedding, metal_embedding)
 
-  backends <- c("cpu", "faiss", "cuvs", "cuda", "metal")
-  nn_info$backend <- as.character(nn_info$backend)
-  missing_backends <- setdiff(backends, nn_info$backend)
-  if (length(missing_backends)) {
-    template <- nn_info[rep(1L, length(missing_backends)), , drop = FALSE]
-    template[] <- NA
-    template$backend <- missing_backends
-    if ("available" %in% names(template)) template$available <- FALSE
-    if ("knn_available" %in% names(template)) template$knn_available <- FALSE
-    if ("device" %in% names(template)) template$device <- NA_character_
-    if ("runtime" %in% names(template)) template$runtime <- NA_character_
-    if ("note" %in% names(template)) template$note <- paste0(
-      missing_backends,
-      " backend was not reported by faissR."
-    )
-    nn_info <- rbind(nn_info, template)
-  }
-  nn_info <- nn_info[match(backends, nn_info$backend), , drop = FALSE]
-  if ("knn_available" %in% names(nn_info)) {
-    nn_info$knn_available[nn_info$backend == "cpu"] <- TRUE
-    nn_info$knn_available[nn_info$backend == "metal"] <- TRUE
-  }
-  embedding_available <- c(
-    TRUE,
-    FALSE,
-    FALSE,
-    backend_flag(embedding_cuda_available_cpp),
-    backend_flag(embedding_metal_available_cpp)
-  )
-
-  nn_info$available <- isTRUE_VECTOR(nn_info$knn_available) | embedding_available
-  nn_info$embedding_available <- embedding_available
-  nn_info$note <- paste(
-    nn_info$note,
-    c(
-      "CPU embedding is always available.",
-      "FAISS is used only by faissR for KNN, not by fastEmbedR embeddings.",
-      "cuVS is used only by faissR for KNN, not by fastEmbedR embeddings.",
-      if (embedding_available[4L]) {
-        "fastEmbedR CUDA embedding kernels are available."
+  data.frame(
+    backend = c("cpu", "cuvs", "cuda", "metal"),
+    available = knn_available | embedding_available,
+    knn_available = knn_available,
+    embedding_available = embedding_available,
+    explicit_backend = c("cpu", "cuda", "cuda", "metal"),
+    device = c(cpu_summary(), NA_character_, NA_character_, NA_character_),
+    runtime = rep(R.version$platform, 4L),
+    note = c(
+      "Package-native CPU HNSW and CPU embedding are available.",
+      if (cuda_knn) {
+        "Package-native CUDA KNN uses the linked RAPIDS cuVS C API."
       } else {
-        "fastEmbedR CUDA embedding kernels are unavailable."
+        "RAPIDS cuVS KNN is unavailable in this build."
       },
-      if (embedding_available[5L]) {
-        "fastEmbedR Metal embedding kernels are available."
+      if (cuda_embedding) {
+        "Package-native CUDA embedding kernels are available."
       } else {
-        "fastEmbedR Metal embedding kernels are unavailable."
+        "CUDA embedding kernels are unavailable in this build."
+      },
+      if (metal_knn && metal_embedding) {
+        "Package-native Metal KNN and embedding kernels are available."
+      } else {
+        "One or more Metal components are unavailable in this build."
       }
-    )
+    ),
+    stringsAsFactors = FALSE
   )
-  nn_info
 }
 
 backend_flag <- function(fn) {
@@ -106,11 +70,12 @@ resolve_native_gpu_backend <- function(need_knn = FALSE,
 
 available_native_gpu_backend <- function(need_knn = FALSE,
                                          need_embedding = FALSE) {
-  cuda_ok <- (!isTRUE(need_knn) || backend_flag(fastembedr_faissr_function("cuda_available"))) &&
+  cuda_knn_available <- backend_flag(native_cuda_knn_available_cpp)
+  cuda_ok <- (!isTRUE(need_knn) || cuda_knn_available) &&
     (!isTRUE(need_embedding) || backend_flag(embedding_cuda_available_cpp))
   if (cuda_ok) return("cuda")
 
-  metal_ok <- (!isTRUE(need_knn) || TRUE) &&
+  metal_ok <- !isTRUE(need_knn) &&
     (!isTRUE(need_embedding) || backend_flag(embedding_metal_available_cpp))
   if (metal_ok) return("metal")
 

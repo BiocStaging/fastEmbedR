@@ -2,4 +2,4 @@ CXX_STD = CXX17
 PKG_CXXFLAGS = -pthread
 PKG_CPPFLAGS = -DHAVE_METAL=1
 PKG_LIBS = -pthread -framework Foundation -framework Metal -framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph
-OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o embedding_metal_bridge.o embedding_metal_impl.o embedding_cuda_bridge.o embedding_cuda_stub.o
+OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o native_knn_bridge.o native_knn_hnsw.o native_knn_cuda_stub.o embedding_metal_bridge.o embedding_metal_impl.o native_knn_metal_impl.o embedding_cuda_bridge.o embedding_cuda_stub.o

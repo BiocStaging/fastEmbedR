@@ -283,24 +283,10 @@ normalize_opentsne_exaggeration <- function(early_exaggeration, exaggeration) {
 }
 
 make_opentsne_random_init <- function(n, n_components, seed) {
-  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-  } else {
-    NULL
-  }
-  on.exit({
-    if (is.null(old_seed)) {
-      if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-        rm(".Random.seed", envir = .GlobalEnv)
-      }
-    } else {
-      assign(".Random.seed", old_seed, envir = .GlobalEnv)
-    }
-  }, add = TRUE)
-
   seed <- suppressWarnings(as.integer(seed))
   if (length(seed) != 1L || is.na(seed)) seed <- 5489L
-  set.seed(seed)
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
   init <- matrix(stats::rnorm(n * n_components, sd = 1e-4), nrow = n, ncol = n_components)
   sweep(init, 2L, colMeans(init), check.margin = FALSE)
 }
@@ -350,16 +336,7 @@ make_opentsne_default_init <- function(indices,
 }
 
 opentsne_dense_numeric_matrix <- function(x) {
-  if (is_float32_matrix(x)) {
-    if (!requireNamespace("float", quietly = TRUE)) {
-      stop("The float package is required to use float32 input.", call. = FALSE)
-    }
-    x <- float::dbl(x)
-  } else {
-    x <- as.matrix(x)
-  }
-  storage.mode(x) <- "double"
-  x
+  embedding_dense_double_matrix(x)
 }
 
 opentsne_pca_input_matrix <- function(x) {
@@ -392,6 +369,9 @@ fastpls_package_pca_scores <- function(x,
   if (!fastembedr_optional_namespace_available(package)) {
     return(NULL)
   }
+  if (utils::packageVersion(package) < numeric_version("0.99.3")) {
+    return(NULL)
+  }
   pca_fun <- tryCatch(
     fastembedr_optional_export(package, "pca"),
     error = function(e) NULL
@@ -401,14 +381,14 @@ fastpls_package_pca_scores <- function(x,
   }
   seed <- suppressWarnings(as.integer(seed))
   if (length(seed) != 1L || is.na(seed)) seed <- 4L
-  set.seed(seed)
   fit <- pca_fun(
     x,
     ncomp = as.integer(rank),
     center = TRUE,
     scale = FALSE,
     backend = backend,
-    method = "rsvd"
+    method = "rsvd",
+    seed = seed
   )
   scores <- fit$scores
   if (is.null(scores)) {
@@ -459,6 +439,29 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
   n_components <- as.integer(n_components)
   if (length(n_components) != 1L || is.na(n_components) || n_components < 1L) {
     stop("`n_components` must be a positive integer.", call. = FALSE)
+  }
+  if (identical(backend, "metal")) {
+    pca <- fastembedr_metal_tsvd_pca(
+      x,
+      ncomp = n_components,
+      center = TRUE,
+      scale = FALSE,
+      seed = seed
+    )
+    init <- as.matrix(pca$scores[, seq_len(n_components), drop = FALSE])
+    init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
+    init_scale <- max(apply(init, 2L, stats::sd))
+    if (is.finite(init_scale) && init_scale > 0) {
+      init <- init * (1e-4 / init_scale)
+    }
+    attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
+    attr(init, "fastEmbedR_init_backend") <- pca$backend
+    attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
+    attr(init, "fastEmbedR_init_package") <- "fastEmbedR native Metal/MPS"
+    attr(init, "fastEmbedR_init_package_version") <-
+      as.character(utils::packageVersion("fastEmbedR"))
+    attr(init, "fastEmbedR_init_timing") <- pca$timing
+    return(init)
   }
   cuda_init_reason <- NA_character_
   if (identical(backend, "cuda")) {
@@ -567,15 +570,15 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
 #' of recomputing PCA. This is useful when comparing several KNN backends with
 #' exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
 #' native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
-#' loudly if that backend is unavailable. For CPU and Metal, if the optional
-#' `fastPLS` package is installed, its RSVD PCA implementation is preferred for
-#' the requested backend, including native Metal PCA on macOS; otherwise
-#' fastEmbedR falls back to its internal RSVD helper. The package does not call
-#' Python or `reticulate` for PCA initialization.
+#' loudly if that backend is unavailable. Metal uses fastEmbedR's native
+#' float32 block-subspace TSVD with Metal Performance Shaders matrix products
+#' and one resident GPU workspace. CPU prefers `fastPLS >= 0.99.3` RSVD when it
+#' is installed and otherwise uses the package-local RSVD helper. The package
+#' does not call Python or `reticulate` for PCA initialization.
 #'
 #' @param data Numeric matrix/data frame with observations in rows.
 #' @param n_components Output dimensionality, usually `2`.
-#' @param seed Random seed used by the randomized SVD PCA helper.
+#' @param seed Random seed used by the truncated PCA subspace sketch.
 #' @param backend Backend used for PCA when available: `"cpu"`, `"metal"`,
 #'   or `"cuda"`.
 #' @param cache_file Optional `.rds` file path. If it exists and
@@ -583,6 +586,9 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
 #'   validated.
 #' @param force_recompute If `TRUE`, ignore any existing cache and recompute.
 #' @return A numeric initialization matrix suitable for `Y_init`.
+#' @examples
+#' init <- opentsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)
+#' plot(init, pch = 21, bg = iris$Species)
 #' @export
 opentsne_pca_init <- function(data,
                               n_components = 2L,
@@ -599,7 +605,8 @@ opentsne_pca_init <- function(data,
   if (nrow(x) < 2L || ncol(x) < 1L) {
     stop("`data` must have at least two rows and one column.", call. = FALSE)
   }
-  if (opentsne_pca_has_nonfinite(x)) {
+  if (!(identical(backend, "metal") && is_float32_matrix(x)) &&
+      opentsne_pca_has_nonfinite(x)) {
     stop("`data` must contain only finite values.", call. = FALSE)
   }
   if (!is.null(cache_file)) {
@@ -986,10 +993,11 @@ fast_knn_opentsne_materialized <- function(indices,
       auto_params$auto_iter_end
     )
   }
+  return_float32 <- isTRUE(gpu_resident_knn) || is_float32_matrix(distances)
   layout <- finalize_embedding_layout(
     out$Y,
     "openTSNE",
-    return_float32 = isTRUE(gpu_resident_knn) || is_float32_matrix(distances)
+    return_float32 = return_float32
   )
   probabilities <- out$probabilities
   if (is.null(probabilities)) probabilities <- "symmetric_sparse_knn_cpu"
@@ -1036,7 +1044,8 @@ fast_knn_opentsne_materialized <- function(indices,
     record_costs = record_costs,
     optimizer = out$optimizer,
     repulsion = out$repulsion,
-    precision = out$precision %||% if (isTRUE(gpu_resident_knn) || is_float32_matrix(distances)) "float32" else "double",
+    precision = out$precision %||% "float32",
+    output_precision = if (return_float32) "float32" else "double",
     probabilities = probabilities,
     n_negatives = n_negatives,
     n_threads = out$n_threads,
@@ -1136,11 +1145,13 @@ fast_knn_opentsne_core <- function(indices,
 #' @inheritParams opentsne_knn
 #' @return A prepared openTSNE KNN object.
 #' @examples
-#' x <- scale(as.matrix(iris[, 1:4]))
-#' knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-#' prep <- prepare_opentsne_knn(knn, perplexity = 10)
-#' y1 <- opentsne_knn(prep, seed = 1, early_exaggeration_iter = 50, n_iter = 100)
-#' y2 <- opentsne_knn(prep, seed = 2, early_exaggeration_iter = 50, n_iter = 100)
+#' if (requireNamespace("faissR", quietly = TRUE)) {
+#'   x <- scale(as.matrix(iris[, 1:4]))
+#'   knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
+#'   prep <- prepare_opentsne_knn(knn, perplexity = 10)
+#'   y1 <- opentsne_knn(prep, seed = 1, early_exaggeration_iter = 50, n_iter = 100)
+#'   y2 <- opentsne_knn(prep, seed = 2, early_exaggeration_iter = 50, n_iter = 100)
+#' }
 #' @export
 prepare_opentsne_knn <- function(indices,
                                  distances = NULL,
@@ -1190,12 +1201,14 @@ prepare_opentsne_knn <- function(indices,
 #' @return A numeric embedding matrix with settings stored in
 #'   `attr(layout, "fastEmbedR_config")`.
 #' @examples
-#' x <- scale(as.matrix(iris[, 1:4]))
-#' knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
-#' layout <- opentsne_knn(knn, init_data = x, perplexity = 10,
-#'   early_exaggeration_iter = 100, n_iter = 250)
-#' if (all(is.finite(layout))) {
-#'   plot(layout, pch = 21, bg = iris$Species)
+#' if (requireNamespace("faissR", quietly = TRUE)) {
+#'   x <- scale(as.matrix(iris[, 1:4]))
+#'   knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
+#'   layout <- opentsne_knn(knn, init_data = x, perplexity = 10,
+#'     early_exaggeration_iter = 100, n_iter = 250)
+#'   if (all(is.finite(layout))) {
+#'     plot(layout, pch = 21, bg = iris$Species)
+#'   }
 #' }
 #' @export
 opentsne_knn <- function(indices,
@@ -1225,7 +1238,7 @@ opentsne_knn <- function(indices,
   if (fastembedr_is_gpu_knn(indices) && identical(backend, "cuda")) {
     indices <- fastembedr_as_gpu_knn(indices)
     if (!is.null(distances)) {
-      stop("Do not pass `distances` when `indices` is a faissR_gpu_knn object.", call. = FALSE)
+      stop("Do not pass `distances` when `indices` is a GPU-resident KNN object.", call. = FALSE)
     }
     gpu_info <- fastembedr_gpu_knn_info(indices)
     if (isTRUE(gpu_info$has_self)) {
@@ -1297,6 +1310,14 @@ opentsne_knn <- function(indices,
     knn <- indices$knn
     if (is.null(perplexity)) perplexity <- indices$perplexity
   } else {
+    knn0 <- coerce_knn_input(indices, distances)
+    policy <- opentsne_neighbor_policy(
+      nrow(knn0$indices),
+      perplexity = perplexity,
+      available = knn0$n_neighbors
+    )
+    if (is.null(n_neighbors)) n_neighbors <- policy$n_neighbors
+    if (is.null(perplexity)) perplexity <- policy$perplexity
     knn <- normalize_opentsne_knn_input(indices, distances, n_neighbors)
   }
   Y_init <- resolve_opentsne_y_init(Y_init, knn$n, n_components)
@@ -1363,13 +1384,11 @@ opentsne_knn <- function(indices,
 #'   `"cosine"`, `"correlation"`, or `"inner_product"`.
 #' @param nn Optional precomputed KNN output when `data` is a data matrix.
 #' @param seed Random seed.
-#' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. For
-#'   matrix input, KNN is delegated to faissR with automatic method/tuning
-#'   selection through an internal bridge. The default asks for exact KNN below
-#'   100,000 samples and IVF above that threshold. CUDA requests GPU-resident
-#'   faissR KNN; if resident IVF is not exposed by the installed faissR build,
-#'   CUDA large-data runs use faissR's tuned `method = "auto"` instead of
-#'   materializing the KNN result on the host.
+#' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
+#'   uses package-native HNSW. Metal uses package-native exact or recall-tuned
+#'   IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
+#'   rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
+#'   device pointers directly to native CUDA openTSNE.
 #'   Unsupported GPU requests fail clearly and are not relabelled CPU runs.
 #' @param keep_knn If `TRUE`, retain KNN matrices in the returned object.
 #' @param verbose Print optimizer progress.
@@ -1401,6 +1420,14 @@ opentsne_knn <- function(indices,
 #'   not prohibitively expensive. Explicit user-supplied values are respected.
 #' @param ... Additional low-level parameters passed to [opentsne_knn()].
 #' @return A `fastEmbedR_embedding` object.
+#' @examples
+#' if (requireNamespace("faissR", quietly = TRUE)) {
+#'   fit <- opentsne(
+#'     as.matrix(iris[, 1:4]), perplexity = 5,
+#'     early_exaggeration_iter = 10, n_iter = 20, seed = 1
+#'   )
+#'   plot(fit, labels = iris$Species)
+#' }
 #' @export
 opentsne <- function(data,
                      perplexity = NULL,
@@ -1510,7 +1537,7 @@ opentsne <- function(data,
       parameters = c(
         list(
           method = "opentsne",
-          input = "faissR_gpu_knn",
+          input = "gpu_resident_knn",
           n = nrow(layout),
           p = NA_integer_,
           n_neighbors = cfg$n_neighbors %||% gpu_info$k,
@@ -1668,7 +1695,10 @@ opentsne <- function(data,
   knn_time <- system.time({
     if (is.null(nn)) {
       knn_policy <- fastembedr_embedding_nn_policy(backend, n = n)
-      knn_engine <- fastembedr_nn_policy_engine(knn_policy)
+      knn_engine <- fastembedr_nn_policy_engine(
+        knn_policy,
+        keep_gpu = identical(knn_policy$backend, "cuda")
+      )
       raw_knn <- fastembedr_nn_without_self(
         x,
         k = n_neighbors,
@@ -1684,7 +1714,7 @@ opentsne <- function(data,
       if (fastembedr_is_gpu_knn(raw_knn)) {
         gpu_info <- fastembedr_gpu_knn_info(raw_knn)
         if (gpu_info$n != n || gpu_info$k < n_neighbors || isTRUE(gpu_info$has_self)) {
-          stop("faissR GPU KNN output is incompatible with openTSNE input.", call. = FALSE)
+          stop("GPU-resident KNN output is incompatible with openTSNE input.", call. = FALSE)
         }
         knn_result <- list(
           indices = NULL,
@@ -1704,7 +1734,7 @@ opentsne <- function(data,
         nn <- fastembedr_as_gpu_knn(nn)
         gpu_info <- fastembedr_gpu_knn_info(nn)
         if (gpu_info$n != n || gpu_info$k < n_neighbors || isTRUE(gpu_info$has_self)) {
-          stop("Supplied faissR GPU KNN output is incompatible with openTSNE input.", call. = FALSE)
+          stop("Supplied GPU-resident KNN output is incompatible with openTSNE input.", call. = FALSE)
         }
         knn_result <- list(
           indices = NULL,
@@ -1723,48 +1753,50 @@ opentsne <- function(data,
     }
   })
 
-  Y_init <- resolve_opentsne_y_init(Y_init, n, n_components)
-  init_info <- list(method = "user", backend = NA_character_)
-  cuda_init_data <- NULL
-  if (is.null(Y_init)) {
-    init_source <- if (is.null(init_data)) x else init_data
-    init_backend <- if (optimizer_backend %in% c("metal", "cuda")) optimizer_backend else "cpu"
-    if (identical(optimizer_backend, "cuda") && fastembedr_is_gpu_knn(embedding_knn_input)) {
-      cuda_init_candidate <- opentsne_pca_input_matrix(init_source)
-      if (nrow(cuda_init_candidate) != n) {
-        stop("`init_data` must have one row per input row.", call. = FALSE)
-      }
-      cuda_init_data <- cuda_init_candidate
-      init_info$method <- "pca_cuda_raft_tsvd_pca_device"
-      init_info$backend <- "cuda_raft_tsvd_device"
-    } else {
-      Y_init <- tryCatch(
-        make_opentsne_pca_init_from_data(
-          init_source,
-          n = n,
-          n_components = n_components,
-          seed = seed,
-          backend = init_backend
-        ),
-        error = function(e) {
-          init_info$error <<- conditionMessage(e)
-          NULL
+  initialization_time <- system.time({
+    Y_init <- resolve_opentsne_y_init(Y_init, n, n_components)
+    init_info <- list(method = "user", backend = NA_character_)
+    cuda_init_data <- NULL
+    if (is.null(Y_init)) {
+      init_source <- if (is.null(init_data)) x else init_data
+      init_backend <- if (optimizer_backend %in% c("metal", "cuda")) optimizer_backend else "cpu"
+      if (identical(optimizer_backend, "cuda") && fastembedr_is_gpu_knn(embedding_knn_input)) {
+        cuda_init_candidate <- opentsne_pca_input_matrix(init_source)
+        if (nrow(cuda_init_candidate) != n) {
+          stop("`init_data` must have one row per input row.", call. = FALSE)
         }
-      )
-      if (!is.null(Y_init)) {
-        init_info$method <- attr(Y_init, "fastEmbedR_init_method") %||% "pca"
-        init_info$backend <- attr(Y_init, "fastEmbedR_init_backend") %||% init_backend
+        cuda_init_data <- cuda_init_candidate
+        init_info$method <- "pca_cuda_raft_tsvd_pca_device"
+        init_info$backend <- "cuda_raft_tsvd_device"
       } else {
-        stop(
-          "openTSNE PCA initialization failed for backend `",
-          init_backend,
-          "`: ",
-          init_info$error %||% "unknown error",
-          call. = FALSE
+        Y_init <- tryCatch(
+          make_opentsne_pca_init_from_data(
+            init_source,
+            n = n,
+            n_components = n_components,
+            seed = seed,
+            backend = init_backend
+          ),
+          error = function(e) {
+            init_info$error <<- conditionMessage(e)
+            NULL
+          }
         )
+        if (!is.null(Y_init)) {
+          init_info$method <- attr(Y_init, "fastEmbedR_init_method") %||% "pca"
+          init_info$backend <- attr(Y_init, "fastEmbedR_init_backend") %||% init_backend
+        } else {
+          stop(
+            "openTSNE PCA initialization failed for backend `",
+            init_backend,
+            "`: ",
+            init_info$error %||% "unknown error",
+            call. = FALSE
+          )
+        }
       }
     }
-  }
+  })
 
   embedding_time <- system.time({
     layout <- opentsne_knn(
@@ -1801,6 +1833,7 @@ opentsne <- function(data,
   timings <- rbind(
     preprocess = preprocess_time,
     knn = knn_time,
+    initialization = initialization_time,
     embedding = embedding_time
   )
   metrics <- data.frame(
@@ -1812,6 +1845,7 @@ opentsne <- function(data,
     elapsed = sum(timings[, "elapsed"]),
     preprocess_elapsed = preprocess_time["elapsed"],
     knn_elapsed = knn_time["elapsed"],
+    initialization_elapsed = initialization_time["elapsed"],
     embedding_elapsed = embedding_time["elapsed"],
     stringsAsFactors = FALSE
   )

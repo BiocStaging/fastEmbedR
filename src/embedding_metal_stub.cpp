@@ -124,6 +124,14 @@ NumericMatrix rsvd_multiply_metal_impl(NumericMatrix,
   Rcpp::stop("Metal RSVD matrix multiply is only available on macOS with Metal support.");
 }
 
+List pca_tsvd_metal_impl(SEXP,
+                         int,
+                         bool,
+                         bool,
+                         int) {
+  Rcpp::stop("Metal TSVD PCA is only available on macOS with Metal support.");
+}
+
 List transform_tsne_metal_impl(NumericMatrix,
                                IntegerMatrix,
                                NumericMatrix,
