@@ -189,7 +189,9 @@ supplied. The decomposition follows the randomized-SVD family used by
 
 - CPU uses BLAS-backed randomized subspace products;
 - Metal uses a resident float32 block-subspace iteration with MPS matrix
-  multiplication and a small CPU eigensolve of the projected Gram matrix;
+  multiplication and a small CPU eigensolve of the projected Gram matrix.
+  Float32 input is copied directly into unified Metal storage; a native Metal
+  reduction validates, centers, and optionally scales every feature in place;
 - CUDA uses RAPIDS RAFT TSVD when that optional native backend is compiled.
 
 Scores are centered and rescaled so the largest component standard deviation
@@ -204,14 +206,30 @@ no feature scaling, seed 4, and three repetitions:
 | Backend | Median PCA time, s | Precision | Engine |
 | --- | ---: | --- | --- |
 | CPU | 1.578 | float32 | Native RSVD |
-| Metal | 0.429 | float32 | Native MPS block-subspace TSVD |
+| Metal, previous path | 0.429 | float32 | MPS TSVD with CPU preprocessing |
+| Metal, current warm path | 0.104 | float32 | Resident preprocessing plus MPS TSVD |
 
-Metal was 3.68 times faster in this measurement. The CPU and Metal loading
-subspaces had a minimum canonical correlation of 0.9941 (maximum principal
-angle 6.20 degrees), while pairwise distances between a deterministic sample
-of 2,000 score rows had Pearson correlation 0.9977. The small-data test suite
-also compares Metal scores against `stats::prcomp()` and requires correlation
-of at least 0.99 for both components.
+The current warm Metal path is 4.1 times faster than the previous Metal path
+and 15.2 times faster than the measured CPU path. Its first invocation also
+compiles the Metal pipeline; the observed cold time was 0.774 seconds, so cold
+and warm timings are reported separately. Moving preprocessing to Metal
+reduced the conversion/centering stage from approximately 0.37 seconds to
+0.039-0.043 seconds. The retained implementation returns actual
+`float::float32` score and loading matrices for float32 input instead of
+constructing double R matrices and attaching float metadata. The 70,000 by 2
+score object occupies approximately 0.56 MB rather than the approximately
+1.12 MB double payload.
+
+Against the CPU RSVD reference, the current Metal loading subspace had minimum
+canonical correlation 0.9980 (maximum principal angle 3.65 degrees), while
+pairwise distances between a deterministic sample of 2,000 score rows had
+Pearson correlation 0.9977. Three full openTSNE runs initialized by this path
+had coordinate correlation 0.99897-0.99909 and normalized Procrustes RMSD
+0.0426-0.0454 against the accepted Metal baseline. Their embedding times were
+2.568-2.621 seconds and the label-colored full-MNIST layout passed visual
+inspection. The small-data test suite also compares Metal scores against
+`stats::prcomp()` and requires correlation of at least 0.99 for both
+components.
 
 The CUDA implementation is a distinct native RAFT TSVD path. In the accepted
 MNIST70k device-resident run, the complete CUDA initialization/preprocessing
@@ -318,7 +336,9 @@ embedding. The corresponding CUDA UMAP runs were 2.317 seconds (fuzzy) and
 | Real-to-complex/complex-to-real FFT conversion | CUDA openTSNE | Only marginal timing change and weaker local agreement than the accepted C2C path | Removed; retain C2C cuFFT |
 | Cached Stockham twiddle table | Metal openTSNE | Warm median 2.596 s versus 2.576 s for the simpler batching candidate | Removed |
 | Five-channel batched forward FFT | Metal openTSNE | Median 2.629 s; extra occupancy/scratch traffic outweighed fewer dispatches | Removed |
-| Parallel point splatting | CPU openTSNE | Would change accumulation order or require synchronization/atomics | Not introduced |
+| Parallel point splatting with private grids | CPU openTSNE | Full-MNIST median 14.897 s versus 14.233 s; reduction traffic exceeded the parallel splat gain | Removed |
+| Fused post-update centering | Metal openTSNE | Full-MNIST median 2.613 s versus 2.545 s | Removed |
+| GPU orthonormalization of the small PCA basis | Metal PCA | Median 0.449 s versus 0.429 s; extra dispatch exceeded the tiny CPU QR cost | Removed |
 
 Failed experiments are not exposed as parameters. Keeping them out of the
 public implementation reduces maintenance, branching, and accidental use of a

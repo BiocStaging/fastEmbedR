@@ -348,8 +348,9 @@ test_that("native Metal MPS TSVD matches reference PCA", {
   expect_gte(max(agreement[2L, ]), 0.99)
 
   if (requireNamespace("float", quietly = TRUE)) {
+    float_x <- float::fl(x)
     float_fit <- fastEmbedR::pca(
-      float::fl(x),
+      float_x,
       ncomp = 2L,
       center = TRUE,
       scale = FALSE,
@@ -357,7 +358,51 @@ test_that("native Metal MPS TSVD matches reference PCA", {
       seed = 72L
     )
     expect_identical(float_fit$precision, "float32")
-    expect_equal(float_fit$scores, fit$scores, tolerance = 1e-5)
+    expect_s4_class(float_fit$scores, "float32")
+    expect_s4_class(float_fit$loadings, "float32")
+    expect_equal(float::dbl(float_fit$scores), fit$scores, tolerance = 1e-5)
+    expect_equal(float::dbl(float_fit$loadings), fit$loadings, tolerance = 1e-5)
+    expect_lt(
+      as.numeric(object.size(float_fit$scores)),
+      as.numeric(object.size(fit$scores)) * 0.7
+    )
+
+    float_init <- fastEmbedR::opentsne_pca_init(
+      float_x,
+      n_components = 2L,
+      backend = "metal",
+      seed = 72L
+    )
+    expect_s4_class(float_init, "float32")
+    expect_lt(
+      abs(max(apply(float::dbl(float_init), 2L, stats::sd)) - 1e-4),
+      2e-8
+    )
+
+    cache_file <- tempfile(fileext = ".rds")
+    on.exit(unlink(cache_file), add = TRUE)
+    saveRDS(float_init, cache_file)
+    cached_init <- fastEmbedR::opentsne_pca_init(
+      float_x,
+      n_components = 2L,
+      backend = "metal",
+      seed = 72L,
+      cache_file = cache_file
+    )
+    expect_s4_class(cached_init, "float32")
+    expect_true(isTRUE(attr(cached_init, "fastEmbedR_init_cache_hit")))
+
+    bad_x <- x
+    bad_x[4L, 3L] <- Inf
+    expect_error(
+      fastEmbedR::pca(
+        float::fl(bad_x),
+        ncomp = 2L,
+        backend = "metal",
+        seed = 72L
+      ),
+      "finite"
+    )
   }
 
   init <- fastEmbedR::opentsne_pca_init(

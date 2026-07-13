@@ -40,6 +40,30 @@ float metal_int_bits_to_float(const int value) {
   return out;
 }
 
+int metal_float_to_int_bits(const float value) {
+  int out = 0;
+  static_assert(sizeof(out) == sizeof(value), "float32 payload must use 32-bit storage");
+  std::memcpy(&out, &value, sizeof(float));
+  return out;
+}
+
+Rcpp::S4 metal_make_float32_matrix(const float* values,
+                                    const int nrow,
+                                    const int ncol,
+                                    const std::size_t row_stride) {
+  IntegerMatrix payload(nrow, ncol);
+  int* destination = INTEGER(payload);
+  for (int column = 0; column < ncol; ++column) {
+    for (int row = 0; row < nrow; ++row) {
+      destination[static_cast<std::size_t>(column) * nrow + row] =
+        metal_float_to_int_bits(values[static_cast<std::size_t>(row) * row_stride + column]);
+    }
+  }
+  Rcpp::S4 out("float32");
+  out.slot("Data") = payload;
+  return out;
+}
+
 std::vector<float> metal_copy_float_vector(SEXP values,
                                            const char* name) {
   if (metal_is_float32_s4(values)) {
@@ -125,6 +149,7 @@ struct MetalEmbeddingState {
   id<MTLComputePipelineState> structure_score_pipeline;
   id<MTLComputePipelineState> silhouette_pipeline;
   id<MTLComputePipelineState> matrix_multiply_pipeline;
+  id<MTLComputePipelineState> pca_center_scale_pipeline;
   id<MTLComputePipelineState> spectral_random_pipeline;
   id<MTLComputePipelineState> spectral_diffuse_pipeline;
   id<MTLComputePipelineState> spectral_stats_pipeline;
@@ -316,6 +341,7 @@ MetalEmbeddingState& metal_embedding_state() {
       state.refine_prepare_pipeline != nil &&
       state.refine_rows_pipeline != nil &&
       state.affine_project_pipeline != nil &&
+      state.pca_center_scale_pipeline != nil &&
       state.opentsne_sum_q_pipeline != nil &&
       state.opentsne_epoch_pipeline != nil &&
       state.opentsne_center_pipeline != nil &&
@@ -373,6 +399,7 @@ MetalEmbeddingState& metal_embedding_state() {
   state.structure_score_pipeline = make_pipeline(state, "structure_score_rows");
   state.silhouette_pipeline = make_pipeline(state, "silhouette_rows");
   state.matrix_multiply_pipeline = make_pipeline(state, "matrix_multiply");
+  state.pca_center_scale_pipeline = make_pipeline(state, "pca_center_scale_columns");
   state.spectral_random_pipeline = make_pipeline(state, "spectral_random_init");
   state.spectral_diffuse_pipeline = make_pipeline(state, "spectral_diffuse");
   state.spectral_stats_pipeline = make_pipeline(state, "spectral_init_stats");
@@ -1660,6 +1687,71 @@ kernel void matrix_multiply(
     }
   }
   out[row + col * out_rows] = total;
+}
+
+kernel void pca_center_scale_columns(
+  device float* values [[buffer(0)]],
+  device float* centers [[buffer(1)]],
+  device float* scales [[buffer(2)]],
+  device atomic_uint* invalid [[buffer(3)]],
+  constant uint& rows [[buffer(4)]],
+  constant uint& columns [[buffer(5)]],
+  constant uint& stride [[buffer(6)]],
+  constant uint& apply_center [[buffer(7)]],
+  constant uint& apply_scale [[buffer(8)]],
+  threadgroup float* scratch [[threadgroup(0)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint3 group [[threadgroup_position_in_grid]],
+  uint3 threads_per_group [[threads_per_threadgroup]]
+) {
+  const uint column = group.x;
+  if (column >= columns) return;
+  const uint workers = threads_per_group.x;
+  float sum = 0.0f;
+  float sum_squares = 0.0f;
+  for (uint row = tid; row < rows; row += workers) {
+    float value = values[column * stride + row];
+    if (!isfinite(value)) {
+      atomic_store_explicit(invalid, 1u, memory_order_relaxed);
+      value = 0.0f;
+    }
+    sum += value;
+    sum_squares += value * value;
+  }
+  scratch[tid] = sum;
+  scratch[workers + tid] = sum_squares;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint offset = workers >> 1u; offset > 0u; offset >>= 1u) {
+    if (tid < offset) {
+      scratch[tid] += scratch[tid + offset];
+      scratch[workers + tid] += scratch[workers + tid + offset];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (tid == 0u) {
+    const float raw_mean = rows > 0u ? scratch[0] / float(rows) : 0.0f;
+    float variance = 0.0f;
+    if (rows > 1u) {
+      variance = max(
+        0.0f,
+        (scratch[workers] - scratch[0] * raw_mean) / float(rows - 1u)
+      );
+    }
+    const float column_center = apply_center != 0u ? raw_mean : 0.0f;
+    const float column_scale =
+      apply_scale != 0u && variance > 0.0f ? sqrt(variance) : 1.0f;
+    centers[column] = column_center;
+    scales[column] = column_scale;
+    scratch[0] = column_center;
+    scratch[1] = column_scale;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const float column_center = scratch[0];
+  const float column_scale = scratch[1];
+  for (uint row = tid; row < rows; row += workers) {
+    values[column * stride + row] =
+      (values[column * stride + row] - column_center) / column_scale;
+  }
 }
 
 kernel void spectral_random_init(
@@ -4298,43 +4390,104 @@ List run_tsvd_pca_metal(SEXP data_sexp,
     std::memset(data_values, 0, static_cast<std::size_t>(p) * data_stride * sizeof(float));
 
     const bool float_input = metal_is_float32_s4(data_sexp);
-    const int* float_bits = nullptr;
-    const double* double_values = nullptr;
+    NumericVector centers(p);
+    NumericVector scales(p, 1.0);
     if (float_input) {
       Rcpp::S4 object(data_sexp);
       IntegerVector payload(object.slot("Data"));
-      float_bits = INTEGER(payload);
+      const int* float_bits = INTEGER(payload);
+      for (int column = 0; column < p; ++column) {
+        std::memcpy(
+          data_values + static_cast<std::size_t>(column) * data_stride,
+          float_bits + static_cast<std::size_t>(column) * n,
+          static_cast<std::size_t>(n) * sizeof(float)
+        );
+      }
+
+      id<MTLBuffer> center_values_buffer = [state.device
+        newBufferWithLength:static_cast<std::size_t>(p) * sizeof(float)
+                   options:MTLResourceStorageModeShared];
+      id<MTLBuffer> scale_values_buffer = [state.device
+        newBufferWithLength:static_cast<std::size_t>(p) * sizeof(float)
+                   options:MTLResourceStorageModeShared];
+      id<MTLBuffer> invalid_buffer = [state.device
+        newBufferWithLength:sizeof(std::uint32_t)
+                   options:MTLResourceStorageModeShared];
+      if (center_values_buffer == nil || scale_values_buffer == nil || invalid_buffer == nil) {
+        Rcpp::stop("Failed to allocate Metal PCA preprocessing buffers.");
+      }
+      std::memset([invalid_buffer contents], 0, sizeof(std::uint32_t));
+      const std::uint32_t rows_u = static_cast<std::uint32_t>(n);
+      const std::uint32_t columns_u = static_cast<std::uint32_t>(p);
+      const std::uint32_t stride_u = static_cast<std::uint32_t>(data_stride);
+      const std::uint32_t center_u = center ? 1u : 0u;
+      const std::uint32_t scale_u = scale ? 1u : 0u;
+      NSUInteger threads = 1u;
+      const NSUInteger thread_limit = std::min<NSUInteger>(
+        256u,
+        state.pca_center_scale_pipeline.maxTotalThreadsPerThreadgroup
+      );
+      while ((threads << 1u) <= thread_limit) threads <<= 1u;
+      id<MTLCommandBuffer> preprocess_command = [state.queue commandBuffer];
+      id<MTLComputeCommandEncoder> preprocess_encoder =
+        [preprocess_command computeCommandEncoder];
+      [preprocess_encoder setComputePipelineState:state.pca_center_scale_pipeline];
+      [preprocess_encoder setBuffer:data_buffer offset:0 atIndex:0];
+      [preprocess_encoder setBuffer:center_values_buffer offset:0 atIndex:1];
+      [preprocess_encoder setBuffer:scale_values_buffer offset:0 atIndex:2];
+      [preprocess_encoder setBuffer:invalid_buffer offset:0 atIndex:3];
+      [preprocess_encoder setBytes:&rows_u length:sizeof(std::uint32_t) atIndex:4];
+      [preprocess_encoder setBytes:&columns_u length:sizeof(std::uint32_t) atIndex:5];
+      [preprocess_encoder setBytes:&stride_u length:sizeof(std::uint32_t) atIndex:6];
+      [preprocess_encoder setBytes:&center_u length:sizeof(std::uint32_t) atIndex:7];
+      [preprocess_encoder setBytes:&scale_u length:sizeof(std::uint32_t) atIndex:8];
+      [preprocess_encoder setThreadgroupMemoryLength:2u * threads * sizeof(float)
+                                             atIndex:0];
+      [preprocess_encoder dispatchThreadgroups:MTLSizeMake(static_cast<NSUInteger>(p), 1, 1)
+                         threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+      [preprocess_encoder endEncoding];
+      wait_for_command(preprocess_command, "Metal TSVD float32 centering");
+      const std::uint32_t invalid =
+        *static_cast<const std::uint32_t*>([invalid_buffer contents]);
+      if (invalid != 0u) {
+        Rcpp::stop("data must contain only finite values.");
+      }
+      const float* center_values =
+        static_cast<const float*>([center_values_buffer contents]);
+      const float* scale_values =
+        static_cast<const float*>([scale_values_buffer contents]);
+      for (int column = 0; column < p; ++column) {
+        centers[column] = center_values[column];
+        scales[column] = scale_values[column];
+      }
+      [invalid_buffer release];
+      [scale_values_buffer release];
+      [center_values_buffer release];
     } else {
       NumericMatrix numeric(data_sexp);
-      double_values = REAL(numeric);
-    }
-    NumericVector centers(p);
-    NumericVector scales(p, 1.0);
-    for (int column = 0; column < p; ++column) {
-      double sum = 0.0;
-      double sum_squares = 0.0;
-      const std::size_t input_offset = static_cast<std::size_t>(column) * n;
-      for (int row = 0; row < n; ++row) {
-        const std::size_t position = input_offset + row;
-        const float value = float_input ? metal_int_bits_to_float(float_bits[position]) :
-                                          static_cast<float>(double_values[position]);
-        if (!std::isfinite(value)) Rcpp::stop("`data` must contain only finite values.");
-        sum += value;
-        sum_squares += static_cast<double>(value) * value;
-      }
-      const double raw_mean = sum / static_cast<double>(n);
-      const double variance = n > 1 ?
-        std::max(0.0, (sum_squares - sum * raw_mean) / static_cast<double>(n - 1)) : 0.0;
-      const double column_scale = scale && variance > 0.0 ? std::sqrt(variance) : 1.0;
-      const double column_center = center ? raw_mean : 0.0;
-      centers[column] = column_center;
-      scales[column] = column_scale;
-      float* destination = data_values + static_cast<std::size_t>(column) * data_stride;
-      for (int row = 0; row < n; ++row) {
-        const std::size_t position = input_offset + row;
-        const float value = float_input ? metal_int_bits_to_float(float_bits[position]) :
-                                          static_cast<float>(double_values[position]);
-        destination[row] = static_cast<float>((value - column_center) / column_scale);
+      const double* double_values = REAL(numeric);
+      for (int column = 0; column < p; ++column) {
+        double sum = 0.0;
+        double sum_squares = 0.0;
+        const std::size_t input_offset = static_cast<std::size_t>(column) * n;
+        for (int row = 0; row < n; ++row) {
+          const float value = static_cast<float>(double_values[input_offset + row]);
+          if (!std::isfinite(value)) Rcpp::stop("data must contain only finite values.");
+          sum += value;
+          sum_squares += static_cast<double>(value) * value;
+        }
+        const double raw_mean = sum / static_cast<double>(n);
+        const double variance = n > 1 ?
+          std::max(0.0, (sum_squares - sum * raw_mean) / static_cast<double>(n - 1)) : 0.0;
+        const double column_scale = scale && variance > 0.0 ? std::sqrt(variance) : 1.0;
+        const double column_center = center ? raw_mean : 0.0;
+        centers[column] = column_center;
+        scales[column] = column_scale;
+        float* destination = data_values + static_cast<std::size_t>(column) * data_stride;
+        for (int row = 0; row < n; ++row) {
+          const float value = static_cast<float>(double_values[input_offset + row]);
+          destination[row] = static_cast<float>((value - column_center) / column_scale);
+        }
       }
     }
     const auto converted = Clock::now();
@@ -4515,18 +4668,41 @@ List run_tsvd_pca_metal(SEXP data_sexp,
     wait_for_command(score_command, "Metal TSVD score projection");
     const auto scores_done = Clock::now();
 
-    NumericMatrix scores(n, n_components);
-    NumericMatrix loadings(p, n_components);
     NumericVector singular_values(n_components);
     const float* score_values = static_cast<const float*>([score_buffer contents]);
     for (int component = 0; component < n_components; ++component) {
       singular_values[component] = std::sqrt(std::max(0.0f, eigenvalues[component]));
-      for (int row = 0; row < n; ++row) {
-        scores(row, component) = score_values[static_cast<std::size_t>(row) * score_stride + component];
+    }
+    Rcpp::RObject scores;
+    Rcpp::RObject loadings;
+    if (float_input) {
+      scores = metal_make_float32_matrix(
+        score_values,
+        n,
+        n_components,
+        static_cast<std::size_t>(score_stride)
+      );
+      loadings = metal_make_float32_matrix(
+        loading_values,
+        p,
+        n_components,
+        static_cast<std::size_t>(loading_stride)
+      );
+    } else {
+      NumericMatrix numeric_scores(n, n_components);
+      NumericMatrix numeric_loadings(p, n_components);
+      for (int component = 0; component < n_components; ++component) {
+        for (int row = 0; row < n; ++row) {
+          numeric_scores(row, component) =
+            score_values[static_cast<std::size_t>(row) * score_stride + component];
+        }
+        for (int row = 0; row < p; ++row) {
+          numeric_loadings(row, component) =
+            loading_values[static_cast<std::size_t>(row) * loading_stride + component];
+        }
       }
-      for (int row = 0; row < p; ++row) {
-        loadings(row, component) = loading_values[static_cast<std::size_t>(row) * loading_stride + component];
-      }
+      scores = numeric_scores;
+      loadings = numeric_loadings;
     }
     const auto returned = Clock::now();
 

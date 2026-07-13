@@ -14,7 +14,8 @@ opentsne_pca_init(
 )
 }
 \arguments{
-\item{data}{Numeric matrix/data frame with observations in rows.}
+\item{data}{Numeric matrix/data frame or `float::float32` matrix with
+observations in rows.}
 
 \item{n_components}{Output dimensionality, usually `2`.}
 
@@ -30,7 +31,8 @@ validated.}
 \item{force_recompute}{If `TRUE`, ignore any existing cache and recompute.}
 }
 \value{
-A numeric initialization matrix suitable for `Y_init`.
+An initialization matrix suitable for `Y_init`. Float32 input is
+  returned as `float::float32` when the selected PCA backend preserves it.
 }
 \description{
 `opentsne_pca_init()` creates the small-scale PCA initialization used by
@@ -40,10 +42,11 @@ of recomputing PCA. This is useful when comparing several KNN backends with
 exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
 native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
 loudly if that backend is unavailable. Metal uses fastEmbedR's native
-float32 block-subspace TSVD with Metal Performance Shaders matrix products
-and one resident GPU workspace. CPU prefers `fastPLS >= 0.99.3` RSVD when it
-is installed and otherwise uses the package-local RSVD helper. The package
-does not call Python or `reticulate` for PCA initialization.
+float32 block-subspace TSVD with native Metal centering/scaling, Metal
+Performance Shaders matrix products, and one resident GPU workspace. CPU
+prefers `fastPLS >= 0.99.3` RSVD when it is installed and otherwise uses the
+package-local RSVD helper. The package does not call Python or `reticulate`
+for PCA initialization.
 }
 \examples{
 init <- opentsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)

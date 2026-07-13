@@ -270,11 +270,14 @@ prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
 #' decomposition. CPU uses the fastPLS-style randomized SVD family. Metal uses
 #' a package-native float32 block-subspace TSVD whose large matrix products are
 #' executed with Metal Performance Shaders while data and work buffers remain
-#' resident in unified GPU memory. The API intentionally has no decomposition
-#' method menu and does not call Python. Explicit unavailable GPU requests fail
-#' instead of being reported as GPU work.
+#' resident in unified GPU memory. With `float::float32` input, native Metal
+#' preprocessing and the returned scores/loadings also remain float32. The API
+#' intentionally has no decomposition method menu and does not call Python.
+#' Explicit unavailable GPU requests fail instead of being reported as GPU
+#' work.
 #'
-#' @param data Numeric matrix/data frame with observations in rows.
+#' @param data Numeric matrix/data frame or `float::float32` matrix with
+#'   observations in rows.
 #' @param ncomp Number of principal components.
 #' @param center If `TRUE`, mean-center columns before decomposition.
 #' @param scale If `TRUE`, scale centered columns to unit sample standard
@@ -283,7 +286,8 @@ prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
 #' @param seed Random seed for the Gaussian subspace sketch.
 #' @return A `fastEmbedR_pca` list with `scores`, `loadings`,
 #'   `singular_values`, centering/scaling vectors, backend metadata, and
-#'   decomposition metadata.
+#'   decomposition metadata. Metal preserves `float::float32` scores and
+#'   loadings when the input is float32.
 #' @examples
 #' fit <- pca(as.matrix(iris[, 1:4]), ncomp = 2, seed = 1)
 #' plot(fit$scores, pch = 21, bg = iris$Species)

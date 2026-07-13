@@ -237,9 +237,7 @@ check_tsne_neighbor_params <- function(n,
     verbose = isTRUE(verbose),
     init = !is.null(Y_init),
     Y_init = if (is.null(Y_init)) matrix(0, 0L, 0L) else {
-      Y_init <- as.matrix(Y_init)
-      storage.mode(Y_init) <- "double"
-      Y_init
+      opentsne_dense_numeric_matrix(Y_init)
     },
     momentum = as.numeric(momentum),
     final_momentum = as.numeric(final_momentum)
@@ -434,6 +432,33 @@ fastpls_package_pca_scores <- function(x,
   )
 }
 
+normalize_opentsne_pca_scores <- function(scores, n_components) {
+  init <- scores[, seq_len(n_components), drop = FALSE]
+  if (is_float32_matrix(init)) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to normalize float32 PCA scores.", call. = FALSE)
+    }
+    init <- float::sweep(init, 2L, float::colMeans(init), check.margin = FALSE)
+    mean_squares <- float::dbl(float::colMeans(init * init))
+    variance <- mean_squares
+    if (nrow(init) > 1L) {
+      variance <- variance * nrow(init) / (nrow(init) - 1L)
+    }
+    init_scale <- sqrt(max(variance))
+    if (is.finite(init_scale) && init_scale > 0) {
+      init <- init * float::fl(1e-4 / init_scale)
+    }
+    return(init)
+  }
+  init <- as.matrix(init)
+  init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
+  init_scale <- max(apply(init, 2L, stats::sd))
+  if (is.finite(init_scale) && init_scale > 0) {
+    init <- init * (1e-4 / init_scale)
+  }
+  init
+}
+
 make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
   x <- opentsne_pca_input_matrix(x)
   n_components <- as.integer(n_components)
@@ -448,12 +473,7 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
       scale = FALSE,
       seed = seed
     )
-    init <- as.matrix(pca$scores[, seq_len(n_components), drop = FALSE])
-    init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
-    init_scale <- max(apply(init, 2L, stats::sd))
-    if (is.finite(init_scale) && init_scale > 0) {
-      init <- init * (1e-4 / init_scale)
-    }
+    init <- normalize_opentsne_pca_scores(pca$scores, n_components)
     attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
     attr(init, "fastEmbedR_init_backend") <- pca$backend
     attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
@@ -492,12 +512,7 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
         package = "RAPIDS RAFT TSVD",
         package_version = NA_character_
       )
-      init <- as.matrix(pca$scores[, seq_len(n_components), drop = FALSE])
-      init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
-      scale <- max(apply(init, 2L, stats::sd))
-      if (is.finite(scale) && scale > 0) {
-        init <- init * (1e-4 / scale)
-      }
+      init <- normalize_opentsne_pca_scores(pca$scores, n_components)
       attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
       attr(init, "fastEmbedR_init_backend") <- pca$backend
       attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
@@ -546,12 +561,7 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
       )
     }
   }
-  init <- as.matrix(pca$scores[, seq_len(n_components), drop = FALSE])
-  init <- sweep(init, 2L, colMeans(init), check.margin = FALSE)
-  scale <- max(apply(init, 2L, stats::sd))
-  if (is.finite(scale) && scale > 0) {
-    init <- init * (1e-4 / scale)
-  }
+  init <- normalize_opentsne_pca_scores(pca$scores, n_components)
   attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
   attr(init, "fastEmbedR_init_backend") <- pca$backend
   attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
@@ -571,12 +581,14 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
 #' exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
 #' native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
 #' loudly if that backend is unavailable. Metal uses fastEmbedR's native
-#' float32 block-subspace TSVD with Metal Performance Shaders matrix products
-#' and one resident GPU workspace. CPU prefers `fastPLS >= 0.99.3` RSVD when it
-#' is installed and otherwise uses the package-local RSVD helper. The package
-#' does not call Python or `reticulate` for PCA initialization.
+#' float32 block-subspace TSVD with native Metal centering/scaling, Metal
+#' Performance Shaders matrix products, and one resident GPU workspace. CPU
+#' prefers `fastPLS >= 0.99.3` RSVD when it is installed and otherwise uses the
+#' package-local RSVD helper. The package does not call Python or `reticulate`
+#' for PCA initialization.
 #'
-#' @param data Numeric matrix/data frame with observations in rows.
+#' @param data Numeric matrix/data frame or `float::float32` matrix with
+#'   observations in rows.
 #' @param n_components Output dimensionality, usually `2`.
 #' @param seed Random seed used by the truncated PCA subspace sketch.
 #' @param backend Backend used for PCA when available: `"cpu"`, `"metal"`,
@@ -585,7 +597,8 @@ make_opentsne_pca_init <- function(x, n_components, seed, backend = "cpu") {
 #'   `force_recompute = FALSE`, the saved initialization is loaded and
 #'   validated.
 #' @param force_recompute If `TRUE`, ignore any existing cache and recompute.
-#' @return A numeric initialization matrix suitable for `Y_init`.
+#' @return An initialization matrix suitable for `Y_init`. Float32 input is
+#'   returned as `float::float32` when the selected PCA backend preserves it.
 #' @examples
 #' init <- opentsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)
 #' plot(init, pch = 21, bg = iris$Species)
@@ -649,7 +662,10 @@ resolve_opentsne_y_init <- function(Y_init, n, n_components) {
     attr(Y_init, "fastEmbedR_init_cache_file") <- path
     attr(Y_init, "fastEmbedR_init_cache_hit") <- TRUE
   }
-  Y_init <- opentsne_dense_numeric_matrix(Y_init)
+  float_init <- is_float32_matrix(Y_init)
+  if (!float_init) {
+    Y_init <- opentsne_dense_numeric_matrix(Y_init)
+  }
   if (nrow(Y_init) != n || ncol(Y_init) != n_components) {
     stop(
       "`Y_init` must have ", n, " rows and ", n_components,
@@ -657,7 +673,12 @@ resolve_opentsne_y_init <- function(Y_init, n, n_components) {
       call. = FALSE
     )
   }
-  if (any(!is.finite(Y_init))) {
+  finite_init <- if (float_init) {
+    isTRUE(float32_all_finite_cpp(Y_init))
+  } else {
+    all(is.finite(Y_init))
+  }
+  if (!finite_init) {
     stop("`Y_init` must contain only finite values.", call. = FALSE)
   }
   Y_init
