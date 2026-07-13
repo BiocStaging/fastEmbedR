@@ -678,6 +678,42 @@ test_that("public PCA API uses randomized SVD", {
   expect_true(all(is.finite(fit$singular_values)))
 })
 
+test_that("public PCA API can return an openTSNE-ready initialization", {
+  set.seed(46)
+  x <- matrix(rnorm(600L), 100L, 6L)
+  xtest <- matrix(rnorm(120L), 20L, 6L)
+  fit <- pca(
+    x,
+    ncomp = 2L,
+    xtest = xtest,
+    seed = 46L,
+    backend = "cpu",
+    opentsne_init = TRUE
+  )
+
+  expect_s3_class(fit, "fastEmbedR_pca")
+  expect_equal(dim(fit$opentsne_init), c(100L, 2L))
+  expect_equal(dim(fit$scores_test), c(20L, 2L))
+  expected_test <- sweep(xtest, 2L, fit$center, "-", check.margin = FALSE)
+  expected_test <- sweep(expected_test, 2L, fit$scale, "/", check.margin = FALSE)
+  expected_test <- expected_test %*% fit$loadings
+  colnames(expected_test) <- colnames(fit$scores)
+  expect_equal(fit$scores_test, expected_test, tolerance = 1e-10)
+  expect_equal(unname(colMeans(fit$opentsne_init)), c(0, 0), tolerance = 1e-12)
+  expect_equal(max(apply(fit$opentsne_init, 2L, stats::sd)), 1e-4,
+    tolerance = 1e-12)
+  expect_identical(
+    attr(fit$opentsne_init, "fastEmbedR_init_backend"),
+    fit$backend
+  )
+  expect_identical(
+    attr(fit$opentsne_init, "fastEmbedR_init_method"),
+    paste0("pca_", fit$method)
+  )
+  expect_error(pca(x, opentsne_init = NA), "must be TRUE or FALSE")
+  expect_error(pca(x, xtest = matrix(0, 2L, 5L)), "same number of columns")
+})
+
 test_that("high-level embeddings avoid retaining KNN matrices by default", {
   skip_if_not_installed("faissR")
   set.seed(47)

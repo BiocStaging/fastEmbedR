@@ -81,7 +81,7 @@ and quality metrics without changing the stored layout.
 | `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
-| `pca()` | Backend-native truncated PCA: CPU RSVD, resident Metal/MPS TSVD, or compiled CUDA RAFT TSVD. |
+| `pca()` | Backend-native truncated PCA; set `opentsne_init = TRUE` to return a ready-to-use openTSNE initialization. |
 | `landmark_tsne()` / `landmark_umap()` | Landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
 | `faissR::backend_info()` | Report FAISS/cuVS neighbour-search availability. |

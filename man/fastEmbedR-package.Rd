@@ -10,6 +10,8 @@ fastEmbedR combines native CPU/Metal nearest-neighbour search with native
 UMAP/openTSNE-style embeddings from data or precomputed KNN matrices. Use
 [umap()] or [opentsne()] for one-call workflows, or compute a reusable KNN
 object with `faissR::nn()` and pass it to [umap_knn()] or [opentsne_knn()].
+Use [pca()] for reusable backend-native PCA and request
+`opentsne_init = TRUE` when an openTSNE-ready initialization is needed.
 Score results with [evaluate_embedding()].
 }
 \details{

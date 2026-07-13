@@ -117,8 +117,15 @@ KNN-input runs and is not used for neighbour search or optimization.
 for openTSNE initialization:
 
 ```r
-pca_fit <- pca(x, ncomp = 2, backend = "cpu", seed = 1)
-Y_init <- opentsne_pca_init(x, backend = "cpu", seed = 1)
+pca_fit <- pca(
+  x,
+  ncomp = 2,
+  backend = "cpu",
+  seed = 1,
+  opentsne_init = TRUE
+)
+Y_init <- pca_fit$opentsne_init
+layout <- opentsne_knn(knn, Y_init = Y_init, perplexity = 30)
 ```
 
 The public `pca()` helper is intentionally simple: there is no `irlba` or
@@ -127,6 +134,16 @@ native RAPIDS RAFT TSVD compiled into the package CUDA backend and fails loudly
 if that support is unavailable. Metal uses a native float32 block-subspace TSVD
 with MPS matrix products and a resident workspace. CPU uses the fastPLS-style
 RSVD family available to the package build.
+
+The ordinary PCA scores are always retained in `pca_fit$scores`.
+`opentsne_init = TRUE` adds a second matrix, centered and scaled so that its
+largest component standard deviation is `1e-4`; no second decomposition is
+performed.
+
+The argument order follows `fastPLS::pca()` for `x`, `ncomp`, `xtest`,
+`center`, `scale`, and `backend`, but fastEmbedR intentionally omits the SVD
+method selector. Supplying `xtest` adds projected test coordinates in
+`pca_fit$scores_test`.
 
 ## Explicit GPU Use
 

@@ -166,7 +166,8 @@ it. For t-SNE this initialization is centered and scaled to the small scale
 expected by t-SNE:
 
 ```r
-Y_init <- opentsne_pca_init(x)
+pca_fit <- pca(x, ncomp = 2L, opentsne_init = TRUE)
+Y_init <- pca_fit$opentsne_init
 y_tsne <- opentsne_knn(knn, Y_init = Y_init, perplexity = 15)
 ```
 

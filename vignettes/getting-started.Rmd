@@ -83,6 +83,35 @@ learning rate is `n / early_exaggeration`, CPU/small exact runs can end early by
 monitoring KLD, and large FFT/GPU runs do not hide an expensive CPU KLD monitor
 inside a GPU-labelled benchmark.
 
+## PCA And openTSNE Initialization
+
+`pca()` is a visible package function for reusable backend-native PCA. Set
+`opentsne_init = TRUE` to derive an openTSNE-ready initialization from the same
+PCA scores without running a second decomposition:
+
+```{r pca-opentsne-init}
+pca_fit <- pca(
+  x,
+  ncomp = 2,
+  backend = "cpu",
+  seed = 4,
+  opentsne_init = TRUE
+)
+
+layout_tsne <- opentsne_knn(
+  knn,
+  Y_init = pca_fit$opentsne_init,
+  perplexity = 5,
+  early_exaggeration_iter = 10,
+  n_iter = 20,
+  seed = 4
+)
+```
+
+`pca_fit$scores` contains the ordinary PCA coordinates.
+`pca_fit$opentsne_init` is centered and scaled so that its largest component
+standard deviation is `1e-4`, as expected by the openTSNE optimizer.
+
 ## One-Call Workflow
 
 ```{r one-call-workflow}

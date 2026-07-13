@@ -15,8 +15,17 @@ test_that("public API is KNN and openTSNE focused", {
   expect_true(all(c(
     "umap", "umap_knn", "opentsne", "opentsne_knn", "embed_knn",
     "evaluate_embedding", "transform_tsne", "landmark_tsne",
-    "prepare_umap_knn", "prepare_opentsne_knn"
+    "prepare_umap_knn", "prepare_opentsne_knn", "pca"
   ) %in% exports))
+
+  pca_args <- names(formals(pca))
+  expect_identical(
+    pca_args[seq_len(6L)],
+    c("x", "ncomp", "xtest", "center", "scale", "backend")
+  )
+  expect_true(all(c("seed", "opentsne_init") %in% pca_args))
+  expect_false("method" %in% pca_args)
+  expect_identical(formals(pca)$opentsne_init, FALSE)
   expect_false(any(c(
     "supervised_umap", "tsne", "infotsne", "pacmap", "trimap",
     "localmap", "transform_embedding", "knn_graph",

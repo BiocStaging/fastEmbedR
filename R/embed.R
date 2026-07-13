@@ -264,6 +264,78 @@ prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
   list(data = x, center = center_values, scale = scale_values)
 }
 
+attach_opentsne_pca_init <- function(fit, requested) {
+  if (!is.logical(requested) || length(requested) != 1L || is.na(requested)) {
+    stop("`opentsne_init` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!isTRUE(requested)) return(fit)
+
+  init <- normalize_opentsne_pca_scores(fit$scores, fit$ncomp)
+  attr(init, "fastEmbedR_init_method") <- paste0("pca_", fit$method)
+  attr(init, "fastEmbedR_init_backend") <- fit$backend
+  attr(init, "fastEmbedR_init_backend_reason") <- fit$backend_reason %||% NA_character_
+  attr(init, "fastEmbedR_init_seed") <- fit$seed
+  fit$opentsne_init <- init
+  fit
+}
+
+project_pca_test_scores <- function(xtest, fit) {
+  use_float32 <- is_float32_matrix(xtest) && is_float32_matrix(fit$loadings)
+  x_test <- if (use_float32) {
+    if (!requireNamespace("float", quietly = TRUE)) {
+      stop("The float package is required to project float32 `xtest`.", call. = FALSE)
+    }
+    xtest
+  } else if (is_float32_matrix(xtest)) {
+    float::dbl(xtest)
+  } else {
+    x <- as.matrix(xtest)
+    storage.mode(x) <- "double"
+    x
+  }
+
+  if (nrow(x_test) < 1L || ncol(x_test) != nrow(fit$loadings)) {
+    stop(
+      "`xtest` must have at least one row and the same number of columns as `x`.",
+      call. = FALSE
+    )
+  }
+  finite <- if (use_float32) {
+    isTRUE(float32_all_finite_cpp(x_test))
+  } else {
+    all(is.finite(x_test))
+  }
+  if (!finite) {
+    stop("`xtest` must contain only finite values.", call. = FALSE)
+  }
+
+  if (use_float32) {
+    center <- float::fl(matrix(as.numeric(fit$center), nrow = 1L))
+    scale <- float::fl(matrix(as.numeric(fit$scale), nrow = 1L))
+    scaled <- float::sweep(x_test, 2L, center, "-", check.margin = FALSE)
+    scaled <- float::sweep(scaled, 2L, scale, "/", check.margin = FALSE)
+    scores <- scaled %*% fit$loadings
+  } else {
+    loadings <- if (is_float32_matrix(fit$loadings)) {
+      float::dbl(fit$loadings)
+    } else {
+      as.matrix(fit$loadings)
+    }
+    scaled <- sweep(x_test, 2L, as.numeric(fit$center), "-", check.margin = FALSE)
+    scaled <- sweep(scaled, 2L, as.numeric(fit$scale), "/", check.margin = FALSE)
+    scores <- scaled %*% loadings
+  }
+  colnames(scores) <- colnames(fit$scores)
+  scores
+}
+
+finalize_pca_fit <- function(fit, xtest, opentsne_init) {
+  if (!is.null(xtest)) {
+    fit$scores_test <- project_pca_test_scores(xtest, fit)
+  }
+  attach_opentsne_pca_init(fit, opentsne_init)
+}
+
 #' Backend-native truncated PCA
 #'
 #' `pca()` computes principal component scores with a backend-native truncated
@@ -276,53 +348,77 @@ prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
 #' Explicit unavailable GPU requests fail instead of being reported as GPU
 #' work.
 #'
-#' @param data Numeric matrix/data frame or `float::float32` matrix with
+#' @param x Numeric matrix/data frame or `float::float32` matrix with
 #'   observations in rows.
 #' @param ncomp Number of principal components.
+#' @param xtest Optional test/query matrix with the same columns as `x`.
+#'   Projected coordinates are returned in `scores_test`.
 #' @param center If `TRUE`, mean-center columns before decomposition.
 #' @param scale If `TRUE`, scale centered columns to unit sample standard
 #'   deviation before decomposition.
 #' @param backend PCA backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @param seed Random seed for the Gaussian subspace sketch.
+#' @param opentsne_init If `TRUE`, add `opentsne_init` to the returned PCA
+#'   object. This matrix is centered and rescaled so its largest component
+#'   standard deviation is `1e-4`, ready to pass as `Y_init` to [opentsne()]
+#'   or [opentsne_knn()].
 #' @return A `fastEmbedR_pca` list with `scores`, `loadings`,
 #'   `singular_values`, centering/scaling vectors, backend metadata, and
-#'   decomposition metadata. Metal preserves `float::float32` scores and
-#'   loadings when the input is float32.
+#'   decomposition metadata. When `opentsne_init = TRUE`, the list also
+#'   contains `opentsne_init`; when `xtest` is supplied, it also contains
+#'   `scores_test`. Metal preserves `float::float32` scores, loadings,
+#'   initialization, and compatible test projections when the input is
+#'   float32.
 #' @examples
-#' fit <- pca(as.matrix(iris[, 1:4]), ncomp = 2, seed = 1)
+#' fit <- pca(
+#'   as.matrix(iris[, 1:4]),
+#'   ncomp = 2,
+#'   seed = 1,
+#'   opentsne_init = TRUE
+#' )
 #' plot(fit$scores, pch = 21, bg = iris$Species)
+#' plot(fit$opentsne_init, pch = 21, bg = iris$Species)
 #' @export
-pca <- function(data,
+pca <- function(x,
                 ncomp = 2L,
+                xtest = NULL,
                 center = TRUE,
                 scale = FALSE,
                 backend = c("cpu", "cuda", "metal"),
-                seed = 4L) {
+                seed = 4L,
+                opentsne_init = FALSE) {
   backend <- validate_pca_backend(match.arg(backend))
+  if (!is.logical(opentsne_init) || length(opentsne_init) != 1L ||
+      is.na(opentsne_init)) {
+    stop("`opentsne_init` must be TRUE or FALSE.", call. = FALSE)
+  }
   ncomp <- as.integer(ncomp)
   if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) || ncomp < 1L) {
     stop("`ncomp` must be a positive integer.", call. = FALSE)
   }
   if (identical(backend, "metal")) {
-    return(fastembedr_metal_tsvd_pca(
-      data,
+    fit <- fastembedr_metal_tsvd_pca(
+      x,
       ncomp = ncomp,
       center = center,
       scale = scale,
       seed = seed
-    ))
+    )
+    return(finalize_pca_fit(fit, xtest, opentsne_init))
   }
   fastpls_fit <- fastembedr_fastpls_pca(
-    data,
+    x,
     ncomp = ncomp,
     center = center,
     scale = scale,
     backend = backend,
     seed = seed
   )
-  if (!is.null(fastpls_fit)) return(fastpls_fit)
+  if (!is.null(fastpls_fit)) {
+    return(finalize_pca_fit(fastpls_fit, xtest, opentsne_init))
+  }
 
-  prepared <- prepare_pca_matrix(data, center = center, scale = scale)
+  prepared <- prepare_pca_matrix(x, center = center, scale = scale)
   rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
   if (rank < 1L) {
     stop("`data` has no usable PCA rank.", call. = FALSE)
@@ -356,7 +452,7 @@ pca <- function(data,
     seed = as.integer(seed)
   )
   class(out) <- "fastEmbedR_pca"
-  out
+  finalize_pca_fit(out, xtest, opentsne_init)
 }
 
 fastembedr_fastpls_pca <- function(data,

@@ -154,11 +154,14 @@ through RAPIDS RAFT TSVD compiled in the package CUDA translation unit. If
 RAFT TSVD support is not compiled in, CUDA PCA initialization fails loudly
 rather than falling back to a different implementation.
 
-`opentsne_pca_init()` is a thin initialization helper on top of this PCA
-family. It centers the PCA scores and rescales them so the maximum component
-standard deviation is `1e-4`, matching the small-scale initialization expected
-by t-SNE/openTSNE optimizers [1,3-4]. Users can compute this once and pass it
-as `Y_init` to `opentsne_knn()` or `opentsne()`.
+Set `opentsne_init = TRUE` in `pca()` to retain the ordinary PCA fit and add an
+`opentsne_init` matrix derived from those same scores. The added matrix is
+centered and rescaled so the maximum component standard deviation is `1e-4`,
+matching the small-scale initialization expected by t-SNE/openTSNE optimizers
+[1,3-4]. No second decomposition is performed. `opentsne_pca_init()` remains a
+compact helper for users who need only the initialization matrix or an RDS
+cache. Either result can be passed as `Y_init` to `opentsne_knn()` or
+`opentsne()`.
 
 ## UMAP From KNN
 

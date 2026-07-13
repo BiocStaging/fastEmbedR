@@ -352,19 +352,28 @@ test_that("native Metal MPS TSVD matches reference PCA", {
     float_fit <- fastEmbedR::pca(
       float_x,
       ncomp = 2L,
+      xtest = float_x[seq_len(12L), , drop = FALSE],
       center = TRUE,
       scale = FALSE,
       backend = "metal",
-      seed = 72L
+      seed = 72L,
+      opentsne_init = TRUE
     )
     expect_identical(float_fit$precision, "float32")
     expect_s4_class(float_fit$scores, "float32")
     expect_s4_class(float_fit$loadings, "float32")
+    expect_s4_class(float_fit$opentsne_init, "float32")
+    expect_s4_class(float_fit$scores_test, "float32")
+    expect_equal(dim(float_fit$scores_test), c(12L, 2L))
     expect_equal(float::dbl(float_fit$scores), fit$scores, tolerance = 1e-5)
     expect_equal(float::dbl(float_fit$loadings), fit$loadings, tolerance = 1e-5)
     expect_lt(
       as.numeric(object.size(float_fit$scores)),
       as.numeric(object.size(fit$scores)) * 0.7
+    )
+    expect_lt(
+      abs(max(apply(float::dbl(float_fit$opentsne_init), 2L, stats::sd)) - 1e-4),
+      2e-8
     )
 
     float_init <- fastEmbedR::opentsne_pca_init(
