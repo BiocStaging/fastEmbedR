@@ -260,7 +260,7 @@ EOF_PY
       -DCMAKE_INSTALL_PREFIX=/opt/kodama \
       -DCMAKE_CXX_COMPILER=/opt/conda/bin/x86_64-conda-linux-gnu-c++ \
       -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
-      -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
+      -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;120" \
       -DKODAMA_ENABLE_CUDA=ON \
       -DKODAMA_ENABLE_METAL=OFF \
       -DKODAMA_ENABLE_OPENMP=ON \
