@@ -321,9 +321,21 @@ publication_clean_plot <- function(layout, labels, path, cex = NULL) {
   old <- graphics::par(no.readonly = TRUE)
   on.exit(graphics::par(old), add = TRUE)
   graphics::par(mar = rep(0, 4L), xaxs = "i", yaxs = "i", bty = "n")
+  padded_limits <- function(values, fraction = 0.04) {
+    limits <- range(values, finite = TRUE)
+    span <- diff(limits)
+    if (!is.finite(span) || span <= 0) {
+      center <- if (all(is.finite(limits))) mean(limits) else 0
+      span <- max(1, abs(center) * 0.08)
+      limits <- center + c(-0.5, 0.5) * span
+    }
+    limits + c(-1, 1) * span * fraction
+  }
   graphics::plot(
     layout[, 1L], layout[, 2L],
     pch = 16, cex = cex, col = colors,
+    xlim = padded_limits(layout[, 1L]),
+    ylim = padded_limits(layout[, 2L]),
     axes = FALSE, ann = FALSE, frame.plot = FALSE
   )
   invisible(path)

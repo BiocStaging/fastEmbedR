@@ -26,8 +26,14 @@ precomputed object is missing, the driver creates it once under
 - `publication_metrics.R`: exact/sampled quality and agreement metrics.
 - `reference_opentsne_affinity.py`: independent Python openTSNE affinity oracle.
 - `benchmark_worker_monitor.sh`: timeout, peak RSS, and GPU-memory monitor.
-- `run_reviewer_hpc_cpu.sh`: Slurm CPU run at 1 and 4 threads.
-- `run_reviewer_hpc_cuda.sh`: Slurm CUDA run.
+- `run_reviewer_dataset_job.sh`: shared execution logic for one dataset/backend.
+- `jobs_by_dataset/run_<dataset>_cpu1.sh`: one-core Slurm job for one dataset.
+- `jobs_by_dataset/run_<dataset>_cpu4.sh`: four-core Slurm job for one dataset.
+- `jobs_by_dataset/run_<dataset>_cuda.sh`: one-GPU Slurm job for one dataset.
+- `jobs_by_dataset/job_manifest.csv`: complete list of the 33 generated jobs.
+- `generate_reviewer_dataset_jobs.R`: reproducibly regenerates those launchers.
+- `run_reviewer_hpc_cpu.sh` and `run_reviewer_hpc_cuda.sh`: legacy aggregate
+  launchers retained for compatibility.
 - `run_reviewer_local_cpu_metal.sh`: native macOS CPU and Metal run.
 - `combine_reviewer_benchmarks.R`: cross-machine CPU/Metal/CUDA agreement.
 - `fastembedr_cuda_multiarch_cugraph.def`: reproducible Linux CUDA image.
@@ -75,17 +81,31 @@ converted float32 object.
 
 ## Run On HPC
 
-Copy the benchmark files and image into `/scratch/firenze/NN`, then submit:
+Copy the benchmark files, the complete `jobs_by_dataset` directory, and the
+image into `/scratch/firenze/NN`. Create the log directory before submission:
 
 ```bash
-sbatch /scratch/firenze/NN/run_reviewer_hpc_cpu.sh
-sbatch /scratch/firenze/NN/run_reviewer_hpc_cuda.sh
+mkdir -p /scratch/firenze/NN/benchmark_logs
+
+sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cpu1.sh
+sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cpu4.sh
+sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cuda.sh
 ```
 
-Both launchers default to `k = 30`, perplexity `30`, three seeds, a 3-hour
-per-method timeout, and all datasets. The CPU job requests four cores and tests
-both one and four threads where the implementation exposes threading. A failed,
-OOM-killed, or timed-out method is recorded and the remaining methods continue.
+Equivalent triples exist for every dataset in the analysis cohort. CPU-1 jobs
+request `#SBATCH --ntasks=1`; CPU-4 jobs request `#SBATCH --ntasks=4`; CUDA jobs
+request one L40S GPU. Each job processes exactly one dataset and writes to an
+independent result and precomputation directory, so jobs may run concurrently
+without cache collisions. All jobs default to `k = 30`, perplexity `30`, seeds
+`4,17,42`, and a 3-hour per-method timeout. A failed, OOM-killed, or timed-out
+method is recorded and the remaining methods continue.
+
+Regenerate the launchers after changing the dataset panel with:
+
+```bash
+Rscript /scratch/firenze/NN/generate_reviewer_dataset_jobs.R \
+  /scratch/firenze/NN/jobs_by_dataset
+```
 
 ## Run On macOS
 
