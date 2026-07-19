@@ -315,6 +315,23 @@ kcv <- kodamaR::KNNCV(kx, kl, folds = 3, k = 5, backend = 'cpu', n.cores = 2)
 stopifnot(is.finite(kcv$accuracy))
 kp <- kodamaR::KODAMA.pca(kx, ncomp = 2, backend = 'cpu', n.cores = 2)
 stopifnot(all(dim(kp$scores) == c(120, 2)))
+for (classifier in c('knn', 'pls_lda')) {
+    core <- kodamaR::KODAMA.matrix(
+        kx, classifier = classifier, backend = 'cpu', M = 2, Tcycle = 2,
+        ncomp = 3, landmarks = 80, graph.neighbors = 10, knn.k = 5,
+        n.cores = 2, seed = 4, progress = FALSE
+    )
+    ku <- kodamaR::KODAMA.visualization(
+        core, method = 'UMAP', k = 5, backend = 'cpu', n.cores = 2,
+        n.epochs = 10, seed = 4
+    )
+    kt <- kodamaR::KODAMA.visualization(
+        core, method = 'opentsne', k = 5, perplexity = 2,
+        backend = 'cpu', n.cores = 2, n.iter = 10, seed = 4
+    )
+    stopifnot(all(dim(as_embedding_matrix(ku)) == c(120, 2)))
+    stopifnot(all(dim(as_embedding_matrix(kt)) == c(120, 2)))
+}
 EOF_R
 
 %runscript
@@ -356,6 +373,23 @@ kx <- matrix(rnorm(120 * 8), 120, 8)
 kl <- rep(1:3, each = 40)
 kcv <- kodamaR::KNNCV(kx, kl, folds = 3, k = 5, backend = 'cpu', n.cores = 2)
 stopifnot(is.finite(kcv$accuracy))
+for (classifier in c('knn', 'pls_lda')) {
+    core <- kodamaR::KODAMA.matrix(
+        kx, classifier = classifier, backend = 'cpu', M = 2, Tcycle = 2,
+        ncomp = 3, landmarks = 80, graph.neighbors = 10, knn.k = 5,
+        n.cores = 2, seed = 4, progress = FALSE
+    )
+    ku <- kodamaR::KODAMA.visualization(
+        core, method = 'UMAP', k = 5, backend = 'cpu', n.cores = 2,
+        n.epochs = 10, seed = 4
+    )
+    kt <- kodamaR::KODAMA.visualization(
+        core, method = 'opentsne', k = 5, perplexity = 2,
+        backend = 'cpu', n.cores = 2, n.iter = 10, seed = 4
+    )
+    stopifnot(all(dim(as_embedding_matrix(ku)) == c(120, 2)))
+    stopifnot(all(dim(as_embedding_matrix(kt)) == c(120, 2)))
+}
 EOF_R
     python - <<'EOF_PY'
 import importlib

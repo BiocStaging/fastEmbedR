@@ -30,6 +30,14 @@ K="${K:-30}"
 PERPLEXITY="${PERPLEXITY:-30}"
 TIMEOUT="${TIMEOUT:-10800}"
 QUALITY_MAX_DISTANCE_OPS="${QUALITY_MAX_DISTANCE_OPS:-200000000}"
+BENCHMARK_METHODS="${BENCHMARK_METHODS:-}"
+KODAMA_M="${KODAMA_M:-100}"
+KODAMA_TCYCLE="${KODAMA_TCYCLE:-20}"
+KODAMA_NCOMP="${KODAMA_NCOMP:-50}"
+KODAMA_LANDMARKS="${KODAMA_LANDMARKS:-10000}"
+KODAMA_GRAPH_NEIGHBORS="${KODAMA_GRAPH_NEIGHBORS:-100}"
+KODAMA_N_EPOCHS="${KODAMA_N_EPOCHS:-200}"
+KODAMA_N_ITER="${KODAMA_N_ITER:-500}"
 FORCE="${FORCE:-FALSE}"
 DRY_RUN="${DRY_RUN:-FALSE}"
 
@@ -108,8 +116,18 @@ r_args=(
   "--perplexity=${PERPLEXITY}"
   "--timeout=${TIMEOUT}"
   "--quality-max-distance-ops=${QUALITY_MAX_DISTANCE_OPS}"
+  "--kodama-m=${KODAMA_M}"
+  "--kodama-tcycle=${KODAMA_TCYCLE}"
+  "--kodama-ncomp=${KODAMA_NCOMP}"
+  "--kodama-landmarks=${KODAMA_LANDMARKS}"
+  "--kodama-graph-neighbors=${KODAMA_GRAPH_NEIGHBORS}"
+  "--kodama-n-epochs=${KODAMA_N_EPOCHS}"
+  "--kodama-n-iter=${KODAMA_N_ITER}"
   "--force=${FORCE}"
 )
+if [[ -n "${BENCHMARK_METHODS}" ]]; then
+  r_args+=("--methods=${BENCHMARK_METHODS}")
+fi
 
 echo "fastEmbedR reviewer dataset job"
 echo "  dataset: ${BENCHMARK_DATASET}"
@@ -119,6 +137,10 @@ echo "  data:    ${DATA_ROOT}"
 echo "  output:  ${OUT_DIR}"
 echo "  cache:   ${CACHE_DIR}"
 echo "  image:   ${IMAGE}"
+echo "  KODAMA:  M=${KODAMA_M} Tcycle=${KODAMA_TCYCLE} ncomp=${KODAMA_NCOMP} landmarks=${KODAMA_LANDMARKS}"
+if [[ -n "${BENCHMARK_METHODS}" ]]; then
+  echo "  methods: ${BENCHMARK_METHODS}"
+fi
 
 case "$(printf '%s' "${DRY_RUN}" | tr '[:upper:]' '[:lower:]')" in
 true|1|yes)

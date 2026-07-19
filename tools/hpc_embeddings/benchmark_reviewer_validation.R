@@ -69,6 +69,7 @@ backend_group <- match.arg(
 )
 worker <- as_bool(args$worker, FALSE)
 precompute_worker <- as_bool(args$precompute_worker, FALSE)
+kodama_core_worker <- as_bool(args$kodama_core_worker, FALSE)
 force <- as_bool(args$force, FALSE)
 threads_grid <- unique(as.integer(as_csv(args$threads_grid, "1,4")))
 threads_grid <- threads_grid[is.finite(threads_grid) & threads_grid > 0L]
@@ -85,6 +86,13 @@ quality_sample_n <- as_int(args$quality_sample_n, 3000L)
 quality_max_distance_ops <- as_num(args$quality_max_distance_ops, 2e8)
 validation_sample_n <- as_int(args$validation_sample_n, 2000L)
 pca_ncomp <- as_int(args$pca_ncomp, 2L)
+kodama_m <- as_int(args$kodama_m, 100L)
+kodama_tcycle <- as_int(args$kodama_tcycle, 20L)
+kodama_ncomp <- as_int(args$kodama_ncomp, 50L)
+kodama_landmarks <- as_int(args$kodama_landmarks, 10000L)
+kodama_graph_neighbors <- as_int(args$kodama_graph_neighbors, 100L)
+kodama_n_epochs <- as_int(args$kodama_n_epochs, 200L)
+kodama_n_iter <- as_int(args$kodama_n_iter, 500L)
 local_cpu_max_n <- as_int(args$local_cpu_max_n, .Machine$integer.max)
 local_cpu_exceptions <- as_csv(args$local_cpu_exceptions, "")
 datasets <- as_csv(
@@ -313,6 +321,49 @@ cache_paths <- function(dataset, backend = NULL) {
   )
 }
 
+kodama_core_paths <- function(dataset, classifier, backend, worker_threads, worker_seed) {
+  version <- tryCatch(
+    as.character(utils::packageVersion("kodamaR")),
+    error = function(...) "unavailable"
+  )
+  stem <- paste(
+    safe_name(dataset_alias(dataset)), classifier, backend,
+    paste0("t", as.integer(worker_threads)), paste0("seed", as.integer(worker_seed)),
+    paste0("M", kodama_m), paste0("C", kodama_tcycle),
+    paste0("P", kodama_ncomp), paste0("L", kodama_landmarks),
+    paste0("G", kodama_graph_neighbors), paste0("K", k),
+    paste0("v", safe_name(version)), sep = "_"
+  )
+  directory <- file.path(cache_dir, "kodama_core")
+  dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+  list(
+    fit = file.path(directory, paste0(stem, ".rds")),
+    metrics = file.path(directory, paste0(stem, "_metrics.rds"))
+  )
+}
+
+save_rds_atomic <- function(object, path, compress = FALSE) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- tempfile(pattern = paste0(basename(path), "."), tmpdir = dirname(path))
+  on.exit(unlink(temporary), add = TRUE)
+  saveRDS(object, temporary, compress = compress)
+  if (!file.rename(temporary, path)) {
+    if (!file.copy(temporary, path, overwrite = TRUE)) {
+      stop("Could not publish cache file: ", path, call. = FALSE)
+    }
+    unlink(temporary)
+  }
+  invisible(path)
+}
+
+call_supported <- function(fun, arguments) {
+  formal_names <- names(formals(fun))
+  if (!"..." %in% formal_names) {
+    arguments <- arguments[names(arguments) %in% formal_names]
+  }
+  do.call(fun, arguments)
+}
+
 host_knn_subset <- function(knn, width) {
   knn <- publication_knn_host(knn)
   width <- min(as.integer(width), ncol(knn$indices))
@@ -329,6 +380,18 @@ method_family <- function(method) {
   "unknown"
 }
 
+method_is_kodama <- function(method) startsWith(method, "KODAMA_")
+
+kodama_classifier_for_method <- function(method) {
+  if (!method_is_kodama(method)) return(NA_character_)
+  if (grepl("_plslda_", method, fixed = TRUE)) "pls_lda" else "knn"
+}
+
+kodama_visualization_for_method <- function(method) {
+  if (!method_is_kodama(method)) return(NA_character_)
+  if (grepl("opentsne", method, ignore.case = TRUE)) "opentsne" else "UMAP"
+}
+
 method_backend <- function(method) {
   if (grepl("_cuda|rapids", method, ignore.case = TRUE)) return("cuda")
   if (grepl("_metal", method, ignore.case = TRUE)) return("metal")
@@ -336,6 +399,7 @@ method_backend <- function(method) {
 }
 
 method_scope <- function(method) {
+  if (method_is_kodama(method)) return("full_pipeline")
   if (grepl("_knn$|_knn_|Rtsne_neighbors", method)) {
     return("embedding_from_precomputed_knn")
   }
@@ -347,9 +411,11 @@ default_methods <- function(group) {
   cpu <- c(
     "fastEmbedR_pca_cpu", "irlba_pca",
     "fastEmbedR_opentsne_cpu_full", "fastEmbedR_opentsne_cpu_knn",
+    "KODAMA_plslda_opentsne_cpu", "KODAMA_knn_opentsne_cpu",
     "Rtsne_full", "Rtsne_neighbors", "KlugerLab_FItSNE",
     "fastEmbedR_umap_cpu_fuzzy_full", "fastEmbedR_umap_cpu_fuzzy_knn",
     "fastEmbedR_umap_cpu_binary_full", "fastEmbedR_umap_cpu_binary_knn",
+    "KODAMA_plslda_umap_cpu", "KODAMA_knn_umap_cpu",
     "uwot_default", "uwot_fast_sgd", "uwot_knn",
     "umap_package", "umap_package_knn"
   )
@@ -362,8 +428,10 @@ default_methods <- function(group) {
   cuda <- c(
     "fastEmbedR_pca_cuda",
     "fastEmbedR_opentsne_cuda_full", "fastEmbedR_opentsne_cuda_knn",
+    "KODAMA_plslda_opentsne_cuda", "KODAMA_knn_opentsne_cuda",
     "fastEmbedR_umap_cuda_fuzzy_full", "fastEmbedR_umap_cuda_fuzzy_knn",
     "fastEmbedR_umap_cuda_binary_full", "fastEmbedR_umap_cuda_binary_knn",
+    "KODAMA_plslda_umap_cuda", "KODAMA_knn_umap_cuda",
     "rapids_cuml_tsne_full", "rapids_cuml_umap_full"
   )
   switch(group, cpu = cpu, metal = metal, cuda = cuda, local = c(cpu, metal))
@@ -371,7 +439,13 @@ default_methods <- function(group) {
 methods <- as_csv(args$methods, paste(default_methods(backend_group), collapse = ","))
 
 method_uses_standard <- function(method) {
-  grepl("Rtsne|FItSNE|uwot|umap_package|irlba|rapids", method)
+  grepl("Rtsne|FItSNE|uwot|umap_package|irlba|rapids|KODAMA", method)
+}
+
+method_input_type <- function(method) {
+  if (startsWith(method, "fastEmbedR")) return("float32")
+  if (method_is_kodama(method)) return("standard R double; KODAMA C++ float32")
+  "standard R double"
 }
 
 method_is_tsne <- function(method) identical(method_family(method), "t-SNE")
@@ -394,32 +468,67 @@ parameter_record <- function(method, requested_threads) {
     perplexity = if (family == "t-SNE") perplexity else NA_real_,
     pca_components = if (family == "PCA") pca_ncomp else if (family == "t-SNE") 2L else NA_integer_,
     initialization = if (family == "t-SNE") {
-      if (scope == "embedding_from_precomputed_knn") "shared fastEmbedR rSVD PCA initialization" else "method internal PCA initialization"
-    } else if (family == "UMAP") "method internal spectral initialization" else "randomized truncated PCA",
-    iterations_or_epochs = if (family == "t-SNE") {
-      if (grepl("Rtsne|FItSNE", method)) "750 iterations" else "fastEmbedR/openTSNE auto policy (250 early + 500 normal default)"
+      if (method_is_kodama(method)) {
+        "KODAMA stored PCA initialization when exposed by kodamaR; otherwise native default"
+      } else if (scope == "embedding_from_precomputed_knn") {
+        "shared fastEmbedR rSVD PCA initialization"
+      } else "method internal PCA initialization"
     } else if (family == "UMAP") {
-      if (grepl("fastEmbedR", method)) "fastEmbedR size-aware epoch policy" else "reference-package default"
+      if (method_is_kodama(method)) {
+        "KODAMA stored PCA initialization when exposed by kodamaR; otherwise native default"
+      } else "method internal spectral initialization"
+    } else "randomized truncated PCA",
+    iterations_or_epochs = if (family == "t-SNE") {
+      if (method_is_kodama(method)) {
+        sprintf("KODAMA openTSNE: 250 early-exaggeration + %d optimization iterations", kodama_n_iter)
+      } else if (grepl("Rtsne|FItSNE", method)) "750 iterations" else "fastEmbedR/openTSNE auto policy (250 early + 500 normal default)"
+    } else if (family == "UMAP") {
+      if (method_is_kodama(method)) {
+        sprintf("KODAMA UMAP: %d epochs", kodama_n_epochs)
+      } else if (grepl("fastEmbedR", method)) "fastEmbedR size-aware epoch policy" else "reference-package default"
     } else "randomized subspace iterations",
     early_exaggeration = if (family == "t-SNE") {
-      if (grepl("Rtsne", method)) "12 for first 250 iterations" else "openTSNE/fastEmbedR auto policy"
+      if (method_is_kodama(method)) {
+        "12 for first 250 iterations"
+      } else if (grepl("Rtsne", method)) "12 for first 250 iterations" else "openTSNE/fastEmbedR auto policy"
     } else "not applicable",
     learning_rate = if (family == "t-SNE") {
       if (grepl("Rtsne", method)) "200" else "automatic"
     } else if (family == "UMAP") "method default/automatic" else "not applicable",
     metric = "euclidean",
+    kodama_classifier = if (method_is_kodama(method)) {
+      kodama_classifier_for_method(method)
+    } else NA_character_,
+    kodama_M = if (method_is_kodama(method)) kodama_m else NA_integer_,
+    kodama_Tcycle = if (method_is_kodama(method)) kodama_tcycle else NA_integer_,
+    kodama_ncomp = if (method_is_kodama(method)) kodama_ncomp else NA_integer_,
+    kodama_landmarks = if (method_is_kodama(method)) kodama_landmarks else NA_integer_,
     requested_threads = requested_threads,
     effective_threads = method_threads(method, requested_threads),
     random_seeds = paste(seeds, collapse = ","),
-    input_type = if (startsWith(method, "fastEmbedR")) "float32" else "standard R double",
-    knn_boundary = if (scope == "embedding_from_precomputed_knn") "precomputed and excluded from elapsed time" else if (family == "PCA") "not applicable" else "internal and included in elapsed time",
+    input_type = method_input_type(method),
+    knn_boundary = if (method_is_kodama(method)) {
+      "KODAMA graph is built once per classifier and reused by both visualizations"
+    } else if (scope == "embedding_from_precomputed_knn") {
+      "precomputed and excluded from elapsed time"
+    } else if (family == "PCA") "not applicable" else "internal and included in elapsed time",
     knn_mode = if (scope == "embedding_from_precomputed_knn") {
       "shared fastEmbedR CPU HNSW cache, target recall 0.99"
     } else if (startsWith(method, "fastEmbedR")) {
       if (method_backend(method) == "cuda") "native CUDA exact/IVF auto route, target recall 0.99" else "native CPU HNSW or Metal exact/IVF auto route, target recall 0.99"
+    } else if (method_is_kodama(method)) {
+      "KODAMA-corrected graph retained by the shared classifier fit"
     } else "reference-package internal",
-    graph_mode = if (grepl("binary", method)) "binary" else if (family == "UMAP") "fuzzy/reference default" else "not applicable",
-    notes = if (grepl("binary", method)) "binary symmetric graph" else if (grepl("fuzzy", method)) "fuzzy simplicial graph" else "",
+    graph_mode = if (method_is_kodama(method) && family == "UMAP") {
+      "KODAMA visualization default"
+    } else if (grepl("binary", method)) "binary" else if (family == "UMAP") "fuzzy/reference default" else "not applicable",
+    notes = if (method_is_kodama(method)) {
+      sprintf(
+        "classifier=%s; M=%d; Tcycle=%d; ncomp<=%d; landmarks<=%d; shared core charged once per workflow",
+        kodama_classifier_for_method(method), kodama_m, kodama_tcycle,
+        kodama_ncomp, kodama_landmarks
+      )
+    } else if (grepl("binary", method)) "binary symmetric graph" else if (grepl("fuzzy", method)) "fuzzy simplicial graph" else "",
     stringsAsFactors = FALSE
   )
 }
@@ -781,6 +890,107 @@ run_rapids <- function(method, x) {
   python_layout(model$fit_transform(x))
 }
 
+build_kodama_core <- function(dataset_data, classifier, backend) {
+  if (!requireNamespace("kodamaR", quietly = TRUE)) {
+    stop("kodamaR is not installed.", call. = FALSE)
+  }
+  if (!backend %in% c("cpu", "cuda")) {
+    stop("KODAMA benchmark backends are limited to cpu and cuda.", call. = FALSE)
+  }
+  if (is.null(dataset_data$standard)) {
+    stop("Standard R data are required by the current kodamaR wrapper.", call. = FALSE)
+  }
+  x <- as_double_matrix(dataset_data$standard$data)
+  n <- nrow(x)
+  p <- ncol(x)
+  effective_ncomp <- max(1L, min(kodama_ncomp, p, n - 1L))
+  effective_landmarks <- max(1L, min(kodama_landmarks, n))
+  effective_graph_neighbors <- max(1L, min(kodama_graph_neighbors, n - 1L))
+  effective_knn_k <- max(1L, min(k, n - 1L))
+  fun <- getExportedValue("kodamaR", "KODAMA.matrix")
+  arguments <- list(
+    data = x,
+    M = as.integer(kodama_m),
+    Tcycle = as.integer(kodama_tcycle),
+    ncomp = as.integer(effective_ncomp),
+    landmarks = as.integer(effective_landmarks),
+    n.cores = as.integer(threads),
+    graph.neighbors = as.integer(effective_graph_neighbors),
+    knn.k = as.integer(effective_knn_k),
+    metric = "euclidean",
+    classifier = classifier,
+    backend = backend,
+    seed = as.integer(seed),
+    visual.init = TRUE,
+    progress = FALSE,
+    apply.kodama.dissimilarity = TRUE
+  )
+  elapsed <- system.time({
+    fit <- call_supported(fun, arguments)
+  })[["elapsed"]]
+  list(
+    fit = fit,
+    elapsed_sec = unname(elapsed),
+    n = n,
+    p = p,
+    classifier = classifier,
+    backend = backend,
+    threads = as.integer(threads),
+    seed = as.integer(seed),
+    effective_ncomp = effective_ncomp,
+    effective_landmarks = effective_landmarks,
+    effective_graph_neighbors = effective_graph_neighbors,
+    effective_knn_k = effective_knn_k
+  )
+}
+
+load_kodama_core <- function(method) {
+  classifier <- kodama_classifier_for_method(method)
+  backend <- method_backend(method)
+  paths <- kodama_core_paths(args$dataset, classifier, backend, threads, seed)
+  if (!file.exists(paths$fit) || !file.exists(paths$metrics)) {
+    stop(
+      "Shared KODAMA core cache is unavailable for ", classifier, "/", backend,
+      ". The core worker must complete before visualization.", call. = FALSE
+    )
+  }
+  cached <- readRDS(paths$fit)
+  metrics <- readRDS(paths$metrics)
+  list(
+    fit = if (is.list(cached) && !is.null(cached$fit)) cached$fit else cached,
+    metrics = metrics,
+    paths = paths,
+    classifier = classifier,
+    backend = backend
+  )
+}
+
+run_kodama_visualization <- function(method, core) {
+  fun <- getExportedValue("kodamaR", "KODAMA.visualization")
+  visualization <- kodama_visualization_for_method(method)
+  init_key <- if (identical(visualization, "UMAP")) "umap" else "opentsne"
+  stored_init <- if (is.list(core$fit) && is.list(core$fit$visual_init)) {
+    core$fit$visual_init[[init_key]] %||% NULL
+  } else if (is.list(core$fit)) {
+    core$fit$visual_init %||% NULL
+  } else NULL
+  arguments <- list(
+    x = core$fit,
+    method = visualization,
+    init = stored_init,
+    k = as.integer(k),
+    metric = "euclidean",
+    backend = core$backend,
+    n.cores = as.integer(threads),
+    gpu.device = 0L,
+    n.epochs = as.integer(kodama_n_epochs),
+    n.iter = as.integer(kodama_n_iter),
+    perplexity = as.numeric(perplexity),
+    seed = as.integer(seed)
+  )
+  call_supported(fun, arguments)
+}
+
 fit_layout <- function(fit) {
   publication_layout_matrix(fit)
 }
@@ -817,6 +1027,7 @@ run_method <- function(method, dataset_data) {
     distances = as_float32_matrix(shared_knn$distances)
   )
   pca_init_fast <- if (is.null(pca_init)) NULL else as_float32_matrix(pca_init)
+  kodama_core <- if (method_is_kodama(method)) load_kodama_core(method) else NULL
   component <- c(preprocess_sec = NA_real_, knn_sec = NA_real_, init_sec = NA_real_,
                  graph_or_affinity_sec = NA_real_, embedding_sec = NA_real_)
 
@@ -867,6 +1078,10 @@ run_method <- function(method, dataset_data) {
         Y_init = pca_init_fast, backend = "cuda", n_threads = threads,
         seed = seed, record_costs = FALSE
       ),
+      KODAMA_plslda_opentsne_cpu = run_kodama_visualization(method, kodama_core),
+      KODAMA_knn_opentsne_cpu = run_kodama_visualization(method, kodama_core),
+      KODAMA_plslda_opentsne_cuda = run_kodama_visualization(method, kodama_core),
+      KODAMA_knn_opentsne_cuda = run_kodama_visualization(method, kodama_core),
       Rtsne_full = {
         if (!requireNamespace("Rtsne", quietly = TRUE)) stop("Rtsne is not installed.", call. = FALSE)
         Rtsne::Rtsne(
@@ -935,6 +1150,10 @@ run_method <- function(method, dataset_data) {
         shared_knn_fast, backend = "cuda", n_threads = threads,
         graph_mode = "binary", seed = seed
       ),
+      KODAMA_plslda_umap_cpu = run_kodama_visualization(method, kodama_core),
+      KODAMA_knn_umap_cpu = run_kodama_visualization(method, kodama_core),
+      KODAMA_plslda_umap_cuda = run_kodama_visualization(method, kodama_core),
+      KODAMA_knn_umap_cuda = run_kodama_visualization(method, kodama_core),
       uwot_default = {
         if (!requireNamespace("uwot", quietly = TRUE)) stop("uwot is not installed.", call. = FALSE)
         uwot::umap(
@@ -989,6 +1208,9 @@ run_method <- function(method, dataset_data) {
   if (method_scope(method) == "embedding_from_precomputed_knn") {
     component[["embedding_sec"]] <- unname(elapsed)
   }
+  if (method_is_kodama(method)) {
+    component[["embedding_sec"]] <- unname(elapsed)
+  }
   if (method_family(method) == "PCA") {
     component[["init_sec"]] <- unname(elapsed)
   }
@@ -997,9 +1219,30 @@ run_method <- function(method, dataset_data) {
   } else {
     fit_layout(fit)
   }
+  workflow_elapsed <- if (method_is_kodama(method)) {
+    core_elapsed <- as.numeric(
+      kodama_core$metrics$core_runtime_sec %||%
+        kodama_core$metrics$elapsed_sec %||% NA_real_
+    )
+    if (!is.finite(core_elapsed)) {
+      stop("KODAMA core cache has no valid runtime.", call. = FALSE)
+    }
+    core_elapsed + unname(elapsed)
+  } else {
+    unname(elapsed)
+  }
+  extra <- if (method_is_kodama(method)) {
+    list(
+      kodama_classifier = kodama_core$classifier,
+      kodama_core_sec = workflow_elapsed - unname(elapsed),
+      kodama_visualization_sec = unname(elapsed),
+      kodama_core_cache_file = kodama_core$paths$fit,
+      kodama_core_reused = TRUE
+    )
+  } else list()
   list(
     fit = fit, layout = publication_layout_matrix(layout),
-    elapsed_sec = unname(elapsed), component = component
+    elapsed_sec = workflow_elapsed, component = component, extra = extra
   )
 }
 
@@ -1066,7 +1309,7 @@ worker_result_template <- function(dataset, method, status = "failed", error = N
     status = status, error = error,
     n = NA_integer_, p = NA_integer_, k = if (method_is_umap(method)) k else NA_integer_,
     perplexity = if (method_is_tsne(method)) perplexity else NA_real_,
-    input_type = if (startsWith(method, "fastEmbedR")) "float32" else "standard_R_double",
+    input_type = gsub(" ", "_", method_input_type(method), fixed = TRUE),
     total_runtime_sec = NA_real_, preprocess_sec = NA_real_, knn_sec = NA_real_,
     init_sec = NA_real_, graph_or_affinity_sec = NA_real_, embedding_sec = NA_real_,
     peak_ram_kb = NA_real_, peak_ram_gb = NA_real_,
@@ -1075,6 +1318,14 @@ worker_result_template <- function(dataset, method, status = "failed", error = N
     trustworthiness = NA_real_, knn_preservation_15 = NA_real_,
     knn_preservation_30 = NA_real_, knn_preservation_50 = NA_real_,
     silhouette = NA_real_, label_knn_accuracy = NA_real_, tsne_kl = NA_real_,
+    kodama_classifier = if (method_is_kodama(method)) {
+      kodama_classifier_for_method(method)
+    } else NA_character_,
+    kodama_core_sec = NA_real_, kodama_visualization_sec = NA_real_,
+    kodama_core_peak_ram_gb = NA_real_, kodama_visualization_peak_ram_gb = NA_real_,
+    kodama_core_peak_gpu_delta_mb = NA_real_,
+    kodama_visualization_peak_gpu_delta_mb = NA_real_,
+    kodama_core_cache_file = NA_character_, kodama_core_reused = NA,
     quality_sample_n = NA_integer_, layout_file = NA_character_,
     plot_file = NA_character_, stringsAsFactors = FALSE
   )
@@ -1122,6 +1373,7 @@ worker_main <- function() {
   row$p <- ncol(data$float$data %||% data$standard$data)
   row$total_runtime_sec <- result$elapsed_sec
   for (name in names(result$component)) row[[name]] <- result$component[[name]]
+  for (name in names(result$extra %||% list())) row[[name]] <- result$extra[[name]]
   for (name in names(scores)) row[[name]] <- scores[[name]]
   row$layout_file <- layout_file
   row$plot_file <- plot_file
@@ -1154,6 +1406,117 @@ parse_memory_files <- function(time_file, gpu_file) {
     peak_gpu_mb = suppressWarnings(as.numeric(gpu$gpu_peak_mb %||% NA_real_)),
     peak_gpu_delta_mb = suppressWarnings(as.numeric(gpu$gpu_peak_delta_mb %||% NA_real_))
   )
+}
+
+kodama_core_result_template <- function(dataset, classifier, backend,
+                                        status = "failed", error = NA_character_) {
+  data.frame(
+    dataset = dataset_alias(dataset), classifier = classifier, backend = backend,
+    seed = seed, requested_threads = threads,
+    status = status, error = error, n = NA_integer_, p = NA_integer_,
+    M = kodama_m, Tcycle = kodama_tcycle, requested_ncomp = kodama_ncomp,
+    requested_landmarks = kodama_landmarks,
+    graph_neighbors = kodama_graph_neighbors, knn_k = k,
+    effective_ncomp = NA_integer_, effective_landmarks = NA_integer_,
+    core_runtime_sec = NA_real_, peak_ram_kb = NA_real_, peak_ram_gb = NA_real_,
+    gpu_memory_scope = NA_character_, gpu_baseline_mb = NA_real_,
+    peak_gpu_mb = NA_real_, peak_gpu_delta_mb = NA_real_,
+    cache_file = NA_character_, core_reused = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+kodama_core_worker_main <- function() {
+  dataset <- args$dataset %||% stop("--dataset is required.", call. = FALSE)
+  classifier <- args$kodama_classifier %||%
+    stop("--kodama-classifier is required.", call. = FALSE)
+  backend <- args$kodama_backend %||% backend_group
+  worker_out <- args$worker_out %||% stop("--worker-out is required.", call. = FALSE)
+  if (!classifier %in% c("knn", "pls_lda")) {
+    stop("KODAMA classifier must be knn or pls_lda.", call. = FALSE)
+  }
+  set_threads(threads)
+  data <- load_dataset(dataset, need_standard = TRUE, need_float = FALSE)
+  gc()
+  result <- build_kodama_core(data, classifier, backend)
+  paths <- kodama_core_paths(dataset, classifier, backend, threads, seed)
+  save_rds_atomic(result, paths$fit, compress = FALSE)
+  row <- kodama_core_result_template(
+    dataset, classifier, backend, status = "success", error = NA_character_
+  )
+  row$n <- result$n
+  row$p <- result$p
+  row$effective_ncomp <- result$effective_ncomp
+  row$effective_landmarks <- result$effective_landmarks
+  row$core_runtime_sec <- result$elapsed_sec
+  row$cache_file <- paths$fit
+  write.csv(row, worker_out, row.names = FALSE)
+  invisible(row)
+}
+
+run_kodama_core_isolated <- function(dataset, classifier, backend,
+                                     worker_threads, worker_seed) {
+  paths <- kodama_core_paths(dataset, classifier, backend, worker_threads, worker_seed)
+  if (!force && file.exists(paths$fit) && file.exists(paths$metrics)) {
+    cached <- tryCatch(readRDS(paths$metrics), error = function(...) NULL)
+    if (is.data.frame(cached) && nrow(cached) &&
+        identical(cached$status[[1L]], "success")) {
+      cached$core_reused <- TRUE
+      return(cached)
+    }
+  }
+  stem <- sprintf(
+    "%s_KODAMA_core_%s_%s_threads%d_seed%d",
+    safe_name(dataset_alias(dataset)), classifier, backend,
+    worker_threads, worker_seed
+  )
+  csv <- file.path(out_dir, "worker_results", paste0(stem, ".csv"))
+  log <- file.path(out_dir, "logs", paste0(stem, ".log"))
+  time_file <- file.path(out_dir, "memory", paste0(stem, "_ram.txt"))
+  gpu_file <- file.path(out_dir, "memory", paste0(stem, "_gpu.txt"))
+  monitor <- file.path(script_dir, "benchmark_worker_monitor.sh")
+  command <- c(
+    monitor, time_file, gpu_file, as.character(timeout),
+    file.path(R.home("bin"), "Rscript"), script_path,
+    "--kodama-core-worker=TRUE",
+    paste0("--backend-group=", backend_group),
+    paste0("--kodama-backend=", backend),
+    paste0("--kodama-classifier=", classifier),
+    paste0("--base-dir=", base_dir), paste0("--data-root=", data_root),
+    paste0("--out-dir=", out_dir), paste0("--cache-dir=", cache_dir),
+    paste0("--dataset=", dataset), paste0("--worker-out=", csv),
+    paste0("--threads=", worker_threads), paste0("--seed=", worker_seed),
+    paste0("--k=", k), paste0("--perplexity=", perplexity),
+    paste0("--kodama-m=", kodama_m),
+    paste0("--kodama-tcycle=", kodama_tcycle),
+    paste0("--kodama-ncomp=", kodama_ncomp),
+    paste0("--kodama-landmarks=", kodama_landmarks),
+    paste0("--kodama-graph-neighbors=", kodama_graph_neighbors),
+    paste0("--kodama-n-epochs=", kodama_n_epochs),
+    paste0("--kodama-n-iter=", kodama_n_iter)
+  )
+  status <- system2("bash", command, stdout = log, stderr = log)
+  row <- if (file.exists(csv)) {
+    read.csv(csv, stringsAsFactors = FALSE)
+  } else {
+    kodama_core_result_template(
+      dataset, classifier, backend,
+      status = if (identical(as.integer(status), 124L)) "timeout" else "failed",
+      error = sprintf("isolated KODAMA core worker exited with status %s", status)
+    )
+  }
+  if (!identical(as.integer(status), 0L) && identical(row$status[[1L]], "success")) {
+    row$status <- if (identical(as.integer(status), 124L)) "timeout" else "failed"
+    row$error <- sprintf("isolated KODAMA core worker exited with status %s", status)
+  }
+  memory <- parse_memory_files(time_file, gpu_file)
+  for (name in names(memory)) row[[name]] <- memory[[name]]
+  row$core_reused <- FALSE
+  write.csv(row, csv, row.names = FALSE)
+  if (identical(row$status[[1L]], "success") && file.exists(paths$fit)) {
+    save_rds_atomic(row, paths$metrics, compress = FALSE)
+  }
+  row
 }
 
 is_resource_failure <- function(status, error) {
@@ -1206,6 +1569,13 @@ run_isolated_worker <- function(
     paste0("--quality-max-distance-ops=", quality_max_distance_ops),
     paste0("--validation-sample-n=", validation_sample_n),
     paste0("--pca-ncomp=", pca_ncomp),
+    paste0("--kodama-m=", kodama_m),
+    paste0("--kodama-tcycle=", kodama_tcycle),
+    paste0("--kodama-ncomp=", kodama_ncomp),
+    paste0("--kodama-landmarks=", kodama_landmarks),
+    paste0("--kodama-graph-neighbors=", kodama_graph_neighbors),
+    paste0("--kodama-n-epochs=", kodama_n_epochs),
+    paste0("--kodama-n-iter=", kodama_n_iter),
     paste0("--shared-cache-backend=", shared_cache_backend),
     paste0("--local-cpu-max-n=", local_cpu_max_n),
     paste0("--local-cpu-exceptions=", paste(local_cpu_exceptions, collapse = ","))
@@ -1222,6 +1592,42 @@ run_isolated_worker <- function(
   }
   memory <- parse_memory_files(time_file, gpu_file)
   for (name in names(memory)) row[[name]] <- memory[[name]]
+  if (method_is_kodama(method)) {
+    classifier <- kodama_classifier_for_method(method)
+    core_paths <- kodama_core_paths(
+      dataset, classifier, method_backend(method), worker_threads, worker_seed
+    )
+    core <- if (file.exists(core_paths$metrics)) {
+      tryCatch(readRDS(core_paths$metrics), error = function(...) NULL)
+    } else NULL
+    row$kodama_visualization_peak_ram_gb <- memory$peak_ram_gb
+    row$kodama_visualization_peak_gpu_delta_mb <- memory$peak_gpu_delta_mb
+    if (is.data.frame(core) && nrow(core)) {
+      row$kodama_core_peak_ram_gb <- core$peak_ram_gb[[1L]]
+      row$kodama_core_peak_gpu_delta_mb <- core$peak_gpu_delta_mb[[1L]]
+      finite_max <- function(...) {
+        values <- suppressWarnings(as.numeric(c(...)))
+        values <- values[is.finite(values)]
+        if (length(values)) max(values) else NA_real_
+      }
+      row$peak_ram_gb <- finite_max(
+        row$kodama_core_peak_ram_gb, row$kodama_visualization_peak_ram_gb
+      )
+      row$peak_ram_kb <- row$peak_ram_gb * 1024^2
+      row$peak_gpu_delta_mb <- finite_max(
+        row$kodama_core_peak_gpu_delta_mb,
+        row$kodama_visualization_peak_gpu_delta_mb
+      )
+      row$peak_gpu_mb <- finite_max(core$peak_gpu_mb[[1L]], memory$peak_gpu_mb)
+      row$gpu_baseline_mb <- finite_max(
+        core$gpu_baseline_mb[[1L]], memory$gpu_baseline_mb
+      )
+      row$gpu_memory_scope <- paste(
+        "maximum of isolated KODAMA core and visualization",
+        "device-wide measurements"
+      )
+    }
+  }
   write.csv(row, csv, row.names = FALSE)
   row
 }
@@ -1238,7 +1644,11 @@ aggregate_runs <- function(runs) {
     "graph_or_affinity_sec", "embedding_sec", "peak_ram_gb",
     "peak_gpu_mb", "peak_gpu_delta_mb", "trustworthiness",
     "knn_preservation_15", "knn_preservation_30", "knn_preservation_50",
-    "silhouette", "label_knn_accuracy", "tsne_kl"
+    "silhouette", "label_knn_accuracy", "tsne_kl",
+    "kodama_core_sec", "kodama_visualization_sec",
+    "kodama_core_peak_ram_gb", "kodama_visualization_peak_ram_gb",
+    "kodama_core_peak_gpu_delta_mb",
+    "kodama_visualization_peak_gpu_delta_mb"
   )
   key_parts <- lapply(runs[group_columns], function(value) {
     value <- as.character(value)
@@ -1457,7 +1867,7 @@ write_reproducibility <- function() {
   )
   package_names <- c(
     "fastEmbedR", "float", "Rcpp", "Rtsne", "uwot", "umap", "irlba",
-    "reticulate"
+    "reticulate", "kodamaR"
   )
   versions <- vapply(package_names, function(package) {
     if (requireNamespace(package, quietly = TRUE)) {
@@ -1476,6 +1886,13 @@ write_reproducibility <- function() {
     paste0("quality_sample_n=", quality_sample_n),
     paste0("quality_max_distance_ops=", quality_max_distance_ops),
     paste0("validation_sample_n=", validation_sample_n),
+    paste0("kodama_M=", kodama_m),
+    paste0("kodama_Tcycle=", kodama_tcycle),
+    paste0("kodama_ncomp=", kodama_ncomp),
+    paste0("kodama_landmarks=", kodama_landmarks),
+    paste0("kodama_graph_neighbors=", kodama_graph_neighbors),
+    paste0("kodama_n_epochs=", kodama_n_epochs),
+    paste0("kodama_n_iter=", kodama_n_iter),
     paste0("local_cpu_max_n=", local_cpu_max_n),
     paste0("local_cpu_exceptions=", paste(local_cpu_exceptions, collapse = ",")),
     paste0("R=", R.version.string),
@@ -1518,6 +1935,27 @@ make_summary_figures <- function(summary) {
     }
   }
   invisible(NULL)
+}
+
+if (kodama_core_worker) {
+  tryCatch({
+    kodama_core_worker_main()
+  }, error = function(e) {
+    row <- kodama_core_result_template(
+      args$dataset %||% NA_character_,
+      args$kodama_classifier %||% NA_character_,
+      args$kodama_backend %||% backend_group,
+      status = "failed", error = conditionMessage(e)
+    )
+    write.csv(
+      row,
+      args$worker_out %||% file.path(out_dir, "kodama_core_worker_failed.csv"),
+      row.names = FALSE
+    )
+    message(conditionMessage(e))
+    quit(status = 1L)
+  })
+  quit(status = 0L)
 }
 
 if (precompute_worker) {
@@ -1652,6 +2090,66 @@ for (dataset in datasets) {
 precompute_table <- do.call(rbind, precompute_rows)
 write.csv(precompute_table, file.path(out_dir, "precompute_manifest.csv"), row.names = FALSE)
 
+kodama_core_rows <- list()
+kodama_methods <- methods[vapply(methods, method_is_kodama, logical(1))]
+if (length(kodama_methods)) {
+  core_specs <- unique(data.frame(
+    classifier = vapply(kodama_methods, kodama_classifier_for_method, character(1)),
+    backend = vapply(kodama_methods, method_backend, character(1)),
+    stringsAsFactors = FALSE
+  ))
+  for (dataset in datasets) {
+    pre_status <- precompute_table[
+      precompute_table$dataset == dataset_alias(dataset), , drop = FALSE
+    ]
+    dataset_n <- if (nrow(pre_status) && "n" %in% names(pre_status)) {
+      suppressWarnings(as.numeric(pre_status$n[[1L]]))
+    } else NA_real_
+    for (spec_index in seq_len(nrow(core_specs))) {
+      classifier <- core_specs$classifier[[spec_index]]
+      core_backend <- core_specs$backend[[spec_index]]
+      if (identical(backend_group, "local") && identical(core_backend, "cpu") &&
+          !local_cpu_allowed_for(dataset, dataset_n)) {
+        next
+      }
+      core_threads <- if (identical(core_backend, "cpu")) {
+        threads_grid
+      } else {
+        max(threads_grid)
+      }
+      for (worker_threads in core_threads) {
+        for (worker_seed in seeds) {
+          log_msg(
+            "%s/KODAMA core %s/%s/%dt/seed%d: running",
+            dataset, classifier, core_backend, worker_threads, worker_seed
+          )
+          row <- run_kodama_core_isolated(
+            dataset, classifier, core_backend, worker_threads, worker_seed
+          )
+          kodama_core_rows[[length(kodama_core_rows) + 1L]] <- row
+          write.csv(
+            do.call(rbind, kodama_core_rows),
+            file.path(out_dir, "kodama_core_runs_checkpoint.csv"),
+            row.names = FALSE
+          )
+          log_msg(
+            "%s/KODAMA core %s/%s/%dt/seed%d: %s total=%s RAM=%s GPUdelta=%s reused=%s",
+            dataset, classifier, core_backend, worker_threads, worker_seed,
+            row$status[[1L]], format(row$core_runtime_sec[[1L]], digits = 5),
+            format(row$peak_ram_gb[[1L]], digits = 4),
+            format(row$peak_gpu_delta_mb[[1L]], digits = 4),
+            row$core_reused[[1L]]
+          )
+        }
+      }
+    }
+  }
+}
+kodama_core_table <- if (length(kodama_core_rows)) {
+  do.call(rbind, kodama_core_rows)
+} else data.frame()
+write.csv(kodama_core_table, file.path(out_dir, "kodama_core_runs.csv"), row.names = FALSE)
+
 runs <- list()
 skipped_rows <- list()
 for (dataset in datasets) {
@@ -1681,7 +2179,7 @@ for (dataset in datasets) {
       next
     }
     if (nrow(pre_status) && identical(pre_status$status[[1L]], "timeout") &&
-        !identical(method_family(method), "PCA")) {
+        !identical(method_family(method), "PCA") && !method_is_kodama(method)) {
       log_msg(
         "%s/%s: skipped after shared precompute timeout", dataset, method
       )

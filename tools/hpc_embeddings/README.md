@@ -63,6 +63,17 @@ Reviewer validation additionally reports:
 - fastEmbedR UMAP graph-weight agreement with `uwot::similarity_graph`;
 - fuzzy/binary graph agreement across CPU, Metal, and CUDA;
 - Procrustes and KNN agreement across CPU, Metal, and CUDA and across seeds.
+- four KODAMA workflows: PLS-LDA followed by openTSNE or UMAP, and KNN
+  followed by openTSNE or UMAP.
+
+The two KODAMA classifier fits are cached independently for every dataset,
+backend, thread count, and seed. Each PLS-LDA fit is executed once and reused by
+its openTSNE and UMAP rows; the same rule is applied to KNN. The publication
+runtime for each workflow remains `KODAMA core + visualization`, while
+`kodama_core_runs.csv` exposes the shared core cost separately. Peak memory for
+each workflow is the maximum of its isolated core and visualization workers.
+The current public kodamaR visualization API supports CPU and CUDA, so these
+rows are not mislabelled as Metal runs.
 
 All scientific plots contain points only: no title, axes, labels, ticks, legend,
 or box. Labels are used only for point colours and numerical label-aware
@@ -116,6 +127,22 @@ without cache collisions. All jobs default to `k = 30`, perplexity `30`, seeds
 `4,17,42`, and a 3-hour per-method timeout. A failed, OOM-killed, or timed-out
 method is recorded and the remaining methods continue.
 
+The KODAMA defaults are `M = 100`, `Tcycle = 20`, at most 50 PLS components,
+at most 10,000 landmarks, 100 retained graph neighbours, `k = 30`, 200 UMAP
+epochs, and 500 openTSNE optimization iterations. They can be changed with the
+`KODAMA_M`, `KODAMA_TCYCLE`, `KODAMA_NCOMP`, `KODAMA_LANDMARKS`,
+`KODAMA_GRAPH_NEIGHBORS`, `KODAMA_N_EPOCHS`, and `KODAMA_N_ITER` environment
+variables.
+
+To add only the four KODAMA rows to an existing dataset/backend analysis, pass
+the relevant method IDs through `BENCHMARK_METHODS`. For example:
+
+```bash
+export BENCHMARK_METHODS="KODAMA_plslda_opentsne_cuda,KODAMA_plslda_umap_cuda,KODAMA_knn_opentsne_cuda,KODAMA_knn_umap_cuda"
+sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cuda.sh
+unset BENCHMARK_METHODS
+```
+
 Regenerate the launchers after changing the dataset panel with:
 
 ```bash
@@ -155,6 +182,8 @@ fuzzy/binary graph-weight agreement.
 ## Main Outputs
 
 - `benchmark_runs.csv`: one row per dataset/method/thread/seed.
+- `kodama_core_runs.csv`: one isolated, reusable KODAMA classifier fit per
+  dataset/classifier/backend/thread/seed.
 - `benchmark_summary_median_variability.csv`: medians and variability across
   successful repeats.
 - `stability_pairwise.csv`: within-method stability across seeds.
