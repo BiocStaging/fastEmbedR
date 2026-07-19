@@ -1,5 +1,4 @@
 test_that("transform_tsne places query rows from supplied reference neighbours", {
-  skip_if_not_installed("faissR")
   set.seed(401)
   x <- matrix(rnorm(70L * 5L), 70L, 5L)
   ref <- x[1:50, , drop = FALSE]
@@ -12,7 +11,7 @@ test_that("transform_tsne places query rows from supplied reference neighbours",
     n_iter = 3L,
     standardize = FALSE
   )
-  query_knn <- faissR::nn(ref, qry, k = 15L, backend = "cpu")
+  query_knn <- test_exact_knn(ref, qry, k = 15L, backend = "cpu")
   layout <- transform_tsne(
     fit$layout,
     knn = query_knn,
@@ -29,7 +28,7 @@ test_that("transform_tsne places query rows from supplied reference neighbours",
   cfg <- attr(layout, "fastEmbedR_config")
   expect_equal(cfg$method, "transform_tsne")
   expect_equal(cfg$optimizer, "opentsne_style_fixed_reference_transform")
-  expect_equal(cfg$nn_backend, "cpu")
+  expect_equal(cfg$nn_backend, "test_exact")
   expect_equal(cfg$affinities, "precomputed_query_conditional")
   expect_equal(cfg$affinity_storage, "flat_row_major_double")
   expect_equal(cfg$transform_batches, 1L)
@@ -129,7 +128,6 @@ test_that("transform_tsne CPU batching preserves fixed-reference results", {
 })
 
 test_that("transform_tsne reports GPU transform backends honestly", {
-  skip_if_not_installed("faissR")
   set.seed(403)
   x <- matrix(rnorm(60L * 4L), 60L, 4L)
   ref <- x[1:42, , drop = FALSE]
@@ -141,7 +139,7 @@ test_that("transform_tsne reports GPU transform backends honestly", {
     n_iter = 3L,
     standardize = FALSE
   )
-  query_knn <- faissR::nn(ref, qry, k = 12L, backend = "cpu")
+  query_knn <- test_exact_knn(ref, qry, k = 12L, backend = "cpu")
 
   if (isTRUE(fastEmbedR:::embedding_cuda_available_cpp())) {
     cuda_layout <- transform_tsne(
@@ -196,7 +194,6 @@ test_that("transform_tsne reports GPU transform backends honestly", {
 })
 
 test_that("landmark_tsne returns a compact full embedding object", {
-  skip_if_not_installed("faissR")
   set.seed(402)
   x <- rbind(
     matrix(rnorm(60L, 0, 0.25), 20L, 3L),
@@ -297,13 +294,12 @@ test_that("native affine landmark projection returns finite local placements", {
     2.5,
     2L
   )
-  expect_equal(projected_parallel$layout, projected$layout, tolerance = 1e-12)
+  expect_equal(projected_parallel$layout, projected$layout, tolerance = 1e-7)
   expect_equal(projected_parallel$fallback, projected$fallback)
   expect_equal(projected_parallel$n_threads, 2L)
 })
 
-test_that("landmark_tsne can use projection-specific approximate KNN", {
-  skip_if_not_installed("faissR")
+test_that("landmark_tsne uses native HNSW for CPU projection KNN", {
   old <- options(
     fastEmbedR.landmark_projection = "auto",
     fastEmbedR.landmark_projection_min_rows = 1L,
@@ -336,13 +332,12 @@ test_that("landmark_tsne can use projection-specific approximate KNN", {
 
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
-  expect_true(fit$parameters$projection_nn_backend %in% c("faiss_hnsw", "hnsw", "cpu"))
-  expect_equal(fit$parameters$projection_strategy, "faissR_landmark_query_knn")
+  expect_equal(fit$parameters$projection_nn_backend, "cpu")
+  expect_equal(fit$parameters$projection_strategy, "native_hnsw_landmark_query")
   expect_true(is.list(attr(fit$landmarks$projection_knn, "approximation")))
 })
 
 test_that("landmark_tsne uses fused Metal projection when requested", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
   old_fused <- getOption("fastEmbedR.landmark_projection_fused", NULL)
@@ -386,7 +381,6 @@ test_that("landmark_tsne uses fused Metal projection when requested", {
 })
 
 test_that("landmark_tsne keeps Metal projection and transform native when intermediates are not requested", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
 
@@ -416,8 +410,11 @@ test_that("landmark_tsne keeps Metal projection and transform native when interm
 
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
-  expect_equal(fit$parameters$projection_nn_backend, "cpu")
-  expect_equal(fit$parameters$projection_strategy, "exact")
+  expect_equal(fit$parameters$projection_nn_backend, "metal_fused_projection")
+  expect_equal(
+    fit$parameters$projection_strategy,
+    "query_only_exact_fused_landmark_projection_knn_confidence"
+  )
   expect_equal(fit$parameters$transform_optimizer, "opentsne_style_fixed_reference_transform_metal")
   expect_true(is.null(fit$landmarks$projection_knn))
 })

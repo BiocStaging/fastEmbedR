@@ -7,6 +7,12 @@ Rcpp::List native_hnsw_knn_impl(SEXP data,
                                 int n_threads,
                                 const std::string& metric,
                                 double target_recall);
+Rcpp::List native_hnsw_query_impl(SEXP data,
+                                  SEXP query,
+                                  int k,
+                                  int n_threads,
+                                  const std::string& metric,
+                                  double target_recall);
 bool native_metal_knn_available_impl();
 Rcpp::List native_metal_knn_impl(SEXP data,
                                  int k,
@@ -30,6 +36,18 @@ Rcpp::List native_hnsw_knn_cpp(SEXP data,
                                std::string metric = "euclidean",
                                double target_recall = 0.99) {
   return native_hnsw_knn_impl(data, k, n_threads, metric, target_recall);
+}
+
+// [[Rcpp::export]]
+Rcpp::List native_hnsw_query_cpp(SEXP data,
+                                 SEXP query,
+                                 int k,
+                                 int n_threads = 1,
+                                 std::string metric = "euclidean",
+                                 double target_recall = 0.99) {
+  return native_hnsw_query_impl(
+    data, query, k, n_threads, metric, target_recall
+  );
 }
 
 // [[Rcpp::export]]

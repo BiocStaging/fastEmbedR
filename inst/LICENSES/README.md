@@ -17,5 +17,6 @@ following provenance:
   Copyright DMLC contributors. Apache License 2.0: `DLPACK-LICENSE`.
 
 The package source files identify the portions derived from or informed by
-these projects. CUDA nearest-neighbour integration remains owned by the
-optional faissR package and is not copied into fastEmbedR.
+these projects. The package-owned CUDA adapter was distilled from the pinned
+faissR commit recorded in `../COPYRIGHTS`; it calls installed FAISS GPU and
+cuVS libraries directly and does not invoke the faissR R package.

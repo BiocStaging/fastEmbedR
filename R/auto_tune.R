@@ -986,13 +986,20 @@ auto_umap_pilot_label_scores <- function(layout,
     keep <- seq_len(nrow(layout))
   }
   embed_nn <- tryCatch(
-    fastembedr_faissr_nn(layout, layout, k + 1L, backend = "cpu"),
+    fastembedr_nn_without_self(
+      layout,
+      k = k,
+      backend = "cpu",
+      method = "hnsw",
+      n_threads = 1L,
+      target_recall = 0.99
+    ),
     error = function(e) NULL
   )
   if (is.null(embed_nn)) {
     return(list(label_knn_accuracy = NA_real_, rare_class_recall = NA_real_))
   }
-  embed_indices <- embed_nn$indices[, -1L, drop = FALSE]
+  embed_indices <- embed_nn$indices
   pred <- classification_from_embedding_nn(embed_indices, labels, k)
   acc <- mean(pred[keep] == labels[keep], na.rm = TRUE)
   recalls <- class_recall_metrics(labels[keep], pred[keep])

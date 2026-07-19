@@ -1,6 +1,6 @@
 Package: fastEmbedR
 Type: Package
-Title: Fast Native UMAP and openTSNE from Precomputed KNN Matrices
+Title: Fast Native Embeddings and Graph Clustering from KNN Matrices
 Version: 0.99.0
 Authors@R: person(given = "Stefano",
     family = "Caccia",
@@ -12,13 +12,14 @@ Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN
     components.
 Description: A compact UMAP and openTSNE-style implementation focused on fast
     embeddings from data matrices or precomputed nearest-neighbor index and
-    distance matrices. Native float32 CPU HNSW and Apple Metal exact/IVF-Flat
-    search support one-call workflows. Optional package-native CUDA search
-    links directly to FAISS GPU for exact search and to the RAPIDS cuVS C API
-    for IVF-Flat, keeping results on the device for CUDA embedding. Preprocessing, graph or affinity
-    construction, fixed-reference transform, and stochastic layout
-    optimization use native code with explicit CPU, Metal, and CUDA backend
-    reporting.
+    distance matrices, with native KNN graph construction and Louvain, Leiden,
+    and Walktrap community detection. Native float32 CPU HNSW and Apple Metal
+    exact/IVF-Flat search support one-call workflows. Optional package-native
+    CUDA search links directly to FAISS GPU for exact search and to the RAPIDS
+    cuVS C API for IVF-Flat, keeping results on the device for CUDA embedding.
+    Preprocessing, graph or affinity construction, fixed-reference transform,
+    and stochastic layout optimization use native code with explicit CPU,
+    Metal, and CUDA backend reporting.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
@@ -43,14 +44,12 @@ Suggests:
     igraph,
     jsonlite,
     knitr,
-    leidenbase,
     rmarkdown,
     Rtsne,
     testthat,
     umap,
     uwot
 Enhances:
-    faissR,
     fastPLS (>= 0.99.3)
 LinkingTo:
     Rcpp

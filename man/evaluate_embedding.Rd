@@ -41,8 +41,7 @@ metrics. The default `NULL` preserves the historical k = 15 behavior when
 possible.}
 
 \item{reference_nn}{Optional precomputed high-dimensional nearest-neighbor
-list. It may include a self-neighbor column, like
-\code{faissR::nn(x, x, k + 1)}.}
+list. It may include a self-neighbor column.}
 
 \item{sample_size_for_global_metrics}{Maximum deterministic subsample size
 for all-pairs global distance metrics.}

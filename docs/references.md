@@ -26,14 +26,23 @@ when they influenced design, benchmarking, or backend engineering.
 11. Krijthe JH. Rtsne: T-distributed stochastic neighbor embedding using Barnes-Hut implementation [software]. Available from: https://github.com/jkrijthe/Rtsne.
 12. amine m. AppleSiliconFFT: FFT kernels for Apple Silicon GPUs [software]. Available from: https://github.com/aminems/AppleSiliconFFT.
 13. McInnes L, Healy J, Saul N, Grossberger L. UMAP: Uniform Manifold Approximation and Projection. J Open Source Softw 2018;3:861.
+14. Blondel VD, Guillaume JL, Lambiotte R, Lefebvre E. Fast unfolding of communities in large networks. J Stat Mech 2008;2008:P10008.
+15. Traag VA, Waltman L, van Eck NJ. From Louvain to Leiden: guaranteeing well-connected communities. Sci Rep 2019;9:5233.
+16. Pons P, Latapy M. Computing communities in large networks using random walks. J Graph Algorithms Appl 2006;10:191-218.
+17. Staudt CL, Sazonovs A, Meyerhenke H. NetworKit: a tool suite for large-scale complex network analysis. Network Sci 2016;4:508-530.
 
 ## Software Provenance Notes
 
 - `uwot` and `Rtsne` are benchmark/reference implementations only. Their source
   code is not vendored into `fastEmbedR`.
-- FAISS and RAPIDS cuVS are used through the companion `faissR` package for
-  nearest-neighbour search.
+- fastEmbedR contains the compact native CPU/Metal and optional direct
+  FAISS/cuVS CUDA KNN routes needed by one-call embeddings. The CUDA adapter
+  was distilled from the pinned faissR commit recorded in `inst/COPYRIGHTS`,
+  but fastEmbedR does not invoke that R package.
 - openTSNE, FIt-SNE, t-SNE-CUDA, and opt-SNE informed the t-SNE optimization
   design. The public package implementation is native C++/Metal/CUDA code.
 - AppleSiliconFFT informed the native Metal FFT-grid engineering. The package
   keeps its own backend surface and does not expose experimental FFT variants.
+- Louvain, Leiden, and Walktrap are native package implementations [14-16].
+  The Leiden phase organization was informed by MIT-licensed NetworKit [17];
+  fastEmbedR does not link NetworKit, igraph, or cuGraph at run time.

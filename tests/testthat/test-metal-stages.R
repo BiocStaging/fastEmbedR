@@ -21,7 +21,6 @@ test_that("GPU UMAP exposes one CUDA fused entry shape", {
 })
 
 test_that("Metal openTSNE FFT-grid exposes opt-in per-stage timing", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   old_timing <- Sys.getenv("FASTEMBEDR_METAL_STAGE_TIMING", unset = NA_character_)
@@ -36,7 +35,7 @@ test_that("Metal openTSNE FFT-grid exposes opt-in per-stage timing", {
   Sys.setenv(FASTEMBEDR_METAL_STAGE_TIMING = "1")
   set.seed(93)
   x <- matrix(rnorm(120L * 6L), nrow = 120L, ncol = 6L)
-  knn <- faissR::nn(x, k = 12L, backend = "cpu")
+  knn <- test_exact_knn(x, k = 12L, backend = "cpu")
   layout <- fastEmbedR::opentsne_knn(
     knn,
     perplexity = 3,
@@ -83,7 +82,6 @@ test_that("GPU UMAP config records only the validated atomic paths", {
 })
 
 test_that("Metal UMAP landmark refinement stays native and reports its backend", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   old_refine <- getOption("fastEmbedR.landmark_umap_refine_epochs", NULL)
@@ -116,14 +114,13 @@ test_that("Metal UMAP landmark refinement stays native and reports its backend",
 })
 
 test_that("Metal affine landmark projection matches CPU local affine correction", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   set.seed(92)
   reference_data <- matrix(rnorm(50L * 6L), nrow = 50L, ncol = 6L)
   query_data <- matrix(rnorm(12L * 6L), nrow = 12L, ncol = 6L)
   reference_layout <- cbind(rnorm(50L), rnorm(50L))
-  projection <- faissR::nn(reference_data, query_data, k = 14L, backend = "cpu")
+  projection <- test_exact_knn(reference_data, query_data, k = 14L, backend = "cpu")
 
   cpu <- fastEmbedR:::project_embedding_affine_parallel_cpp(
     reference_data,
@@ -158,7 +155,6 @@ test_that("Metal affine landmark projection matches CPU local affine correction"
 })
 
 test_that("Metal preprocessing, projection, interpolation, and scoring match CPU", {
-  skip_if_not_installed("faissR")
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   set.seed(71)
@@ -262,7 +258,7 @@ test_that("Metal preprocessing, projection, interpolation, and scoring match CPU
   fused_landmark_indices <- c(1L, 4L, 9L, 13L, 18L, 22L, 29L, 35L)
   x_landmarks <- x_query[fused_landmark_indices, , drop = FALSE]
   fused_layout_reference <- cbind(rnorm(length(fused_landmark_indices)), rnorm(length(fused_landmark_indices)))
-  fused_projection <- faissR::nn(x_landmarks, x_query, k = 4L, backend = "cpu")
+  fused_projection <- test_exact_knn(x_landmarks, x_query, k = 4L, backend = "cpu")
   cpu_fused_reference <- fastEmbedR:::interpolate_landmark_layout_cpp(
     fused_layout_reference,
     as.integer(fused_landmark_indices),
@@ -296,7 +292,7 @@ test_that("Metal preprocessing, projection, interpolation, and scoring match CPU
 
   layout <- cbind(rnorm(30L), rnorm(30L))
   labels <- rep(1:3, each = 10L)
-  knn <- faissR::nn(layout, layout, k = 7L, backend = "cpu")
+  knn <- test_exact_knn(layout, layout, k = 7L, backend = "cpu")
   high_indices <- knn$indices[, -1L, drop = FALSE]
   keep <- seq_len(nrow(layout))
   cpu_score <- fastEmbedR:::knn_structure_score_cpp(

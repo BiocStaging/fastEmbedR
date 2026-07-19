@@ -60,7 +60,7 @@ ownership boundaries are:
 | Stage | CPU | Metal | CUDA |
 | --- | --- | --- | --- |
 | One-call KNN | Native float32 HNSW | Native exact or recall-tuned IVF-Flat | Direct FAISS GPU exact or cuVS IVF-Flat |
-| Reusable external KNN | `faissR::nn()` may be supplied by the user | Same KNN-input API | Same KNN-input API; one-call native KNN can remain device-resident |
+| Reusable host KNN | plain `indices`/`distances` list | Same KNN-input API | Same host KNN-input API; one-call native KNN can remain device-resident |
 | PCA/openTSNE initialization | Native RSVD using BLAS-backed products | Float32 block-subspace TSVD using MPS matrix products | Native RAPIDS RAFT TSVD when compiled |
 | t-SNE affinities | Native sparse C++ construction | Host construction followed by one graph upload | Native CUDA construction for resident one-call KNN |
 | UMAP graph | Native compact sparse graph | Prepared sparse graph uploaded once | Native CUDA construction for resident one-call KNN |

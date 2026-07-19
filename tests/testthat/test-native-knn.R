@@ -29,6 +29,116 @@ test_that("native CPU HNSW reaches its recall tier", {
   expect_identical(observed$method, "native_hnsw")
 })
 
+test_that("precompute_knn exposes the native CPU policy without self neighbors", {
+  set.seed(24)
+  x <- matrix(rnorm(240 * 10), nrow = 240)
+  truth <- exact_knn_reference(x, 12L)
+  observed <- precompute_knn(
+    x, k = 12L, metric = "euclidean", backend = "cpu", n_threads = 2L
+  )
+
+  expect_s3_class(observed, "fastEmbedR_knn")
+  expect_identical(dim(observed$indices), c(240L, 12L))
+  expect_identical(dim(observed$distances), c(240L, 12L))
+  expect_false(any(observed$indices == row(observed$indices)))
+  expect_gte(knn_recall_test(observed, truth), 0.99)
+  expect_identical(observed$backend_requested, "cpu")
+  expect_identical(observed$execution_backend, "cpu")
+  expect_identical(observed$engine, "native_cpu_hnsw")
+  expect_identical(observed$result_residency, "host")
+  expect_true(is.finite(observed$elapsed_sec))
+  expect_identical(attr(observed, "exclude_self"), TRUE)
+
+  layout <- umap_knn(observed, backend = "cpu", seed = 1L)
+  expect_identical(dim(layout), c(240L, 2L))
+  expect_true(all(is.finite(layout)))
+
+  tsne_layout <- opentsne_knn(
+    observed,
+    perplexity = 5,
+    init_data = x,
+    backend = "cpu",
+    n_threads = 2L,
+    early_exaggeration_iter = 2L,
+    n_iter = 3L
+  )
+  expect_identical(dim(tsne_layout), c(240L, 2L))
+  expect_true(all(is.finite(tsne_layout)))
+})
+
+test_that("precompute_knn preserves the float32 host path", {
+  skip_if_not_installed("float")
+  set.seed(25)
+  x <- float::fl(matrix(rnorm(180 * 7), nrow = 180))
+  observed <- precompute_knn(x, k = 9L, backend = "cpu", n_threads = 2L)
+
+  expect_s3_class(observed, "fastEmbedR_knn")
+  expect_true(inherits(observed$distances, "float32"))
+  expect_identical(dim(observed$distances), c(180L, 9L))
+})
+
+test_that("precompute_knn exposes no search-algorithm selector", {
+  expect_identical(
+    names(formals(precompute_knn)),
+    c("data", "k", "metric", "backend", "n_threads")
+  )
+  expect_error(
+    precompute_knn(matrix(rnorm(40), nrow = 10), k = 10L),
+    "between 1 and nrow\\(data\\) - 1"
+  )
+})
+
+test_that("precompute_knn Metal output is native or fails explicitly", {
+  set.seed(27)
+  x <- matrix(rnorm(96 * 6), nrow = 96)
+  if (!isTRUE(native_metal_knn_available_cpp())) {
+    expect_error(
+      precompute_knn(x, k = 7L, backend = "metal"),
+      "Native Metal KNN"
+    )
+  } else {
+    observed <- precompute_knn(x, k = 7L, backend = "metal")
+    expect_s3_class(observed, "fastEmbedR_knn")
+    expect_identical(observed$execution_backend, "metal")
+    expect_identical(observed$result_residency, "host")
+    expect_match(observed$method, "native_metal_(exact|ivf)")
+  }
+})
+
+test_that("native CPU HNSW supports query-to-reference search", {
+  set.seed(14)
+  reference <- matrix(rnorm(240 * 10), nrow = 240)
+  query <- matrix(rnorm(40 * 10), nrow = 40)
+  truth <- test_exact_knn(reference, query, k = 12L)
+  observed <- native_hnsw_query_cpp(
+    reference, query, 12L, 2L, "euclidean", 0.99
+  )
+
+  expect_identical(dim(observed$indices), c(40L, 12L))
+  expect_gte(knn_recall_test(observed, truth), 0.99)
+  expect_identical(attr(observed, "backend"), "cpu")
+  expect_identical(observed$method, "native_hnsw_query")
+})
+
+test_that("fastEmbedR has no faissR package dependency or runtime bridge", {
+  desc <- utils::packageDescription("fastEmbedR")
+  dependency_text <- paste(
+    unlist(desc[c("Depends", "Imports", "Suggests", "Enhances")], use.names = FALSE),
+    collapse = " "
+  )
+  expect_false(grepl("faissR", dependency_text, fixed = TRUE))
+
+  runtime_functions <- c(
+    "fastembedr_nn_without_self",
+    "fastembedr_native_query_knn",
+    "fastembedr_gpu_knn_to_host"
+  )
+  runtime_text <- vapply(runtime_functions, function(name) {
+    paste(deparse(body(get(name, envir = asNamespace("fastEmbedR")))), collapse = "\n")
+  }, character(1))
+  expect_false(any(grepl("faissR", runtime_text, fixed = TRUE)))
+})
+
 test_that("native KNN consumes float32 input without a double input copy", {
   skip_if_not_installed("float")
   set.seed(4)
@@ -84,6 +194,25 @@ test_that("native CUDA KNN never silently falls back", {
       ),
       "Native CUDA KNN"
     )
+  }
+})
+
+test_that("precompute_knn CUDA output stays resident or fails explicitly", {
+  set.seed(26)
+  x <- matrix(rnorm(128 * 8), nrow = 128)
+  if (!isTRUE(native_cuda_knn_available_cpp()) ||
+      !isTRUE(native_cuda_faiss_gpu_available_cpp())) {
+    expect_error(
+      precompute_knn(x, k = 8L, backend = "cuda"),
+      "Native (CUDA KNN|exact CUDA KNN)"
+    )
+  } else {
+    observed <- precompute_knn(x, k = 8L, backend = "cuda")
+    expect_s3_class(observed, "fastEmbedR_gpu_knn")
+    expect_s3_class(observed, "fastEmbedR_knn")
+    expect_identical(observed$result_residency, "cuda")
+    expect_identical(observed$device_to_host_result_copies, 0)
+    expect_false(any(c("indices", "distances") %in% names(observed)))
   }
 })
 

@@ -93,12 +93,10 @@ interpolation, and projection confidence before the fixed-reference
 transform.
 }
 \examples{
-if (requireNamespace("faissR", quietly = TRUE)) {
-  fit <- landmark_tsne(
-    as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
-    early_exaggeration_iter = 5, n_iter = 10,
-    transform_iter = 5, seed = 1
-  )
-  plot(fit, labels = iris$Species)
-}
+fit <- landmark_tsne(
+  as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
+  early_exaggeration_iter = 5, n_iter = 10,
+  transform_iter = 5, seed = 1
+)
+plot(fit, labels = iris$Species)
 }

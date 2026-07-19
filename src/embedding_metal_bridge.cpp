@@ -16,11 +16,11 @@ List standardize_metal_impl(NumericMatrix data);
 NumericMatrix project_embedding_knn_metal_impl(NumericMatrix reference_layout,
                                                IntegerMatrix projection_indices,
                                                NumericMatrix projection_distances);
-List project_embedding_affine_metal_impl(NumericMatrix reference_data,
-                                         NumericMatrix query_data,
-                                         NumericMatrix reference_layout,
+List project_embedding_affine_metal_impl(SEXP reference_data,
+                                         SEXP query_data,
+                                         SEXP reference_layout,
                                          IntegerMatrix projection_indices,
-                                         NumericMatrix projection_distances,
+                                         SEXP projection_distances,
                                          int max_neighbors,
                                          double ridge,
                                          double max_extrapolation);
@@ -29,14 +29,14 @@ NumericMatrix interpolate_landmark_layout_metal_impl(NumericMatrix landmark_layo
                                                      IntegerMatrix projection_indices,
                                                      NumericMatrix projection_distances,
                                                      int n);
-NumericMatrix landmark_project_interpolate_metal_impl(NumericMatrix landmark_data,
-                                                      NumericMatrix query_data,
-                                                      NumericMatrix landmark_layout,
+NumericMatrix landmark_project_interpolate_metal_impl(SEXP landmark_data,
+                                                      SEXP query_data,
+                                                      SEXP landmark_layout,
                                                       IntegerVector landmark_indices,
                                                       int k);
-List landmark_project_interpolate_knn_confidence_metal_impl(NumericMatrix landmark_data,
-                                                            NumericMatrix query_data,
-                                                            NumericMatrix landmark_layout,
+List landmark_project_interpolate_knn_confidence_metal_impl(SEXP landmark_data,
+                                                            SEXP query_data,
+                                                            SEXP landmark_layout,
                                                             IntegerVector landmark_indices,
                                                             int k);
 NumericVector knn_structure_score_metal_impl(NumericMatrix layout,
@@ -70,7 +70,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
                                        int seed,
                                        int sampler_mode);
 NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
-                                              NumericMatrix distances,
+                                              SEXP distances,
                                               IntegerVector row_ids,
                                               NumericMatrix init_embedding,
                                               int n_epochs,
@@ -158,11 +158,11 @@ NumericMatrix project_embedding_knn_metal_cpp(NumericMatrix reference_layout,
 }
 
 // [[Rcpp::export]]
-List project_embedding_affine_metal_cpp(NumericMatrix reference_data,
-                                        NumericMatrix query_data,
-                                        NumericMatrix reference_layout,
+List project_embedding_affine_metal_cpp(SEXP reference_data,
+                                        SEXP query_data,
+                                        SEXP reference_layout,
                                         IntegerMatrix projection_indices,
-                                        NumericMatrix projection_distances,
+                                        SEXP projection_distances,
                                         int max_neighbors = 12,
                                         double ridge = 1e-3,
                                         double max_extrapolation = 2.5) {
@@ -194,9 +194,9 @@ NumericMatrix interpolate_landmark_layout_metal_cpp(NumericMatrix landmark_layou
 }
 
 // [[Rcpp::export]]
-NumericMatrix landmark_project_interpolate_metal_cpp(NumericMatrix landmark_data,
-                                                     NumericMatrix query_data,
-                                                     NumericMatrix landmark_layout,
+NumericMatrix landmark_project_interpolate_metal_cpp(SEXP landmark_data,
+                                                     SEXP query_data,
+                                                     SEXP landmark_layout,
                                                      IntegerVector landmark_indices,
                                                      int k) {
   return landmark_project_interpolate_metal_impl(
@@ -209,9 +209,9 @@ NumericMatrix landmark_project_interpolate_metal_cpp(NumericMatrix landmark_data
 }
 
 // [[Rcpp::export]]
-List landmark_project_interpolate_knn_confidence_metal_cpp(NumericMatrix landmark_data,
-                                                           NumericMatrix query_data,
-                                                           NumericMatrix landmark_layout,
+List landmark_project_interpolate_knn_confidence_metal_cpp(SEXP landmark_data,
+                                                           SEXP query_data,
+                                                           SEXP landmark_layout,
                                                            IntegerVector landmark_indices,
                                                            int k) {
   return landmark_project_interpolate_knn_confidence_metal_impl(
@@ -280,7 +280,7 @@ NumericMatrix knn_embed_metal_csr_cpp(IntegerVector offsets,
 
 // [[Rcpp::export]]
 NumericMatrix knn_umap_refine_rows_metal_cpp(IntegerMatrix indices,
-                                             NumericMatrix distances,
+                                             SEXP distances,
                                              IntegerVector row_ids,
                                              NumericMatrix init_embedding,
                                              int n_epochs,

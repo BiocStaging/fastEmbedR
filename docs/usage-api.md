@@ -16,19 +16,28 @@ This page gives the main KNN-first workflows and the public API.
 
 | Situation | Use |
 | --- | --- |
+| You want to precompute fastEmbedR's native neighbours | `precompute_knn()` |
 | You already computed nearest neighbours | `umap_knn()` or `opentsne_knn()` |
 | You want one call from a data matrix | `umap()` or `opentsne()` |
 | You want reusable PCA scores or t-SNE initialization | `pca()` or `opentsne_pca_init()` |
-| You want to compare UMAP and openTSNE fairly | compute `knn <- faissR::nn(...)` once, then reuse it |
+| You want to compare UMAP and openTSNE fairly | compute one host KNN list once, then reuse it |
 | You want Apple GPU | set `backend = "metal"` explicitly |
 | You want NVIDIA GPU | build with CUDA/cuVS, then set embedding `backend = "cuda"` |
 | You want a fast approximation for very large data | use `landmark_umap()` or `landmark_tsne()` and report it as landmarking |
 | You want quality metrics | `evaluate_embedding(x, layout)` |
+| You want a clustering graph | `knn_graph()` |
+| You want native graph communities | `graph_cluster(graph, method = "leiden")` |
 
 The recommended workflow is KNN first:
 
 ```r
-knn <- faissR::nn(x, k = 50, exclude_self = TRUE, backend = "auto", n_threads = 4)
+knn <- precompute_knn(
+  x,
+  k = 50L,
+  metric = "euclidean",
+  backend = "cpu",
+  n_threads = 4L
+)
 layout_umap <- umap_knn(knn, seed = 1)
 layout_tsne <- opentsne_knn(knn, init_data = x, seed = 1)
 ```
@@ -36,27 +45,27 @@ layout_tsne <- opentsne_knn(knn, init_data = x, seed = 1)
 This keeps nearest-neighbour time separate from embedding time and makes
 benchmarks easier to interpret.
 
-The one-call functions intentionally hide the KNN algorithm choice. For
-`opentsne()` and `umap()`, `backend` accepts only `"cpu"`, `"metal"`, or
+The one-call functions and `precompute_knn()` intentionally hide the KNN
+algorithm choice. Their `backend` accepts only `"cpu"`, `"metal"`, or
 `"cuda"`. CPU KNN uses native HNSW; Metal uses native exact/IVF-Flat; CUDA
 uses direct FAISS GPU exact search or RAPIDS cuVS IVF-Flat and keeps its output
-resident on the device. To benchmark another KNN algorithm, compute it
-explicitly with `faissR::nn()` or `faissR::nn_gpu()` and pass the result to
-`opentsne_knn()` or `umap_knn()`.
+resident on the device. A CUDA KNN object should therefore be reused with a
+CUDA embedding backend. A host KNN result from another tool may still be
+supplied as a plain list containing `indices` and `distances`; fastEmbedR never
+calls that tool itself.
 
-## Distance Metrics In `faissR::nn()`
+## Distance Metrics
 
 The default distance is Euclidean:
 
 ```r
-knn <- faissR::nn(x, k = 50, exclude_self = TRUE, metric = "euclidean", backend = "auto", n_threads = 4)
+fit <- umap(x, n_neighbors = 50, metric = "euclidean", n_threads = 4)
 ```
 
 Cosine distance is available through exact CPU KNN:
 
 ```r
-knn_cosine <- faissR::nn(x, k = 50, exclude_self = TRUE, metric = "cosine", backend = "cpu", n_threads = 4)
-layout <- umap_knn(knn_cosine, seed = 1)
+fit_cosine <- umap(x, n_neighbors = 50, metric = "cosine", n_threads = 4)
 ```
 
 Current metric support is deliberately explicit:
@@ -64,7 +73,9 @@ Current metric support is deliberately explicit:
 | metric | supported backends | notes |
 | --- | --- | --- |
 | `euclidean` | native CPU/Metal and optional direct CUDA/cuVS | Recommended default for large UMAP/openTSNE benchmarks. |
-| `cosine` / inner product | FAISS/candidate paths where enabled by `faissR` | Use normalized rows when treating inner product as cosine similarity. |
+| `cosine` | native CPU/Metal and compiled CUDA | Rows are normalized internally. |
+| `correlation` | native CPU/Metal and compiled CUDA | Rows are centered and normalized internally. |
+| `inner_product` | compiled CUDA only | Unsupported CPU/Metal requests fail explicitly. |
 
 ## Basic KNN-First UMAP
 
@@ -75,8 +86,8 @@ set.seed(1)
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
-layout <- umap_knn(knn)
+fit <- umap(x, n_neighbors = 30, n_threads = 4)
+layout <- fit$layout
 
 plot(layout, pch = 21, bg = labels)
 ```
@@ -151,8 +162,8 @@ GPU use is explicit. A request for Metal or CUDA must run that backend or fail
 clearly.
 
 ```r
-knn <- faissR::nn(x, k = 50, exclude_self = TRUE, backend = "metal")
-layout <- opentsne_knn(knn, init_data = x, backend = "metal", seed = 1)
+fit <- opentsne(x, perplexity = 30, backend = "metal", seed = 1)
+layout <- fit$layout
 ```
 
 For CUDA builds with RAPIDS cuVS available:
@@ -163,6 +174,30 @@ fit <- opentsne(x, perplexity = 50, backend = "cuda", seed = 1)
 
 The package does not silently run these examples on CPU and report them as GPU
 results.
+
+## Graph Clustering
+
+Build a graph from raw data, an embedding result, or a reusable KNN object:
+
+```r
+graph <- knn_graph(x, k = 20, weight = "snn", n_threads = 4)
+communities <- graph_cluster(graph, method = "leiden", seed = 1)
+table(communities$membership)
+```
+
+For an embedding-space graph, pass the fit directly:
+
+```r
+fit <- opentsne(x, perplexity = 15, backend = "cpu", seed = 1)
+graph <- knn_graph(fit, k = 20, weight = "snn", n_threads = 4)
+communities <- graph_cluster(graph, method = "leiden", seed = 1)
+```
+
+`knn_graph()` uses the selected backend only when it must compute neighbours.
+`graph_cluster()` is native CPU code and does not call igraph, cuGraph, or an
+external clustering routine. Exact Walktrap is intended for small and moderate
+graphs because its transition matrix is quadratic; use Leiden or Louvain for
+large graphs.
 
 ## Landmark Workflow
 
@@ -223,7 +258,7 @@ supplied neighbour graph.
 
 | Function | Purpose |
 | --- | --- |
-| `faissR::nn()` | Companion-package KNN function for data/query matrices. |
+| `precompute_knn()` | Package-native non-self KNN search with CPU, Metal, or CUDA backend. |
 | `umap_knn()` | UMAP from a supplied KNN object or matrices. |
 | `umap()` | One-call preprocessing, KNN, and UMAP embedding. |
 | `pca()` | Backend-native truncated PCA scores/loadings. |
@@ -234,4 +269,5 @@ supplied neighbour graph.
 | `landmark_tsne()` | Embed landmarks, then transform remaining rows. |
 | `landmark_umap()` | Embed landmarks with UMAP, then project/refine remaining rows. |
 | `evaluate_embedding()` | Embedding quality metrics. |
-| `faissR::backend_info()` | FAISS/cuVS KNN backend detection without silent fallback. |
+| `knn_graph()` | Compact graph from data, an embedding, or supplied KNN. |
+| `graph_cluster()` | Native Louvain, Leiden, or Walktrap communities. |

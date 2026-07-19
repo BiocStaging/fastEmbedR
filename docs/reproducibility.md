@@ -13,7 +13,7 @@
 This page records the reproducibility contract for the manuscript benchmarks.
 It is intentionally explicit because fastEmbedR benchmarks may involve R
 packages, native C++ code, optional Metal kernels, optional CUDA kernels, FAISS,
-and RAPIDS cuVS through the companion `faissR` package.
+and RAPIDS cuVS linked directly by optional CUDA builds.
 
 ## Manuscript Snapshot
 
@@ -74,8 +74,8 @@ The manifest records:
 - hardware information from `Sys.info()`, `lscpu`, `free -h`, and
   `nvidia-smi` where available;
 - CUDA information from `nvcc --version`, `CUDA_HOME`, `LD_LIBRARY_PATH`, and
-  `faissR` backend probes;
-- FAISS/cuVS availability through `faissR::backend_info()`;
+  fastEmbedR native-backend probes;
+- directly linked FAISS GPU/cuVS availability recorded by fastEmbedR;
 - paths to the benchmark driver and wrapper scripts.
 
 The publication benchmark driver
@@ -135,7 +135,7 @@ tools/reproducibility/benchmark_environment.yml
 ```
 
 FAISS, RAPIDS cuVS, CUDA, cuFFT, and GPU driver versions are system-level
-dependencies owned by the `faissR` and CUDA installation. They are therefore
+dependencies owned by the CUDA installation. They are therefore
 not vendored into `fastEmbedR`; the exact versions actually used in a run are
 captured in `reproducibility_manifest.txt` and `reproducibility_manifest.json`.
 

@@ -1,145 +1,149 @@
-# HPC Embedding Benchmarks
+# Reviewer Validation Benchmarks
 
-These scripts run publication-style embedding benchmarks on the HPC datasets in
-`/scratch/firenze/NN/Data`.
+This directory contains the publication-validation benchmark for fastEmbedR.
+It runs the same analysis design on Linux CPU/CUDA and native macOS CPU/Metal,
+keeps failures isolated, and records both computational cost and embedding
+quality. The benchmark is intentionally separate from the installed R package.
+
+## Analysis Cohort
+
+The default dataset panel is:
+
+`COIL20`, `USPS`, `FashionMNIST`, `FlowRepository_FR-FCM-ZYRM_files`,
+`flow18`, `MNIST`, `imagenet`, `MetRef`, `mass41`, `TabulaMuris`, and
+`Macosko2015_retina`.
+
+The HPC launchers read these datasets from `/scratch/firenze/NN/Data`. The local
+launcher reads them from `/Users/stefano/Documents/fastEmbedR/Data`. Each
+dataset directory must contain a standard R dataset for reference packages.
+fastEmbedR reads the corresponding `float::float32` file; when that file or a
+precomputed object is missing, the driver creates it once under
+`_fastEmbedR_precomputed` and reuses it across methods and seeds.
 
 ## Files
 
-- `benchmark_embeddings_float32_publication.R`
-  Main R driver. It runs each dataset/method in an isolated child R process,
-  captures elapsed time, captures peak RSS memory through `/usr/bin/time -v`
-  when available, saves layouts, saves per-method plots, computes embedding
-  quality metrics, and continues after failed/OOM/timeout methods.
+- `benchmark_reviewer_validation.R`: main benchmark and isolated worker.
+- `publication_metrics.R`: exact/sampled quality and agreement metrics.
+- `reference_opentsne_affinity.py`: independent Python openTSNE affinity oracle.
+- `benchmark_worker_monitor.sh`: timeout, peak RSS, and GPU-memory monitor.
+- `run_reviewer_hpc_cpu.sh`: Slurm CPU run at 1 and 4 threads.
+- `run_reviewer_hpc_cuda.sh`: Slurm CUDA run.
+- `run_reviewer_local_cpu_metal.sh`: native macOS CPU and Metal run.
+- `combine_reviewer_benchmarks.R`: cross-machine CPU/Metal/CUDA agreement.
+- `fastembedr_cuda_multiarch_cugraph.def`: reproducible Linux CUDA image.
 
-- `benchmark_python_direct.py`
-  Native Python subprocess helper for Python reference methods. Rows ending in
-  `_direct` use this file and report Python-side fit time separately from the
-  R/reticulate-mediated rows.
+## What Is Measured
 
-- `benchmark_embeddings_float32_cpu12.sh`
-  CPU-only Slurm wrapper using 12 CPU cores. It runs:
-  `fastEmbedR_opentsne_cpu`, `fastEmbedR_umap_cpu_fuzzy`,
-  `fastEmbedR_umap_cpu_binary`, `Rtsne_full`, `KlugerLab_FItSNE`,
-  `python_opentsne_fft`, `python_opentsne_fft_direct`, `umap_package`,
-  `uwot_default`, `uwot_fast_sgd`, `python_umap_learn`, and
-  `python_umap_learn_direct`.
+Every embedding row records total elapsed time, peak process RAM, peak GPU
+memory where measurable, trustworthiness, neighbourhood preservation at 15,
+30, and 50 neighbours, silhouette, embedding-space KNN label accuracy, and a
+sampled t-SNE KL divergence. GPU memory is reported as a device-wide delta and
+is labelled as such because `nvidia-smi` cannot isolate every allocation made
+through shared CUDA libraries.
 
-- `benchmark_embeddings_float32_cuda.sh`
-  CUDA-only Slurm wrapper using one L40S GPU. It runs:
-  `fastEmbedR_opentsne_cuda`, `fastEmbedR_umap_cuda_fuzzy`, and
-  `fastEmbedR_umap_cuda_binary`, plus reticulate-mediated and native Python
-  subprocess RAPIDS/cuML UMAP and t-SNE rows. It prints CUDA/faissR/fastEmbedR
-  diagnostics before the benchmark so a missing CUDA backend is visible
-  immediately.
+Each method is repeated with seeds `4,17,42`. Summary files report median,
+quartiles, IQR, standard deviation, minimum, and maximum. Seed stability is
+reported using Procrustes-aligned embedding similarity and neighbourhood
+stability.
 
-## Input Rule
+Reviewer validation additionally reports:
 
-- fastEmbedR methods load each dataset's `*_float32.RData` file.
-- Reference R packages load each dataset's standard `.RData` file.
+- fastEmbedR PCA runtime by backend and agreement with `irlba` PCA;
+- exact/backend KNN recall;
+- fastEmbedR t-SNE affinity agreement with Python openTSNE;
+- sampled t-SNE KL divergence;
+- fastEmbedR UMAP graph-weight agreement with `uwot::similarity_graph`;
+- fuzzy/binary graph agreement across CPU, Metal, and CUDA;
+- Procrustes and KNN agreement across CPU, Metal, and CUDA and across seeds.
 
-## Copy To HPC Folder
+All scientific plots contain points only: no title, axes, labels, ticks, legend,
+or box. Labels are used only for point colours and numerical label-aware
+metrics.
 
-From the local machine:
+## Timing Boundaries
 
-```bash
-cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_embeddings_float32_publication.R \
-   /Users/stefano/HPC-firenze/NN/
-cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_python_direct.py \
-   /Users/stefano/HPC-firenze/NN/
-cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_embeddings_float32_cpu12.sh \
-   /Users/stefano/HPC-firenze/NN/
-cp /Users/stefano/Documents/umap/tools/hpc_embeddings/benchmark_embeddings_float32_cuda.sh \
-   /Users/stefano/HPC-firenze/NN/
-```
+`full` rows include PCA initialization where applicable, nearest-neighbour
+search, affinity/graph construction, and embedding optimization. `knn` rows
+start from the same cached KNN result and measure graph/affinity construction
+plus optimization. Cache generation is never charged to a `knn` row. This
+allows a fair total-runtime comparison while also exposing optimizer-only
+behaviour for implementations that accept precomputed neighbours.
 
-If `dataset_input_audit.csv` reports missing standard `.RData` files for
-reference packages, copy them into the local HPC mirror before syncing:
+fastEmbedR methods use float32 inputs and native float32 computational paths.
+Reference R methods use the standard double-precision R dataset rather than a
+converted float32 object.
 
-```bash
-bash /Users/stefano/Documents/umap/tools/hpc_embeddings/sync_missing_standard_rdata.sh
-```
+## Run On HPC
 
-Then sync `/Users/stefano/HPC-firenze/NN` to the HPC as usual.
-
-## Submit On HPC
+Copy the benchmark files and image into `/scratch/firenze/NN`, then submit:
 
 ```bash
-sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cpu12.sh
-sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh
+sbatch /scratch/firenze/NN/run_reviewer_hpc_cpu.sh
+sbatch /scratch/firenze/NN/run_reviewer_hpc_cuda.sh
 ```
 
-When `SINGULARITY_IMAGE` points to the benchmark image, both wrappers run
-`/opt/conda/bin/Rscript` inside that image by default. This avoids accidentally
-using the host `/usr/bin/Rscript`, which may not have `fastEmbedR`, `faissR`,
-RAPIDS, or the Python benchmark dependencies installed. Override with
-`CONTAINER_RSCRIPT=/path/to/Rscript` only if a different image layout is used.
+Both launchers default to `k = 30`, perplexity `30`, three seeds, a 3-hour
+per-method timeout, and all datasets. The CPU job requests four cores and tests
+both one and four threads where the implementation exposes threading. A failed,
+OOM-killed, or timed-out method is recorded and the remaining methods continue.
 
-Optional overrides:
+## Run On macOS
+
+Metal must be tested with the native macOS package. A Linux Singularity image
+cannot expose Apple Metal.
 
 ```bash
-DATASETS=MNIST,FashionMNIST K=30 PERPLEXITY=15 TIMEOUT=10800 \
-sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cpu12.sh
-
-DATASETS=MNIST,FashionMNIST K=30 PERPLEXITY=15 TIMEOUT=10800 \
-sbatch /scratch/firenze/NN/benchmark_embeddings_float32_cuda.sh
+bash /Users/stefano/Documents/umap/tools/hpc_embeddings/run_reviewer_local_cpu_metal.sh
 ```
 
-## Outputs
+This executes CPU at one and four threads and the Metal backend against
+`/Users/stefano/Documents/fastEmbedR/Data`.
 
-Each run creates a timestamped output directory containing:
+## Combine Backends
 
-- `embedding_benchmark_results.csv`
-- `embedding_parameter_table.csv`
-- `embedding_parameter_table.md`
-- `embedding_quality_table.csv`
-- `embedding_quality_table.md`
-- `embedding_runtime_quality_pareto.csv`
-- `embedding_runtime_quality_pareto.png`
-- `embedding_time_barplot.png`
-- `embedding_memory_barplot.png`
-- `embedding_parameter_table.csv`
-- `embedding_parameter_table.md`
-- `benchmark_command_lines.txt`
-- `sessionInfo.txt`
-- `reproducibility_manifest.txt`
-- `reproducibility_manifest.json` when `jsonlite` is installed
-- `layouts/*.rds`
-- `plots/*.png`
-- `logs/*.log`
-- `worker_results/*.csv`
+After copying the HPC result directories to the Mac, combine them with the local
+run:
 
-The manuscript table is `embedding_quality_table.md`. It reports, for the key
-datasets requested by the reviewer plus the explicit metabolomics benchmark
-(`MNIST`, `FashionMNIST`, `flow18`, `mass41`, `imagenet`,
-`FlowRepository_FR-FCM-ZYRM_files`, and `MetRef`): dataset, method, backend,
-runtime, trustworthiness, nearest-neighbour preservation, silhouette score,
-embedding-space KNN label accuracy, peak RSS memory, and status. The Pareto
-figure plots runtime against trustworthiness for the same key datasets.
+```bash
+Rscript /Users/stefano/Documents/umap/tools/hpc_embeddings/combine_reviewer_benchmarks.R \
+  --cpu-dir=/path/to/benchmark_reviewer_CPU_* \
+  --cuda-dir=/path/to/benchmark_reviewer_CUDA_* \
+  --local-dir=/path/to/benchmark_reviewer_local_CPU_Metal_* \
+  --out-dir=/path/to/combined_reviewer_results
+```
 
-`MetRef` is the metabolomics dataset in the embedding benchmark. Simulated
-matrices are used only in the separate nearest-neighbour stress benchmark and
-should not be described as part of the UMAP/t-SNE embedding-quality panel.
+The combined output includes cross-backend Procrustes similarity,
+neighbourhood agreement, KNN agreement, t-SNE affinity agreement, and UMAP
+fuzzy/binary graph-weight agreement.
 
-The method-parameter table is `embedding_parameter_table.md`. It records the
-settings needed to assess benchmark fairness: `n_neighbors`/`k`, perplexity,
-iterations or epochs, early exaggeration, learning-rate policy, initialization,
-distance metric, thread count, random seed, whether KNN was precomputed, and
-whether the KNN path was approximate, exact, or package-internal. The benchmark
-still compares total elapsed user-level runtime because the reference packages
-do not expose identical KNN/affinity/optimization boundaries.
+## Main Outputs
 
-Python reference methods are reported in two timing modes. Method names without
-the `_direct` suffix are called from R through `reticulate`. Method names with
-the `_direct` suffix run inside a native Python subprocess using
-`benchmark_python_direct.py`. For `_direct` rows, `elapsed_sec` is the
-Python-side fit time measured by `time.perf_counter()`, while
-`process_elapsed_sec` records the whole subprocess wall time including Python
-startup and NPZ input loading.
+- `benchmark_runs.csv`: one row per dataset/method/thread/seed.
+- `benchmark_summary_median_variability.csv`: medians and variability across
+  successful repeats.
+- `stability_pairwise.csv`: within-method stability across seeds.
+- `pca_vs_irlba_agreement.csv`: fastEmbedR PCA versus `irlba`.
+- `tsne_affinity_agreement_vs_python_opentsne.csv`: fastEmbedR versus openTSNE.
+- `umap_graph_agreement_vs_uwot.csv`: fastEmbedR versus uwot graph weights.
+- `knn_affinity_umap_graph_agreement.csv`: within-run backend diagnostics.
+- `parameter_table.csv`: complete benchmark settings and timing boundaries.
+- `reproducibility_manifest.txt` and `sessionInfo.txt`.
+- `layouts/`, `plots/`, `worker_results/`, and `logs/`.
 
-The reproducibility manifest records the Git commit, release tag field,
-archival DOI field, command lines, random seed, k/perplexity, thread count,
-timeout, R `sessionInfo()`, package versions, hardware information,
-`nvidia-smi` output when available, CUDA environment variables, and faissR
-backend probes for FAISS/cuVS availability. The release tag and DOI are read
-from `FASTEMBEDR_MANUSCRIPT_TAG` and `FASTEMBEDR_ZENODO_DOI` when those
-environment variables are set.
+## CUDA Image
+
+Build and validate the CUDA image on chiamaka with:
+
+```bash
+STAMP=reviewer \
+PKG_TARBALL=/Users/stefano/Documents/umap/fastEmbedR_0.99.0.tar.gz \
+COPY_LOCAL=true \
+LOCAL_COPY_DIR=/Users/stefano/Documents/umap/singularity \
+bash /Users/stefano/Documents/umap/tools/build_chiamaka_singularity_cugraph.sh
+```
+
+CUDA availability is tested only after image construction using
+`apptainer exec --nv`; a GPU is not visible during the definition `%post`
+stage. Validation covers package-native CUDA KNN, PCA, openTSNE, fuzzy and
+binary UMAP, Python openTSNE/umap-learn, RAPIDS cuML, and FIt-SNE. The copied
+image is suitable for Linux CUDA/HPC reproduction, not native macOS Metal.

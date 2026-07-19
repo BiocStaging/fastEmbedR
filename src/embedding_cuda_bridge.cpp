@@ -150,6 +150,42 @@ List landmark_project_interpolate_knn_confidence_cuda_impl(NumericMatrix landmar
                                                            NumericMatrix landmark_layout,
                                                            IntegerVector landmark_indices,
                                                            int k);
+List landmark_tsne_transform_cuda_gpu_impl(SEXP gpu_knn,
+                                           SEXP reference_data,
+                                           SEXP query_data,
+                                           SEXP reference_layout,
+                                           double perplexity,
+                                           int n_iter,
+                                           int early_exaggeration_iter,
+                                           double learning_rate,
+                                           double early_exaggeration,
+                                           double exaggeration,
+                                           double initial_momentum,
+                                           double final_momentum,
+                                           double max_grad_norm,
+                                           double max_step_norm,
+                                           int n_negatives,
+                                           int exact_repulsion_threshold,
+                                           int seed,
+                                           int affine_neighbors,
+                                           double affine_ridge,
+                                           double max_extrapolation);
+List landmark_umap_project_refine_cuda_gpu_impl(SEXP gpu_knn,
+                                                SEXP reference_data,
+                                                SEXP query_data,
+                                                SEXP reference_layout,
+                                                IntegerVector landmark_rows,
+                                                IntegerVector query_rows,
+                                                int n_total,
+                                                int n_epochs,
+                                                double min_dist,
+                                                int negative_sample_rate,
+                                                double learning_rate,
+                                                double repulsion_strength,
+                                                int seed,
+                                                int affine_neighbors,
+                                                double affine_ridge,
+                                                double max_extrapolation);
 NumericVector knn_structure_score_cuda_impl(NumericMatrix layout,
                                             IntegerMatrix indices,
                                             IntegerVector keep,
@@ -540,6 +576,61 @@ List landmark_project_interpolate_knn_confidence_cuda_cpp(NumericMatrix landmark
     landmark_layout,
     landmark_indices,
     k
+  );
+}
+
+// [[Rcpp::export]]
+List landmark_tsne_transform_cuda_gpu_cpp(SEXP gpu_knn,
+                                          SEXP reference_data,
+                                          SEXP query_data,
+                                          SEXP reference_layout,
+                                          double perplexity,
+                                          int n_iter,
+                                          int early_exaggeration_iter,
+                                          double learning_rate,
+                                          double early_exaggeration,
+                                          double exaggeration,
+                                          double initial_momentum,
+                                          double final_momentum,
+                                          double max_grad_norm,
+                                          double max_step_norm,
+                                          int n_negatives,
+                                          int exact_repulsion_threshold,
+                                          int seed,
+                                          int affine_neighbors,
+                                          double affine_ridge,
+                                          double max_extrapolation) {
+  return landmark_tsne_transform_cuda_gpu_impl(
+    gpu_knn, reference_data, query_data, reference_layout,
+    perplexity, n_iter, early_exaggeration_iter, learning_rate,
+    early_exaggeration, exaggeration, initial_momentum, final_momentum,
+    max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold,
+    seed, affine_neighbors, affine_ridge, max_extrapolation
+  );
+}
+
+// [[Rcpp::export]]
+List landmark_umap_project_refine_cuda_gpu_cpp(SEXP gpu_knn,
+                                               SEXP reference_data,
+                                               SEXP query_data,
+                                               SEXP reference_layout,
+                                               IntegerVector landmark_rows,
+                                               IntegerVector query_rows,
+                                               int n_total,
+                                               int n_epochs,
+                                               double min_dist,
+                                               int negative_sample_rate,
+                                               double learning_rate,
+                                               double repulsion_strength,
+                                               int seed,
+                                               int affine_neighbors,
+                                               double affine_ridge,
+                                               double max_extrapolation) {
+  return landmark_umap_project_refine_cuda_gpu_impl(
+    gpu_knn, reference_data, query_data, reference_layout,
+    landmark_rows, query_rows, n_total, n_epochs, min_dist,
+    negative_sample_rate, learning_rate, repulsion_strength, seed,
+    affine_neighbors, affine_ridge, max_extrapolation
   );
 }
 

@@ -5167,7 +5167,7 @@ NumericMatrix knn_umap_refine_masked_cpp(IntegerMatrix indices,
 
 // [[Rcpp::export]]
 NumericMatrix knn_umap_refine_rows_cpp(IntegerMatrix indices,
-                                       NumericMatrix distances,
+                                       SEXP distances,
                                        IntegerVector row_ids,
                                        NumericMatrix init_embedding,
                                        int n_epochs,
@@ -5178,7 +5178,8 @@ NumericMatrix knn_umap_refine_rows_cpp(IntegerMatrix indices,
                                        int n_threads,
                                        int seed,
                                        bool verbose) {
-  if (indices.nrow() != distances.nrow() || indices.ncol() != distances.ncol()) {
+  const auto distance_dims = distance_sexp_dims(distances);
+  if (indices.nrow() != distance_dims.first || indices.ncol() != distance_dims.second) {
     Rcpp::stop("indices and distances must have the same dimensions");
   }
   if (row_ids.size() != indices.nrow()) {
@@ -5219,7 +5220,9 @@ NumericMatrix knn_umap_refine_rows_cpp(IntegerMatrix indices,
   }
   const int index_offset = (min_idx >= 1 && max_idx <= n) ? 1 : 0;
 
-  std::vector<float> distance_values = copy_distances_float(distances, n_threads, 0, k);
+  std::vector<float> distance_values = copy_distances_float_sexp(
+    distances, n_threads, 0, k
+  );
   const FloatDistanceView distance_view{distance_values.data(), m, k, k};
   std::vector<float> sigmas;
   std::vector<float> rhos;

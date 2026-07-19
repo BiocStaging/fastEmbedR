@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <cufft.h>
+#include <math_constants.h>
 #include <cub/cub.cuh>
 #include <thrust/iterator/counting_iterator.h>
 
@@ -22,7 +23,7 @@
 
 namespace {
 
-constexpr float kCudaFloatInf = 3.4028234663852886e+38F;
+#define FASTEMBEDR_CUDA_FLOAT_INF CUDART_INF_F
 constexpr double kCudaDoubleInf = 1.7976931348623157e+308;
 constexpr double kCudaDoubleMin = 2.2250738585072014e-308;
 constexpr int kCudaProjectionMaxK = 128;
@@ -463,6 +464,543 @@ __device__ int negative_samples_this_epoch_period(float period, const EmbedParam
   return samples > 0 ? samples : 0;
 }
 
+constexpr int kCudaAffineMaxNeighbors = 12;
+
+struct LandmarkTsneParams {
+  int n_reference;
+  int n_query;
+  int k;
+  int n_negatives;
+  unsigned int seed;
+  int exact_repulsion;
+  float learning_rate;
+  float exaggeration;
+  float momentum;
+  float max_grad_norm;
+  float max_step_norm;
+};
+
+__device__ float landmark_median_float(float* values, int count) {
+  for (int i = 1; i < count; ++i) {
+    const float value = values[i];
+    int j = i - 1;
+    while (j >= 0 && values[j] > value) {
+      values[j + 1] = values[j];
+      --j;
+    }
+    values[j + 1] = value;
+  }
+  const int mid = count / 2;
+  return (count & 1) ? values[mid] : 0.5f * (values[mid - 1] + values[mid]);
+}
+
+__device__ unsigned int landmark_reference_sample(unsigned int n,
+                                                  unsigned int seed,
+                                                  unsigned int epoch,
+                                                  unsigned int row,
+                                                  unsigned int sample) {
+  unsigned int x = seed;
+  x ^= (epoch + 1u) * 0x9e3779b9u;
+  x ^= (row + 1u) * 0x85ebca6bu;
+  x ^= (sample + 1u) * 0xc2b2ae35u;
+  return mix_uint(x) % n;
+}
+
+__device__ void landmark_affine_fallback(const float* reference_layout,
+                                         const int* projection_indices,
+                                         const float* projection_distances,
+                                         float2* out,
+                                         int n_reference,
+                                         int n_query,
+                                         int k,
+                                         int index_offset,
+                                         int row,
+                                         float rho,
+                                         float sigma) {
+  constexpr float eps = 1.4901161193847656e-8f;
+  float weight_sum = 0.0f;
+  float2 value = make_float2(0.0f, 0.0f);
+  for (int j = 0; j < k; ++j) {
+    const std::size_t pos = static_cast<std::size_t>(j) * n_query + row;
+    const int ref = projection_indices[pos] - index_offset;
+    const float d = projection_distances[pos];
+    if (ref < 0 || ref >= n_reference || !isfinite(d) || d < 0.0f) continue;
+    const float w = expf(-fmaxf(0.0f, d - rho) / fmaxf(sigma, eps));
+    if (!isfinite(w) || w <= 0.0f) continue;
+    weight_sum += w;
+    value.x += w * reference_layout[ref];
+    value.y += w * reference_layout[static_cast<std::size_t>(n_reference) + ref];
+  }
+  if (!isfinite(weight_sum) || weight_sum <= 0.0f) weight_sum = 1.0f;
+  out[row] = make_float2(value.x / weight_sum, value.y / weight_sum);
+}
+
+__global__ void landmark_affine_projection_kernel(const float* reference_data,
+                                                   const float* query_data,
+                                                   const float* reference_layout,
+                                                   const int* projection_indices,
+                                                   const float* projection_distances,
+                                                   float2* out,
+                                                   int n_reference,
+                                                   int n_query,
+                                                   int n_features,
+                                                   int k,
+                                                   int index_offset,
+                                                   int max_neighbors,
+                                                   float ridge,
+                                                   float max_extrapolation) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= n_query) return;
+  constexpr float eps = 1.4901161193847656e-8f;
+  const int m = min(max(max_neighbors, 3), min(k, kCudaAffineMaxNeighbors));
+
+  float all_distances[kCudaProjectionMaxK];
+  float scratch[kCudaProjectionMaxK];
+  float weights[kCudaAffineMaxNeighbors];
+  int refs[kCudaAffineMaxNeighbors];
+  float centered[kCudaAffineMaxNeighbors];
+  float row_norm[kCudaAffineMaxNeighbors];
+  float gram[kCudaAffineMaxNeighbors * kCudaAffineMaxNeighbors];
+  float rhs[kCudaAffineMaxNeighbors * 2];
+  float q[kCudaAffineMaxNeighbors];
+
+  int zero_col = -1;
+  float rho = FASTEMBEDR_CUDA_FLOAT_INF;
+  for (int j = 0; j < k; ++j) {
+    const std::size_t pos = static_cast<std::size_t>(j) * n_query + row;
+    const int ref = projection_indices[pos] - index_offset;
+    const float d = projection_distances[pos];
+    const bool valid = ref >= 0 && ref < n_reference && isfinite(d) && d >= 0.0f;
+    all_distances[j] = valid ? d : FASTEMBEDR_CUDA_FLOAT_INF;
+    if (valid && d <= eps && zero_col < 0) zero_col = j;
+    if (valid) rho = fminf(rho, d);
+  }
+  if (!isfinite(rho)) rho = 0.0f;
+  if (zero_col >= 0) {
+    const int ref = projection_indices[static_cast<std::size_t>(zero_col) * n_query + row] - index_offset;
+    out[row] = make_float2(
+      reference_layout[ref],
+      reference_layout[static_cast<std::size_t>(n_reference) + ref]
+    );
+    return;
+  }
+
+  int positive_count = 0;
+  for (int j = 0; j < k; ++j) {
+    const float adjusted = fmaxf(0.0f, all_distances[j] - rho);
+    if (isfinite(adjusted) && adjusted > eps) scratch[positive_count++] = adjusted;
+  }
+  float sigma = positive_count > 0 ? landmark_median_float(scratch, positive_count) : fmaxf(rho, eps);
+  if (!isfinite(sigma) || sigma < eps) sigma = eps;
+
+  float weight_sum = 0.0f;
+  for (int j = 0; j < m; ++j) {
+    const int ref = projection_indices[static_cast<std::size_t>(j) * n_query + row] - index_offset;
+    refs[j] = ref;
+    const float adjusted = fmaxf(0.0f, all_distances[j] - rho);
+    const float w = ref >= 0 && ref < n_reference && isfinite(adjusted) ? expf(-adjusted / sigma) : 0.0f;
+    weights[j] = w;
+    weight_sum += w;
+  }
+  if (!isfinite(weight_sum) || weight_sum <= 0.0f) {
+    landmark_affine_fallback(
+      reference_layout, projection_indices, projection_distances, out,
+      n_reference, n_query, k, index_offset, row, rho, sigma
+    );
+    return;
+  }
+  for (int j = 0; j < m; ++j) weights[j] /= weight_sum;
+
+  float2 y_center = make_float2(0.0f, 0.0f);
+  for (int j = 0; j < m; ++j) {
+    const int ref = refs[j];
+    if (ref < 0 || ref >= n_reference) continue;
+    y_center.x += weights[j] * reference_layout[ref];
+    y_center.y += weights[j] * reference_layout[static_cast<std::size_t>(n_reference) + ref];
+  }
+
+  float layout_radius_sq = 0.0f;
+  for (int a = 0; a < m; ++a) {
+    const int ref = refs[a];
+    const float sqrt_w = sqrtf(fmaxf(weights[a], 0.0f));
+    const float yc0 = ref >= 0 && ref < n_reference ? reference_layout[ref] - y_center.x : 0.0f;
+    const float yc1 = ref >= 0 && ref < n_reference ?
+      reference_layout[static_cast<std::size_t>(n_reference) + ref] - y_center.y : 0.0f;
+    rhs[a * 2] = sqrt_w * yc0;
+    rhs[a * 2 + 1] = sqrt_w * yc1;
+    layout_radius_sq = fmaxf(layout_radius_sq, yc0 * yc0 + yc1 * yc1);
+    row_norm[a] = 0.0f;
+    q[a] = 0.0f;
+  }
+  for (int i = 0; i < m * m; ++i) gram[i] = 0.0f;
+
+  for (int feature = 0; feature < n_features; ++feature) {
+    float x_center = 0.0f;
+    const std::size_t ref_col = static_cast<std::size_t>(feature) * n_reference;
+    for (int j = 0; j < m; ++j) {
+      const int ref = refs[j];
+      if (ref >= 0 && ref < n_reference) x_center += weights[j] * reference_data[ref_col + ref];
+    }
+    const float query_centered = query_data[static_cast<std::size_t>(feature) * n_query + row] - x_center;
+    for (int a = 0; a < m; ++a) {
+      const int ref = refs[a];
+      const float value = ref >= 0 && ref < n_reference ? reference_data[ref_col + ref] - x_center : 0.0f;
+      centered[a] = value;
+      row_norm[a] += value * value;
+      q[a] += query_centered * value;
+    }
+    for (int a = 0; a < m; ++a) {
+      for (int b = 0; b <= a; ++b) gram[a * m + b] += centered[a] * centered[b];
+    }
+  }
+
+  float trace = 0.0f;
+  for (int a = 0; a < m; ++a) {
+    const float sqrt_wa = sqrtf(fmaxf(weights[a], 0.0f));
+    trace += weights[a] * row_norm[a];
+    q[a] *= sqrt_wa;
+    for (int b = 0; b <= a; ++b) {
+      const float value = sqrt_wa * sqrtf(fmaxf(weights[b], 0.0f)) * gram[a * m + b];
+      gram[a * m + b] = value;
+      gram[b * m + a] = value;
+    }
+  }
+  const float lambda = ridge * fmaxf(trace, eps) + eps;
+  for (int a = 0; a < m; ++a) gram[a * m + a] += lambda;
+
+  bool ok = true;
+  for (int j = 0; j < m && ok; ++j) {
+    float value = gram[j * m + j];
+    for (int kk = 0; kk < j; ++kk) value -= gram[j * m + kk] * gram[j * m + kk];
+    if (!isfinite(value) || value <= eps) { ok = false; break; }
+    const float diag = sqrtf(value);
+    gram[j * m + j] = diag;
+    for (int i = j + 1; i < m; ++i) {
+      float s = gram[i * m + j];
+      for (int kk = 0; kk < j; ++kk) s -= gram[i * m + kk] * gram[j * m + kk];
+      gram[i * m + j] = s / diag;
+    }
+  }
+  if (!ok) {
+    landmark_affine_fallback(
+      reference_layout, projection_indices, projection_distances, out,
+      n_reference, n_query, k, index_offset, row, rho, sigma
+    );
+    return;
+  }
+  for (int component = 0; component < 2; ++component) {
+    for (int i = 0; i < m; ++i) {
+      float s = rhs[i * 2 + component];
+      for (int kk = 0; kk < i; ++kk) s -= gram[i * m + kk] * rhs[kk * 2 + component];
+      rhs[i * 2 + component] = s / gram[i * m + i];
+    }
+    for (int i = m - 1; i >= 0; --i) {
+      float s = rhs[i * 2 + component];
+      for (int kk = i + 1; kk < m; ++kk) s -= gram[kk * m + i] * rhs[kk * 2 + component];
+      rhs[i * 2 + component] = s / gram[i * m + i];
+    }
+  }
+
+  float2 displacement = make_float2(0.0f, 0.0f);
+  for (int a = 0; a < m; ++a) {
+    displacement.x += q[a] * rhs[a * 2];
+    displacement.y += q[a] * rhs[a * 2 + 1];
+  }
+  const float max_disp = max_extrapolation * sqrtf(fmaxf(layout_radius_sq, eps));
+  const float disp_sq = displacement.x * displacement.x + displacement.y * displacement.y;
+  if (disp_sq > max_disp * max_disp) {
+    const float scale = max_disp / (sqrtf(disp_sq) + eps);
+    displacement.x *= scale;
+    displacement.y *= scale;
+  }
+  float2 value = make_float2(y_center.x + displacement.x, y_center.y + displacement.y);
+  if (!isfinite(value.x) || !isfinite(value.y)) {
+    landmark_affine_fallback(
+      reference_layout, projection_indices, projection_distances, out,
+      n_reference, n_query, k, index_offset, row, rho, sigma
+    );
+    return;
+  }
+  out[row] = value;
+}
+
+__global__ void landmark_tsne_probabilities_kernel(const float* distances,
+                                                    float* probabilities,
+                                                    int n_query,
+                                                    int k,
+                                                    float perplexity) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= n_query) return;
+  float beta = 1.0f;
+  float min_beta = -FASTEMBEDR_CUDA_FLOAT_INF;
+  float max_beta = FASTEMBEDR_CUDA_FLOAT_INF;
+  float sum_p = 1.1754943508222875e-38f;
+  const float target = logf(perplexity);
+  for (int iter = 0; iter < 200; ++iter) {
+    sum_p = 1.1754943508222875e-38f;
+    float entropy_numerator = 0.0f;
+    for (int j = 0; j < k; ++j) {
+      const std::size_t pos = static_cast<std::size_t>(j) * n_query + row;
+      const float d = distances[pos];
+      const float d2 = d * d;
+      const float p = expf(-beta * d2);
+      probabilities[pos] = p;
+      sum_p += p;
+      entropy_numerator += beta * d2 * p;
+    }
+    const float diff = entropy_numerator / sum_p + logf(sum_p) - target;
+    if (fabsf(diff) < 1.0e-5f) break;
+    if (diff > 0.0f) {
+      min_beta = beta;
+      beta = isinf(max_beta) ? beta * 2.0f : 0.5f * (beta + max_beta);
+    } else {
+      max_beta = beta;
+      beta = isinf(min_beta) ? beta * 0.5f : 0.5f * (beta + min_beta);
+    }
+  }
+  const float inv_sum = 1.0f / sum_p;
+  for (int j = 0; j < k; ++j) {
+    probabilities[static_cast<std::size_t>(j) * n_query + row] *= inv_sum;
+  }
+}
+
+__global__ void landmark_tsne_epoch_kernel(const float* reference_layout,
+                                           const int* indices,
+                                           const float* probabilities,
+                                           float2* current,
+                                           float2* gains,
+                                           float2* updates,
+                                           LandmarkTsneParams p,
+                                           unsigned int epoch,
+                                           int index_offset) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= p.n_query) return;
+  constexpr float eps = 1.0e-12f;
+  const float2 yi = current[row];
+  float2 grad = make_float2(0.0f, 0.0f);
+  float sum_q = eps;
+  const int samples = p.exact_repulsion ? p.n_reference : p.n_negatives;
+  for (int sample = 0; sample < samples; ++sample) {
+    const unsigned int ref = p.exact_repulsion ? static_cast<unsigned int>(sample) :
+      landmark_reference_sample(p.n_reference, p.seed, epoch, row, sample);
+    const float dx = yi.x - reference_layout[ref];
+    const float dy = yi.y - reference_layout[static_cast<std::size_t>(p.n_reference) + ref];
+    sum_q += 1.0f / (1.0f + dx * dx + dy * dy);
+  }
+  for (int sample = 0; sample < samples; ++sample) {
+    const unsigned int ref = p.exact_repulsion ? static_cast<unsigned int>(sample) :
+      landmark_reference_sample(p.n_reference, p.seed, epoch, row, sample);
+    const float dx = yi.x - reference_layout[ref];
+    const float dy = yi.y - reference_layout[static_cast<std::size_t>(p.n_reference) + ref];
+    const float q = 1.0f / (1.0f + dx * dx + dy * dy);
+    const float coeff = -(q * q) / sum_q;
+    grad.x += coeff * dx;
+    grad.y += coeff * dy;
+  }
+  for (int j = 0; j < p.k; ++j) {
+    const std::size_t pos = static_cast<std::size_t>(j) * p.n_query + row;
+    const int ref = indices[pos] - index_offset;
+    if (ref < 0 || ref >= p.n_reference) continue;
+    const float dx = yi.x - reference_layout[ref];
+    const float dy = yi.y - reference_layout[static_cast<std::size_t>(p.n_reference) + ref];
+    const float q = 1.0f / (1.0f + dx * dx + dy * dy);
+    const float coeff = p.exaggeration * probabilities[pos] * q;
+    grad.x += coeff * dx;
+    grad.y += coeff * dy;
+  }
+  const float grad_norm2 = grad.x * grad.x + grad.y * grad.y;
+  if (isfinite(p.max_grad_norm) && p.max_grad_norm > 0.0f &&
+      grad_norm2 > p.max_grad_norm * p.max_grad_norm) {
+    const float scale = p.max_grad_norm / (sqrtf(grad_norm2) + eps);
+    grad.x *= scale;
+    grad.y *= scale;
+  }
+  float2 gain = gains[row];
+  float2 update = updates[row];
+  gain.x = ((update.x > 0.0f) != (grad.x > 0.0f)) ? gain.x + 0.2f : gain.x * 0.8f + 0.01f;
+  gain.y = ((update.y > 0.0f) != (grad.y > 0.0f)) ? gain.y + 0.2f : gain.y * 0.8f + 0.01f;
+  gain.x = fmaxf(gain.x, 0.01f);
+  gain.y = fmaxf(gain.y, 0.01f);
+  update.x = p.momentum * update.x - p.learning_rate * gain.x * grad.x;
+  update.y = p.momentum * update.y - p.learning_rate * gain.y * grad.y;
+  const float step_norm2 = update.x * update.x + update.y * update.y;
+  if (isfinite(p.max_step_norm) && p.max_step_norm > 0.0f &&
+      step_norm2 > p.max_step_norm * p.max_step_norm) {
+    const float scale = p.max_step_norm / (sqrtf(step_norm2) + eps);
+    update.x *= scale;
+    update.y *= scale;
+  }
+  current[row] = make_float2(yi.x + update.x, yi.y + update.y);
+  gains[row] = gain;
+  updates[row] = update;
+}
+
+__global__ void landmark_tsne_state_init_kernel(float2* gains,
+                                                float2* updates,
+                                                int n_query) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= n_query) return;
+  gains[row] = make_float2(1.0f, 1.0f);
+  updates[row] = make_float2(0.0f, 0.0f);
+}
+
+__global__ void landmark_distance_sum_kernel(const float* distances,
+                                             int total,
+                                             float* sum,
+                                             unsigned int* count) {
+  const int id = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (id >= total) return;
+  const float value = distances[id];
+  if (isfinite(value) && value >= 0.0f) {
+    atomicAdd(sum, value);
+    atomicAdd(count, 1u);
+  }
+}
+
+__global__ void landmark_umap_prepare_kernel(const float* distances,
+                                             float* weights,
+                                             float* epochs_per_sample,
+                                             int n_query,
+                                             int k,
+                                             float global_mean) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= n_query) return;
+  float rho = FASTEMBEDR_CUDA_FLOAT_INF;
+  float row_sum = 0.0f;
+  int row_count = 0;
+  for (int j = 0; j < k; ++j) {
+    const float d = distances[static_cast<std::size_t>(j) * n_query + row];
+    if (!isfinite(d) || d < 0.0f) continue;
+    row_sum += d;
+    ++row_count;
+    if (d > 0.0f) rho = fminf(rho, d);
+  }
+  if (!isfinite(rho)) rho = 0.0f;
+  const float target = log2f(fmaxf(1.0f, static_cast<float>(k)));
+  float lo = 0.0f;
+  float hi = FASTEMBEDR_CUDA_FLOAT_INF;
+  float sigma = 1.0f;
+  float best_sigma = sigma;
+  float best_diff = FASTEMBEDR_CUDA_FLOAT_INF;
+  for (int iter = 0; iter < 64; ++iter) {
+    float psum = 0.0f;
+    const float safe_sigma = fmaxf(sigma, 1.0e-12f);
+    for (int j = 0; j < k; ++j) {
+      const float raw = distances[static_cast<std::size_t>(j) * n_query + row];
+      if (!isfinite(raw) || raw < 0.0f) continue;
+      const float d = raw - rho;
+      psum += d <= 0.0f ? 1.0f : expf(-d / safe_sigma);
+    }
+    const float diff = fabsf(psum - target);
+    if (diff < best_diff) { best_diff = diff; best_sigma = sigma; }
+    if (psum > target) {
+      hi = sigma;
+      sigma = 0.5f * (lo + hi);
+    } else {
+      lo = sigma;
+      sigma = isinf(hi) ? sigma * 2.0f : 0.5f * (lo + hi);
+    }
+    if (diff < 1.0e-5f) break;
+  }
+  const float row_mean = row_count > 0 ? row_sum / row_count : global_mean;
+  const float sigma_floor = 1.0e-3f * (rho > 0.0f ? row_mean : global_mean);
+  best_sigma = fmaxf(fmaxf(best_sigma, sigma_floor), 1.0e-12f);
+  for (int j = 0; j < k; ++j) {
+    const std::size_t pos = static_cast<std::size_t>(j) * n_query + row;
+    const float d = distances[pos];
+    float w = 0.0f;
+    if (isfinite(d) && d >= 0.0f) {
+      w = d <= rho ? 1.0f : expf(-(d - rho) / best_sigma);
+      if (!isfinite(w) || w <= 0.0f) w = 0.0f;
+    }
+    weights[pos] = w;
+    epochs_per_sample[pos] = w > 0.0f ? 1.0f / fmaxf(w, 1.0e-6f) : 0.0f;
+  }
+}
+
+__global__ void landmark_umap_assemble_kernel(const float* reference_layout,
+                                              const float2* query_layout,
+                                              const int* landmark_rows,
+                                              const int* query_rows,
+                                              int n_reference,
+                                              int n_query,
+                                              float* layout) {
+  const int id = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (id < n_reference) {
+    const int row = landmark_rows[id] - 1;
+    layout[static_cast<std::size_t>(row) * 2u] = reference_layout[id];
+    layout[static_cast<std::size_t>(row) * 2u + 1u] =
+      reference_layout[static_cast<std::size_t>(n_reference) + id];
+  }
+  if (id < n_query) {
+    const int row = query_rows[id] - 1;
+    layout[static_cast<std::size_t>(row) * 2u] = query_layout[id].x;
+    layout[static_cast<std::size_t>(row) * 2u + 1u] = query_layout[id].y;
+  }
+}
+
+__global__ void landmark_umap_refine_epoch_kernel(float* layout,
+                                                  const int* indices,
+                                                  const float* weights,
+                                                  const float* epochs_per_sample,
+                                                  const int* landmark_rows,
+                                                  const int* query_rows,
+                                                  int n_reference,
+                                                  int n_query,
+                                                  int k,
+                                                  int index_offset,
+                                                  EmbedParams p,
+                                                  unsigned int epoch) {
+  const int local_row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (local_row >= n_query) return;
+  const int head = query_rows[local_row] - 1;
+  if (head < 0 || head >= p.n) return;
+  float2 yi = make_float2(
+    layout[static_cast<std::size_t>(head) * 2u],
+    layout[static_cast<std::size_t>(head) * 2u + 1u]
+  );
+  const float alpha = p.learning_rate *
+    (1.0f - static_cast<float>(epoch) / fmaxf(1.0f, static_cast<float>(p.n_epochs)));
+  constexpr float eps = 1.1920928955078125e-7f;
+  for (int j = 0; j < k; ++j) {
+    const std::size_t pos = static_cast<std::size_t>(j) * n_query + local_row;
+    const int ref = indices[pos] - index_offset;
+    if (ref < 0 || ref >= n_reference) continue;
+    const int tail = landmark_rows[ref] - 1;
+    if (tail < 0 || tail >= p.n || tail == head) continue;
+    const float period = epochs_per_sample[pos];
+    const int positive_samples = positive_samples_this_epoch_period(period, epoch);
+    if (positive_samples <= 0) continue;
+    const float tx = layout[static_cast<std::size_t>(tail) * 2u];
+    const float ty = layout[static_cast<std::size_t>(tail) * 2u + 1u];
+    for (int sample = 0; sample < positive_samples; ++sample) {
+      const float dx = yi.x - tx;
+      const float dy = yi.y - ty;
+      const float d2 = fmaxf(eps, dx * dx + dy * dy);
+      const float coeff = attractive_coeff(d2, weights[pos], p);
+      yi.x += alpha * clip4(coeff * dx);
+      yi.y += alpha * clip4(coeff * dy);
+    }
+    const int negative_samples = negative_samples_this_epoch_period(period, p, epoch);
+    for (int sample = 0; sample < negative_samples; ++sample) {
+      const unsigned int neg = deterministic_vertex(
+        p.n, p.seed, epoch, head, j, sample
+      );
+      if (static_cast<int>(neg) == head || static_cast<int>(neg) == tail) continue;
+      const float nx = layout[static_cast<std::size_t>(neg) * 2u];
+      const float ny = layout[static_cast<std::size_t>(neg) * 2u + 1u];
+      const float dx = yi.x - nx;
+      const float dy = yi.y - ny;
+      const float d2 = fmaxf(eps, dx * dx + dy * dy);
+      const float coeff = repulsive_coeff(d2, p);
+      yi.x += alpha * clip4(coeff * dx);
+      yi.y += alpha * clip4(coeff * dy);
+    }
+    layout[static_cast<std::size_t>(head) * 2u] = yi.x;
+    layout[static_cast<std::size_t>(head) * 2u + 1u] = yi.y;
+  }
+}
+
 template <typename DistanceT>
 __global__ void prepare_directed_knn_kernel(const int* indices,
                                             const DistanceT* distances,
@@ -472,7 +1010,7 @@ __global__ void prepare_directed_knn_kernel(const int* indices,
   const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
   if (row >= p.n) return;
 
-  float rho = kCudaFloatInf;
+  float rho = FASTEMBEDR_CUDA_FLOAT_INF;
   for (int j = 0; j < p.k; ++j) {
     const float d = static_cast<float>(distances[static_cast<std::size_t>(j) * p.n + row]);
     if (d > 0.0f && d < rho) rho = d;
@@ -481,7 +1019,7 @@ __global__ void prepare_directed_knn_kernel(const int* indices,
 
   const float target = log2f(static_cast<float>(p.k < 2 ? 2 : p.k));
   float lo = 0.0f;
-  float hi = kCudaFloatInf;
+  float hi = FASTEMBEDR_CUDA_FLOAT_INF;
   float sigma = 1.0f;
   for (int iter = 0; iter < 48; ++iter) {
     float psum = 0.0f;
@@ -920,7 +1458,7 @@ __global__ void finalize_cuvs_knn_kernel(const int64_t* input_indices,
       const std::size_t output_offset =
         static_cast<std::size_t>(written) * total_n + global_row;
       output_indices[output_offset] = 0;
-      output_distances[output_offset] = kCudaFloatInf;
+      output_distances[output_offset] = FASTEMBEDR_CUDA_FLOAT_INF;
     }
   }
 }
@@ -2912,6 +3450,263 @@ int raft_tsvd_scores_to_device(const HostT* values,
 #endif
 
 } // namespace
+
+extern "C" int fastembedr_cuda_landmark_tsne_from_device_knn(
+    const int* device_indices,
+    const float* device_distances,
+    int index_offset,
+    const float* reference_data,
+    const float* query_data,
+    const float* reference_layout,
+    int n_reference,
+    int n_query,
+    int n_features,
+    int k,
+    float perplexity,
+    int n_iter,
+    int early_exaggeration_iter,
+    float learning_rate,
+    float early_exaggeration,
+    float exaggeration,
+    float initial_momentum,
+    float final_momentum,
+    float max_grad_norm,
+    float max_step_norm,
+    int n_negatives,
+    int exact_repulsion_threshold,
+    unsigned int seed,
+    int affine_neighbors,
+    float affine_ridge,
+    float max_extrapolation,
+    float* out) {
+  embedding_last_error.clear();
+  if (device_indices == nullptr || device_distances == nullptr ||
+      reference_data == nullptr || query_data == nullptr ||
+      reference_layout == nullptr || out == nullptr) {
+    set_embedding_error("null CUDA landmark t-SNE pointer");
+    return 1;
+  }
+  if (n_reference < 1 || n_query < 1 || n_features < 1 || k < 1 ||
+      k > kCudaProjectionMaxK || perplexity <= 0.0f ||
+      n_iter < 0 || early_exaggeration_iter < 0 ||
+      n_iter + early_exaggeration_iter < 0) {
+    set_embedding_error("invalid CUDA landmark t-SNE dimensions or parameters");
+    return 1;
+  }
+  n_negatives = std::max(1, std::min(n_negatives, n_reference));
+  affine_neighbors = std::max(3, std::min(affine_neighbors, std::min(k, kCudaAffineMaxNeighbors)));
+  const std::size_t reference_items = static_cast<std::size_t>(n_reference) * n_features;
+  const std::size_t query_items = static_cast<std::size_t>(n_query) * n_features;
+  const std::size_t layout_items = static_cast<std::size_t>(n_reference) * 2u;
+  const std::size_t graph_items = static_cast<std::size_t>(n_query) * k;
+  const std::size_t query_layout_items = static_cast<std::size_t>(n_query);
+  const std::size_t required_bytes =
+    align_bytes(reference_items * sizeof(float)) +
+    align_bytes(query_items * sizeof(float)) +
+    align_bytes(layout_items * sizeof(float)) +
+    align_bytes(graph_items * sizeof(float)) +
+    3u * align_bytes(query_layout_items * sizeof(float2));
+  if (check_embedding_memory_available(required_bytes, "CUDA landmark t-SNE workspace")) return 1;
+  CudaWorkspace workspace;
+  if (workspace.init(required_bytes, "landmark t-SNE")) return 1;
+  float* d_reference_data = workspace.alloc<float>(reference_items, "landmark t-SNE reference data");
+  float* d_query_data = workspace.alloc<float>(query_items, "landmark t-SNE query data");
+  float* d_reference_layout = workspace.alloc<float>(layout_items, "landmark t-SNE reference layout");
+  float* d_probabilities = workspace.alloc<float>(graph_items, "landmark t-SNE probabilities");
+  float2* d_current = workspace.alloc<float2>(query_layout_items, "landmark t-SNE current");
+  float2* d_gains = workspace.alloc<float2>(query_layout_items, "landmark t-SNE gains");
+  float2* d_updates = workspace.alloc<float2>(query_layout_items, "landmark t-SNE updates");
+  if (d_reference_data == nullptr || d_query_data == nullptr || d_reference_layout == nullptr ||
+      d_probabilities == nullptr || d_current == nullptr || d_gains == nullptr || d_updates == nullptr) return 1;
+  if (check_cuda(cudaMemcpy(d_reference_data, reference_data, reference_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark t-SNE reference data H2D)") ||
+      check_cuda(cudaMemcpy(d_query_data, query_data, query_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark t-SNE query data H2D)") ||
+      check_cuda(cudaMemcpy(d_reference_layout, reference_layout, layout_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark t-SNE reference layout H2D)")) return 1;
+
+  constexpr int threads = 128;
+  const int blocks = (n_query + threads - 1) / threads;
+  landmark_affine_projection_kernel<<<blocks, threads>>>(
+    d_reference_data, d_query_data, d_reference_layout,
+    device_indices, device_distances, d_current,
+    n_reference, n_query, n_features, k, index_offset,
+    affine_neighbors, affine_ridge, max_extrapolation
+  );
+  landmark_tsne_probabilities_kernel<<<blocks, threads>>>(
+    device_distances, d_probabilities, n_query, k, perplexity
+  );
+  landmark_tsne_state_init_kernel<<<blocks, threads>>>(d_gains, d_updates, n_query);
+  if (check_cuda(cudaGetLastError(), "CUDA landmark t-SNE setup kernels")) return 1;
+
+  const int total_iter = n_iter + early_exaggeration_iter;
+  for (int iter = 0; iter < total_iter; ++iter) {
+    const bool early = iter < early_exaggeration_iter;
+    LandmarkTsneParams params{
+      n_reference,
+      n_query,
+      k,
+      n_negatives,
+      seed,
+      (n_reference <= exact_repulsion_threshold || n_negatives >= n_reference) ? 1 : 0,
+      learning_rate,
+      early ? early_exaggeration : exaggeration,
+      early ? initial_momentum : final_momentum,
+      max_grad_norm,
+      max_step_norm
+    };
+    landmark_tsne_epoch_kernel<<<blocks, threads>>>(
+      d_reference_layout, device_indices, d_probabilities,
+      d_current, d_gains, d_updates, params,
+      static_cast<unsigned int>(iter), index_offset
+    );
+  }
+  if (check_cuda(cudaGetLastError(), "CUDA landmark t-SNE transform kernels") ||
+      check_cuda(cudaMemcpy(out, d_current, query_layout_items * sizeof(float2), cudaMemcpyDeviceToHost),
+                 "cudaMemcpy(landmark t-SNE layout D2H)")) return 1;
+  return 0;
+}
+
+extern "C" int fastembedr_cuda_landmark_umap_from_device_knn(
+    const int* device_indices,
+    const float* device_distances,
+    int index_offset,
+    const float* reference_data,
+    const float* query_data,
+    const float* reference_layout,
+    const int* landmark_rows,
+    const int* query_rows,
+    int n_total,
+    int n_reference,
+    int n_query,
+    int n_features,
+    int k,
+    int n_epochs,
+    int negative_sample_rate,
+    float learning_rate,
+    float a,
+    float b,
+    float repulsion_strength,
+    unsigned int seed,
+    int affine_neighbors,
+    float affine_ridge,
+    float max_extrapolation,
+    float* out) {
+  embedding_last_error.clear();
+  if (device_indices == nullptr || device_distances == nullptr ||
+      reference_data == nullptr || query_data == nullptr || reference_layout == nullptr ||
+      landmark_rows == nullptr || query_rows == nullptr || out == nullptr) {
+    set_embedding_error("null CUDA landmark UMAP pointer");
+    return 1;
+  }
+  if (n_total < n_reference + n_query || n_reference < 1 || n_query < 1 ||
+      n_features < 1 || k < 1 || k > kCudaProjectionMaxK || n_epochs < 0) {
+    set_embedding_error("invalid CUDA landmark UMAP dimensions or parameters");
+    return 1;
+  }
+  affine_neighbors = std::max(3, std::min(affine_neighbors, std::min(k, kCudaAffineMaxNeighbors)));
+  const std::size_t reference_items = static_cast<std::size_t>(n_reference) * n_features;
+  const std::size_t query_items = static_cast<std::size_t>(n_query) * n_features;
+  const std::size_t reference_layout_items = static_cast<std::size_t>(n_reference) * 2u;
+  const std::size_t graph_items = static_cast<std::size_t>(n_query) * k;
+  const std::size_t required_bytes =
+    align_bytes(reference_items * sizeof(float)) +
+    align_bytes(query_items * sizeof(float)) +
+    align_bytes(reference_layout_items * sizeof(float)) +
+    align_bytes(static_cast<std::size_t>(n_reference) * sizeof(int)) +
+    align_bytes(static_cast<std::size_t>(n_query) * sizeof(int)) +
+    align_bytes(static_cast<std::size_t>(n_query) * sizeof(float2)) +
+    align_bytes(static_cast<std::size_t>(n_total) * 2u * sizeof(float)) +
+    2u * align_bytes(graph_items * sizeof(float)) +
+    align_bytes(sizeof(float)) + align_bytes(sizeof(unsigned int));
+  if (check_embedding_memory_available(required_bytes, "CUDA landmark UMAP workspace")) return 1;
+  CudaWorkspace workspace;
+  if (workspace.init(required_bytes, "landmark UMAP")) return 1;
+  float* d_reference_data = workspace.alloc<float>(reference_items, "landmark UMAP reference data");
+  float* d_query_data = workspace.alloc<float>(query_items, "landmark UMAP query data");
+  float* d_reference_layout = workspace.alloc<float>(reference_layout_items, "landmark UMAP reference layout");
+  int* d_landmark_rows = workspace.alloc<int>(n_reference, "landmark UMAP landmark rows");
+  int* d_query_rows = workspace.alloc<int>(n_query, "landmark UMAP query rows");
+  float2* d_query_layout = workspace.alloc<float2>(n_query, "landmark UMAP query layout");
+  float* d_layout = workspace.alloc<float>(static_cast<std::size_t>(n_total) * 2u, "landmark UMAP full layout");
+  float* d_weights = workspace.alloc<float>(graph_items, "landmark UMAP weights");
+  float* d_epochs_per_sample = workspace.alloc<float>(graph_items, "landmark UMAP epoch schedule");
+  float* d_distance_sum = workspace.alloc<float>(1u, "landmark UMAP distance sum");
+  unsigned int* d_distance_count = workspace.alloc<unsigned int>(1u, "landmark UMAP distance count");
+  if (d_reference_data == nullptr || d_query_data == nullptr || d_reference_layout == nullptr ||
+      d_landmark_rows == nullptr || d_query_rows == nullptr || d_query_layout == nullptr ||
+      d_layout == nullptr || d_weights == nullptr || d_epochs_per_sample == nullptr ||
+      d_distance_sum == nullptr || d_distance_count == nullptr) return 1;
+  if (check_cuda(cudaMemcpy(d_reference_data, reference_data, reference_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark UMAP reference data H2D)") ||
+      check_cuda(cudaMemcpy(d_query_data, query_data, query_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark UMAP query data H2D)") ||
+      check_cuda(cudaMemcpy(d_reference_layout, reference_layout, reference_layout_items * sizeof(float), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark UMAP reference layout H2D)") ||
+      check_cuda(cudaMemcpy(d_landmark_rows, landmark_rows, static_cast<std::size_t>(n_reference) * sizeof(int), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark UMAP landmark rows H2D)") ||
+      check_cuda(cudaMemcpy(d_query_rows, query_rows, static_cast<std::size_t>(n_query) * sizeof(int), cudaMemcpyHostToDevice),
+                 "cudaMemcpy(landmark UMAP query rows H2D)") ||
+      check_cuda(cudaMemset(d_layout, 0, static_cast<std::size_t>(n_total) * 2u * sizeof(float)),
+                 "cudaMemset(landmark UMAP layout)") ||
+      check_cuda(cudaMemset(d_distance_sum, 0, sizeof(float)),
+                 "cudaMemset(landmark UMAP distance sum)") ||
+      check_cuda(cudaMemset(d_distance_count, 0, sizeof(unsigned int)),
+                 "cudaMemset(landmark UMAP distance count)")) return 1;
+
+  constexpr int threads = 128;
+  const int query_blocks = (n_query + threads - 1) / threads;
+  landmark_affine_projection_kernel<<<query_blocks, threads>>>(
+    d_reference_data, d_query_data, d_reference_layout,
+    device_indices, device_distances, d_query_layout,
+    n_reference, n_query, n_features, k, index_offset,
+    affine_neighbors, affine_ridge, max_extrapolation
+  );
+  const int assemble_items = std::max(n_reference, n_query);
+  landmark_umap_assemble_kernel<<<(assemble_items + threads - 1) / threads, threads>>>(
+    d_reference_layout, d_query_layout, d_landmark_rows, d_query_rows,
+    n_reference, n_query, d_layout
+  );
+  const int graph_count = n_query * k;
+  landmark_distance_sum_kernel<<<(graph_count + threads - 1) / threads, threads>>>(
+    device_distances, graph_count, d_distance_sum, d_distance_count
+  );
+  if (check_cuda(cudaGetLastError(), "CUDA landmark UMAP setup kernels")) return 1;
+  float distance_sum = 0.0f;
+  unsigned int distance_count = 0u;
+  if (check_cuda(cudaMemcpy(&distance_sum, d_distance_sum, sizeof(float), cudaMemcpyDeviceToHost),
+                 "cudaMemcpy(landmark UMAP distance sum D2H)") ||
+      check_cuda(cudaMemcpy(&distance_count, d_distance_count, sizeof(unsigned int), cudaMemcpyDeviceToHost),
+                 "cudaMemcpy(landmark UMAP distance count D2H)")) return 1;
+  const float global_mean = distance_count > 0u ? distance_sum / distance_count : 1.0f;
+  landmark_umap_prepare_kernel<<<query_blocks, threads>>>(
+    device_distances, d_weights, d_epochs_per_sample, n_query, k, global_mean
+  );
+  EmbedParams params{
+    n_total,
+    k,
+    n_epochs,
+    negative_sample_rate,
+    0,
+    seed,
+    learning_rate,
+    a,
+    b,
+    1.0f,
+    repulsion_strength
+  };
+  for (int epoch = 0; epoch < n_epochs; ++epoch) {
+    landmark_umap_refine_epoch_kernel<<<query_blocks, threads>>>(
+      d_layout, device_indices, d_weights, d_epochs_per_sample,
+      d_landmark_rows, d_query_rows, n_reference, n_query, k,
+      index_offset, params, static_cast<unsigned int>(epoch)
+    );
+  }
+  if (check_cuda(cudaGetLastError(), "CUDA landmark UMAP refinement kernels") ||
+      check_cuda(cudaMemcpy(out, d_layout, static_cast<std::size_t>(n_total) * 2u * sizeof(float), cudaMemcpyDeviceToHost),
+                 "cudaMemcpy(landmark UMAP layout D2H)")) return 1;
+  return 0;
+}
 
 extern "C" const char* fastembedr_cuda_embedding_last_error() {
   return embedding_last_error.c_str();

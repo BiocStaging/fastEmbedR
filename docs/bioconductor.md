@@ -23,9 +23,8 @@ submission of `fastEmbedR`.
 | R package | `jsonlite` | Optional benchmark and reproducibility metadata serialization. | suggested |
 | R package | `knitr`, `rmarkdown` | Vignette and documentation rendering. | suggested |
 | R package | `testthat` | Unit tests. | suggested |
-| R package | `igraph`, `leidenbase` | Optional graph and clustering examples. | suggested |
+| R package | `igraph` | Optional graph-clustering validation and examples. | suggested |
 | R package | `Rtsne`, `uwot`, `umap` | Optional reference benchmarks only. | suggested |
-| Companion package | `faissR` | FAISS/cuVS nearest-neighbor search for matrix-input `opentsne()` and `umap()`. | optional enhancement |
 | Companion package | `fastPLS >= 0.99.3` | Preferred optional randomized-SVD PCA provider for CPU; Metal and compiled CUDA initialization use native fastEmbedR backends. | optional enhancement |
 | System library | C++17 compiler | Native CPU code and numerical helper compilation. | yes |
 | System library | Apple Metal framework | Native Metal KNN and embedding backends on macOS. | optional |
@@ -36,26 +35,23 @@ submission of `fastEmbedR`.
 Faiss-mlx-informed Metal files retain their permissive licenses under
 `inst/LICENSES/`.
 
-## Why faissR Is Not A Hard Import
+## Native KNN Boundary
 
-`faissR` owns its public reusable KNN API. fastEmbedR owns the internal
-CPU/Metal KNN and direct FAISS/cuVS CUDA KNN used by one-call embeddings. The following remain usable
-without `faissR`:
+fastEmbedR owns the internal CPU/Metal KNN and direct FAISS/cuVS CUDA KNN used
+by one-call embeddings. The following are available without another KNN R
+package:
 
 - `opentsne_knn()` works from supplied neighbor indices and distances;
 - `umap_knn()` works from supplied neighbor indices and distances;
 - `prepare_opentsne_knn()` and `prepare_umap_knn()` can prepare reusable
   native embedding inputs;
-- `evaluate_embedding()` and plotting helpers do not require `faissR`.
+- `knn_graph()` and `graph_cluster()` provide native graph construction and
+  community detection;
+- `evaluate_embedding()` and plotting helpers use package-native routines.
 
-CPU, Metal, and a correctly compiled CUDA one-call build work without faissR.
+CPU, Metal, and a correctly compiled CUDA one-call build are self-contained at
+the R package level.
 CUDA requests fail explicitly when cuVS is not linked.
-
-For Bioconductor submission, this keeps the core package buildable with
-standard R/Bioconductor dependencies while still documenting the recommended
-high-performance companion stack. If `faissR` is later submitted to CRAN or
-Bioconductor, it can be promoted from `Enhances` to `Suggests` or `Imports`
-depending on the desired policy.
 
 ## Backend Policy
 

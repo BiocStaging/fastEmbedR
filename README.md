@@ -20,15 +20,21 @@ nearest-neighbour graphs. It focuses on:
 - float32 input/output support with float32 native optimizer buffers;
 - explicit backend reporting, with no silent CPU fallback labelled as GPU;
 - native CPU HNSW and Apple Metal exact/IVF-Flat KNN for one-call embeddings;
-- optional GPU-resident CUDA KNN through direct FAISS GPU and RAPIDS cuVS APIs.
+- optional GPU-resident CUDA KNN through direct FAISS GPU and RAPIDS cuVS APIs;
+- compact KNN graph construction and native Louvain, Leiden, and Walktrap
+  community detection.
 
 The intended workflow is:
 
 1. call `opentsne()` or `umap()` and let fastEmbedR select its native KNN path,
-   or compute a reusable graph with `faissR::nn()`;
-2. reuse a supplied KNN object in `fastEmbedR::opentsne_knn()` or
+   or call `precompute_knn()` explicitly with a CPU, Metal, or CUDA backend;
+2. reuse that KNN object in `fastEmbedR::opentsne_knn()` or
    `fastEmbedR::umap_knn()`;
 3. evaluate or plot the embedding.
+
+An embedding or KNN result can also be passed to `knn_graph()`, followed by
+`graph_cluster()`. Community detection is package-native CPU code; no external
+clustering runtime is required.
 
 For the one-call functions `opentsne()` and `umap()`, the embedding backend is
 deliberately limited to `backend = "cpu"`, `"metal"`, or `"cuda"`. Internal
@@ -36,8 +42,8 @@ CPU one-call embeddings use the package-native float32 HNSW path. Metal uses
 native exact search for small inputs and recall-tuned IVF-Flat for larger
 inputs. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct
 cuVS IVF-Flat above that threshold, then passes package-owned device pointers
-into UMAP or openTSNE. It does not call the faissR R API. No unavailable GPU
-backend is silently relabelled as CPU.
+into UMAP or openTSNE. It does not call another R package for KNN. No
+unavailable GPU backend is silently relabelled as CPU.
 
 ## Quick Start
 
@@ -47,24 +53,31 @@ library(fastEmbedR)
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-knn <- faissR::nn(x, k = 15, backend = "auto", n_threads = 4)
-
-y_tsne <- fastEmbedR::opentsne_knn(
-  knn,
-  init_data = x,
+y_tsne <- fastEmbedR::opentsne(
+  x,
+  perplexity = 10,
   backend = "cpu",
+  n_threads = 4,
   seed = 1
 )
 
-y_umap <- fastEmbedR::umap_knn(
-  knn,
+y_umap <- fastEmbedR::umap(
+  x,
+  n_neighbors = 15,
   backend = "cpu",
+  n_threads = 4,
   graph_mode = "fuzzy",
   seed = 1
 )
 
 plot(y_tsne, pch = 21, bg = labels)
 plot(y_umap, pch = 21, bg = labels)
+
+# Precompute once and reuse the identical neighbors.
+knn <- fastEmbedR::precompute_knn(
+  x, k = 15, backend = "cpu", n_threads = 4
+)
+y_from_knn <- fastEmbedR::umap_knn(knn, backend = "cpu", seed = 1)
 ```
 
 When a one-call function receives a `float::float32` matrix, its returned
@@ -76,7 +89,7 @@ and quality metrics without changing the stored layout.
 
 | Function | Purpose |
 | --- | --- |
-| `faissR::nn()` | Optional reusable FAISS/cuVS neighbour search supplied by the companion package. |
+| `precompute_knn()` | Native non-self KNN search on CPU, Metal, or CUDA, with backend-specific algorithm selection kept internal. |
 | `opentsne_knn()` | Native openTSNE-style t-SNE from a supplied KNN object. |
 | `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
@@ -84,7 +97,8 @@ and quality metrics without changing the stored layout.
 | `pca()` | Backend-native truncated PCA; set `opentsne_init = TRUE` to return a ready-to-use openTSNE initialization. |
 | `landmark_tsne()` / `landmark_umap()` | Landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
-| `faissR::backend_info()` | Report FAISS/cuVS neighbour-search availability. |
+| `knn_graph()` | Compact graph from data, an embedding, or supplied neighbours. |
+| `graph_cluster()` | Native Louvain, Leiden, or exact Walktrap communities. |
 
 ## Installation
 
@@ -95,12 +109,8 @@ install.packages("remotes")
 remotes::install_github("tkcaccia/fastEmbedR")
 ```
 
-Install `faissR` separately only when its reusable public KNN API is needed.
-
 See [Installation](docs/installation.md) for `fastEmbedR` CPU, Metal, and CUDA
-embedding builds, including direct FAISS GPU and RAPIDS cuVS linkage for CUDA KNN. The
-companion [`faissR`](https://github.com/tkcaccia/faissR) project documents its
-broader reusable neighbour-search API.
+embedding builds, including direct FAISS GPU and RAPIDS cuVS linkage for CUDA KNN.
 See [Bioconductor](docs/bioconductor.md) for the dependency split used for
 submission: native CPU/Metal code in `fastEmbedR`, optional direct FAISS/cuVS CUDA
 KNN, and reference packages only in `Suggests`.

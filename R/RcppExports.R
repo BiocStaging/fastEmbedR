@@ -69,6 +69,14 @@ landmark_project_interpolate_knn_confidence_cuda_cpp <- function(landmark_data, 
     .Call(`_fastEmbedR_landmark_project_interpolate_knn_confidence_cuda_cpp`, landmark_data, query_data, landmark_layout, landmark_indices, k)
 }
 
+landmark_tsne_transform_cuda_gpu_cpp <- function(gpu_knn, reference_data, query_data, reference_layout, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, seed, affine_neighbors, affine_ridge, max_extrapolation) {
+    .Call(`_fastEmbedR_landmark_tsne_transform_cuda_gpu_cpp`, gpu_knn, reference_data, query_data, reference_layout, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, seed, affine_neighbors, affine_ridge, max_extrapolation)
+}
+
+landmark_umap_project_refine_cuda_gpu_cpp <- function(gpu_knn, reference_data, query_data, reference_layout, landmark_rows, query_rows, n_total, n_epochs, min_dist, negative_sample_rate, learning_rate, repulsion_strength, seed, affine_neighbors, affine_ridge, max_extrapolation) {
+    .Call(`_fastEmbedR_landmark_umap_project_refine_cuda_gpu_cpp`, gpu_knn, reference_data, query_data, reference_layout, landmark_rows, query_rows, n_total, n_epochs, min_dist, negative_sample_rate, learning_rate, repulsion_strength, seed, affine_neighbors, affine_ridge, max_extrapolation)
+}
+
 knn_structure_score_cuda_cpp <- function(layout, indices, keep, preserve_k, labels, n_label_levels) {
     .Call(`_fastEmbedR_knn_structure_score_cuda_cpp`, layout, indices, keep, preserve_k, labels, n_label_levels)
 }
@@ -161,6 +169,18 @@ standardize_cpu_cpp <- function(data) {
     .Call(`_fastEmbedR_standardize_cpu_cpp`, data)
 }
 
+standardize_float32_cpp <- function(data, n_threads = 0L) {
+    .Call(`_fastEmbedR_standardize_float32_cpp`, data, n_threads)
+}
+
+split_float32_rows_cpp <- function(data, landmark_rows, query_rows, n_threads = 0L) {
+    .Call(`_fastEmbedR_split_float32_rows_cpp`, data, landmark_rows, query_rows, n_threads)
+}
+
+landmark_projection_float32_cpp <- function(data, directions, n_direct = 4L, n_threads = 0L) {
+    .Call(`_fastEmbedR_landmark_projection_float32_cpp`, data, directions, n_direct, n_threads)
+}
+
 strip_self_neighbors_cpp <- function(indices, distances) {
     .Call(`_fastEmbedR_strip_self_neighbors_cpp`, indices, distances)
 }
@@ -221,8 +241,8 @@ project_embedding_affine_cpp <- function(reference_data, query_data, reference_l
     .Call(`_fastEmbedR_project_embedding_affine_cpp`, reference_data, query_data, reference_layout, projection_indices, projection_distances, max_neighbors, ridge, max_extrapolation)
 }
 
-project_embedding_affine_parallel_cpp <- function(reference_data, query_data, reference_layout, projection_indices, projection_distances, max_neighbors = 12L, ridge = 1e-3, max_extrapolation = 2.5, n_threads = 1L) {
-    .Call(`_fastEmbedR_project_embedding_affine_parallel_cpp`, reference_data, query_data, reference_layout, projection_indices, projection_distances, max_neighbors, ridge, max_extrapolation, n_threads)
+project_embedding_affine_parallel_cpp <- function(reference_data_sexp, query_data_sexp, reference_layout_sexp, projection_indices, projection_distances_sexp, max_neighbors = 12L, ridge = 1e-3, max_extrapolation = 2.5, n_threads = 1L) {
+    .Call(`_fastEmbedR_project_embedding_affine_parallel_cpp`, reference_data_sexp, query_data_sexp, reference_layout_sexp, projection_indices, projection_distances_sexp, max_neighbors, ridge, max_extrapolation, n_threads)
 }
 
 knn_connectivity_range_cpp <- function(indices, col_start, n_cols) {
@@ -301,8 +321,24 @@ umap_auto_parameters_cpp <- function(distances, n_neighbors, backend) {
     .Call(`_fastEmbedR_umap_auto_parameters_cpp`, distances, n_neighbors, backend)
 }
 
+fastembedr_graph_from_knn_cpp <- function(indices, distances, weight_type = "snn", mutual = FALSE, prune = 0.0, n_threads = 1L) {
+    .Call(`_fastEmbedR_fastembedr_graph_from_knn_cpp`, indices, distances, weight_type, mutual, prune, n_threads)
+}
+
+fastembedr_graph_cluster_cpp <- function(from, to, weight, n_vertices, method = "leiden", resolution = 1.0, n_iterations = 10L, n_runs = 1L, seed = 1) {
+    .Call(`_fastEmbedR_fastembedr_graph_cluster_cpp`, from, to, weight, n_vertices, method, resolution, n_iterations, n_runs, seed)
+}
+
+fastembedr_graph_modularity_cpp <- function(from, to, weight, n_vertices, membership, resolution = 1.0) {
+    .Call(`_fastEmbedR_fastembedr_graph_modularity_cpp`, from, to, weight, n_vertices, membership, resolution)
+}
+
 native_hnsw_knn_cpp <- function(data, k, n_threads = 1L, metric = "euclidean", target_recall = 0.99) {
     .Call(`_fastEmbedR_native_hnsw_knn_cpp`, data, k, n_threads, metric, target_recall)
+}
+
+native_hnsw_query_cpp <- function(data, query, k, n_threads = 1L, metric = "euclidean", target_recall = 0.99) {
+    .Call(`_fastEmbedR_native_hnsw_query_cpp`, data, query, k, n_threads, metric, target_recall)
 }
 
 native_metal_knn_available_cpp <- function() {
@@ -328,6 +364,7 @@ native_cuda_knn_cpp <- function(data, k, method = "auto", metric = "euclidean", 
 native_cuda_knn_to_host_cpp <- function(knn) {
     .Call(`_fastEmbedR_native_cuda_knn_to_host_cpp`, knn)
 }
+
 tsne_auto_parameters_cpp <- function(n, k, perplexity, perplexity_missing, backend, negative_gradient_method) {
     .Call(`_fastEmbedR_tsne_auto_parameters_cpp`, n, k, perplexity, perplexity_missing, backend, negative_gradient_method)
 }
@@ -342,4 +379,8 @@ knn_tsne_opentsne_float_cpp <- function(indices, distances, y_init, init, n_comp
 
 transform_tsne_cpp <- function(reference_layout, indices, distances, y_init, init, initialization, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, n_threads, seed, verbose) {
     .Call(`_fastEmbedR_transform_tsne_cpp`, reference_layout, indices, distances, y_init, init, initialization, perplexity, n_iter, early_exaggeration_iter, learning_rate, early_exaggeration, exaggeration, initial_momentum, final_momentum, max_grad_norm, max_step_norm, n_negatives, exact_repulsion_threshold, n_threads, seed, verbose)
+}
+
+fastembedr_walktrap_cpp <- function(from, to, weight, n_vertices, steps = 4L) {
+    .Call(`_fastEmbedR_fastembedr_walktrap_cpp`, from, to, weight, n_vertices, steps)
 }

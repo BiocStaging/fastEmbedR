@@ -109,6 +109,22 @@ std::pair<int, int> metal_matrix_dims(SEXP values, const char* name) {
   Rcpp::stop("%s must be a numeric matrix or float::float32 matrix", name);
 }
 
+std::vector<float> metal_copy_float_matrix_row_major(SEXP values,
+                                                      const char* name) {
+  const std::pair<int, int> dims = metal_matrix_dims(values, name);
+  const int nrow = dims.first;
+  const int ncol = dims.second;
+  std::vector<float> column_major = metal_copy_float_vector(values, name);
+  std::vector<float> row_major(static_cast<std::size_t>(nrow) * ncol);
+  for (int column = 0; column < ncol; ++column) {
+    for (int row = 0; row < nrow; ++row) {
+      row_major[static_cast<std::size_t>(row) * ncol + column] =
+        column_major[static_cast<std::size_t>(column) * nrow + row];
+    }
+  }
+  return row_major;
+}
+
 struct EmbedParams {
   std::uint32_t n;
   std::uint32_t k;
@@ -3091,6 +3107,8 @@ kernel void project_embedding_affine_rows(
   float scratch[FASTEMBEDR_METAL_PROJECTION_MAX_K];
   float weights[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS];
   int refs[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS];
+  float centered[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS];
+  float row_norm[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS];
   float y_center[2];
   float gram[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS * FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS];
   float rhs[FASTEMBEDR_METAL_AFFINE_MAX_NEIGHBORS * 2];
@@ -3160,25 +3178,9 @@ kernel void project_embedding_affine_rows(
   }
 
   float layout_radius_sq = 0.0f;
-  float trace = 0.0f;
   for (uint a = 0u; a < m; ++a) {
     int ref_a = refs[a];
     float sqrt_wa = sqrt(max(weights[a], 0.0f));
-    float row_norm = 0.0f;
-    for (uint f = 0u; f < n_features; ++f) {
-      float x_center_f = 0.0f;
-      for (uint j = 0u; j < m; ++j) {
-        int ref_j = refs[j];
-        if (ref_j >= 0 && uint(ref_j) < n_reference) {
-          x_center_f += weights[j] * reference_data[uint(ref_j) + f * n_reference];
-        }
-      }
-      float xc = (ref_a >= 0 && uint(ref_a) < n_reference) ?
-        reference_data[uint(ref_a) + f * n_reference] - x_center_f :
-        0.0f;
-      row_norm += xc * xc;
-    }
-    trace += weights[a] * row_norm;
     float yc0 = (ref_a >= 0 && uint(ref_a) < n_reference) ?
       reference_layout[uint(ref_a)] - y_center[0] :
       0.0f;
@@ -3188,32 +3190,44 @@ kernel void project_embedding_affine_rows(
     rhs[a * 2u] = sqrt_wa * yc0;
     rhs[a * 2u + 1u] = sqrt_wa * yc1;
     layout_radius_sq = max(layout_radius_sq, yc0 * yc0 + yc1 * yc1);
+    row_norm[a] = 0.0f;
+    q[a] = 0.0f;
   }
 
-  for (uint a = 0u; a < m; ++a) {
-    int ref_a = refs[a];
-    float sqrt_wa = sqrt(max(weights[a], 0.0f));
-    for (uint b = 0u; b <= a; ++b) {
-      int ref_b = refs[b];
-      float sqrt_wb = sqrt(max(weights[b], 0.0f));
-      float dot_value = 0.0f;
-      for (uint f = 0u; f < n_features; ++f) {
-        float x_center_f = 0.0f;
-        for (uint j = 0u; j < m; ++j) {
-          int ref_j = refs[j];
-          if (ref_j >= 0 && uint(ref_j) < n_reference) {
-            x_center_f += weights[j] * reference_data[uint(ref_j) + f * n_reference];
-          }
-        }
-        float xa = (ref_a >= 0 && uint(ref_a) < n_reference) ?
-          reference_data[uint(ref_a) + f * n_reference] - x_center_f :
-          0.0f;
-        float xb = (ref_b >= 0 && uint(ref_b) < n_reference) ?
-          reference_data[uint(ref_b) + f * n_reference] - x_center_f :
-          0.0f;
-        dot_value += xa * xb;
+  for (uint a = 0u; a < m * m; ++a) gram[a] = 0.0f;
+  for (uint f = 0u; f < n_features; ++f) {
+    float x_center_f = 0.0f;
+    for (uint j = 0u; j < m; ++j) {
+      int ref_j = refs[j];
+      if (ref_j >= 0 && uint(ref_j) < n_reference) {
+        x_center_f += weights[j] * reference_data[uint(ref_j) + f * n_reference];
       }
-      float value = sqrt_wa * sqrt_wb * dot_value;
+    }
+    float query_centered = query_data[row + f * n_query] - x_center_f;
+    for (uint a = 0u; a < m; ++a) {
+      int ref_a = refs[a];
+      float value = (ref_a >= 0 && uint(ref_a) < n_reference) ?
+        reference_data[uint(ref_a) + f * n_reference] - x_center_f :
+        0.0f;
+      centered[a] = value;
+      row_norm[a] += value * value;
+      q[a] += query_centered * value;
+    }
+    for (uint a = 0u; a < m; ++a) {
+      for (uint b = 0u; b <= a; ++b) {
+        gram[a * m + b] += centered[a] * centered[b];
+      }
+    }
+  }
+
+  float trace = 0.0f;
+  for (uint a = 0u; a < m; ++a) {
+    float sqrt_wa = sqrt(max(weights[a], 0.0f));
+    trace += weights[a] * row_norm[a];
+    q[a] *= sqrt_wa;
+    for (uint b = 0u; b <= a; ++b) {
+      float sqrt_wb = sqrt(max(weights[b], 0.0f));
+      float value = sqrt_wa * sqrt_wb * gram[a * m + b];
       gram[a * m + b] = value;
       gram[b * m + a] = value;
     }
@@ -3261,27 +3275,6 @@ kernel void project_embedding_affine_rows(
       for (uint kk = i + 1u; kk < m; ++kk) s -= gram[kk * m + i] * rhs[kk * 2u + c];
       rhs[i * 2u + c] = s / gram[i * m + i];
     }
-  }
-
-  for (uint a = 0u; a < m; ++a) {
-    int ref_a = refs[a];
-    float sqrt_wa = sqrt(max(weights[a], 0.0f));
-    float dot_value = 0.0f;
-    for (uint f = 0u; f < n_features; ++f) {
-      float x_center_f = 0.0f;
-      for (uint j = 0u; j < m; ++j) {
-        int ref_j = refs[j];
-        if (ref_j >= 0 && uint(ref_j) < n_reference) {
-          x_center_f += weights[j] * reference_data[uint(ref_j) + f * n_reference];
-        }
-      }
-      float qa = query_data[row + f * n_query] - x_center_f;
-      float xa = (ref_a >= 0 && uint(ref_a) < n_reference) ?
-        reference_data[uint(ref_a) + f * n_reference] - x_center_f :
-        0.0f;
-      dot_value += qa * xa;
-    }
-    q[a] = sqrt_wa * dot_value;
   }
 
   float displacement0 = 0.0f;
@@ -6822,28 +6815,36 @@ NumericMatrix project_embedding_knn_metal_impl(NumericMatrix reference_layout,
   }
 }
 
-List project_embedding_affine_metal_impl(NumericMatrix reference_data,
-                                         NumericMatrix query_data,
-                                         NumericMatrix reference_layout,
+List project_embedding_affine_metal_impl(SEXP reference_data,
+                                         SEXP query_data,
+                                         SEXP reference_layout,
                                          IntegerMatrix projection_indices,
-                                         NumericMatrix projection_distances,
+                                         SEXP projection_distances,
                                          int max_neighbors,
                                          double ridge,
                                          double max_extrapolation) {
-  const int n_reference = reference_layout.nrow();
-  const int n_components = reference_layout.ncol();
+  const std::pair<int, int> reference_data_dims =
+    metal_matrix_dims(reference_data, "reference_data");
+  const std::pair<int, int> query_data_dims =
+    metal_matrix_dims(query_data, "query_data");
+  const std::pair<int, int> reference_layout_dims =
+    metal_matrix_dims(reference_layout, "reference_layout");
+  const std::pair<int, int> distance_dims =
+    metal_matrix_dims(projection_distances, "projection_distances");
+  const int n_reference = reference_layout_dims.first;
+  const int n_components = reference_layout_dims.second;
   const int n_query = projection_indices.nrow();
   const int projection_k = projection_indices.ncol();
-  const int n_features = reference_data.ncol();
+  const int n_features = reference_data_dims.second;
 
   if (n_reference < 1) Rcpp::stop("reference_layout must have at least one row");
-  if (reference_data.nrow() != n_reference) {
+  if (reference_data_dims.first != n_reference) {
     Rcpp::stop("reference_data and reference_layout must have the same number of rows");
   }
-  if (query_data.nrow() != n_query) {
+  if (query_data_dims.first != n_query) {
     Rcpp::stop("query_data and projection_indices must have the same number of rows");
   }
-  if (query_data.ncol() != n_features) {
+  if (query_data_dims.second != n_features) {
     Rcpp::stop("reference_data and query_data must have the same number of columns");
   }
   if (n_components != 2) {
@@ -6854,8 +6855,7 @@ List project_embedding_affine_metal_impl(NumericMatrix reference_data,
   if (projection_k > kMaxMetalProjectionNeighbors) {
     Rcpp::stop("Metal affine landmark projection supports at most %d projection neighbors.", kMaxMetalProjectionNeighbors);
   }
-  if (projection_distances.nrow() != n_query ||
-      projection_distances.ncol() != projection_k) {
+  if (distance_dims.first != n_query || distance_dims.second != projection_k) {
     Rcpp::stop("projection_indices and projection_distances must have the same dimensions");
   }
   if (max_neighbors < 3) max_neighbors = 3;
@@ -6865,10 +6865,15 @@ List project_embedding_affine_metal_impl(NumericMatrix reference_data,
   if (!std::isfinite(max_extrapolation) || max_extrapolation <= 0.0) {
     max_extrapolation = 2.5;
   }
+  std::vector<float> distance_values = metal_copy_float_vector(
+    projection_distances, "projection_distances"
+  );
   for (int i = 0; i < n_query; ++i) {
     for (int j = 0; j < projection_k; ++j) {
       const int idx = projection_indices(i, j);
-      const double d = projection_distances(i, j);
+      const float d = distance_values[
+        static_cast<std::size_t>(j) * n_query + i
+      ];
       if (idx < 1 || idx > n_reference) Rcpp::stop("projection indices out of range");
       if (!std::isfinite(d) || d < 0.0) {
         Rcpp::stop("projection distances must be finite and non-negative");
@@ -6878,10 +6883,15 @@ List project_embedding_affine_metal_impl(NumericMatrix reference_data,
 
   @autoreleasepool {
     MetalEmbeddingState& state = metal_embedding_state();
-    std::vector<float> reference_values = numeric_matrix_to_float(reference_data);
-    std::vector<float> query_values = numeric_matrix_to_float(query_data);
-    std::vector<float> layout_values = numeric_matrix_to_float(reference_layout);
-    std::vector<float> distance_values = numeric_matrix_to_float(projection_distances);
+    std::vector<float> reference_values = metal_copy_float_vector(
+      reference_data, "reference_data"
+    );
+    std::vector<float> query_values = metal_copy_float_vector(
+      query_data, "query_data"
+    );
+    std::vector<float> layout_values = metal_copy_float_vector(
+      reference_layout, "reference_layout"
+    );
     std::vector<float> out(static_cast<std::size_t>(n_query) * 2u, 0.0f);
     std::vector<float> confidence(static_cast<std::size_t>(n_query), 0.0f);
     std::vector<std::int32_t> used(static_cast<std::size_t>(n_query), 0);
@@ -7081,22 +7091,28 @@ NumericMatrix interpolate_landmark_layout_metal_impl(NumericMatrix landmark_layo
   }
 }
 
-NumericMatrix landmark_project_interpolate_metal_impl(NumericMatrix landmark_data,
-                                                      NumericMatrix query_data,
-                                                      NumericMatrix landmark_layout,
+NumericMatrix landmark_project_interpolate_metal_impl(SEXP landmark_data,
+                                                      SEXP query_data,
+                                                      SEXP landmark_layout,
                                                       IntegerVector landmark_indices,
                                                       int k) {
-  const int n_landmarks = landmark_data.nrow();
-  const int n = query_data.nrow();
-  const int n_features = landmark_data.ncol();
-  const int n_components = landmark_layout.ncol();
+  const std::pair<int, int> landmark_dims =
+    metal_matrix_dims(landmark_data, "landmark_data");
+  const std::pair<int, int> query_dims =
+    metal_matrix_dims(query_data, "query_data");
+  const std::pair<int, int> layout_dims =
+    metal_matrix_dims(landmark_layout, "landmark_layout");
+  const int n_landmarks = landmark_dims.first;
+  const int n = query_dims.first;
+  const int n_features = landmark_dims.second;
+  const int n_components = layout_dims.second;
   if (n_landmarks < 1) Rcpp::stop("landmark_data must have at least one row");
   if (n < 1) Rcpp::stop("query_data must have at least one row");
   if (n_features < 1) Rcpp::stop("landmark_data must have at least one column");
-  if (query_data.ncol() != n_features) {
+  if (query_dims.second != n_features) {
     Rcpp::stop("landmark_data and query_data must have the same number of columns");
   }
-  if (landmark_layout.nrow() != n_landmarks) {
+  if (layout_dims.first != n_landmarks) {
     Rcpp::stop("landmark_layout rows must match landmark_data rows");
   }
   if (n_components < 1) Rcpp::stop("landmark_layout must have at least one column");
@@ -7116,9 +7132,15 @@ NumericMatrix landmark_project_interpolate_metal_impl(NumericMatrix landmark_dat
 
   @autoreleasepool {
     MetalEmbeddingState& state = metal_embedding_state();
-    std::vector<float> landmark_values = numeric_matrix_to_row_major_float(landmark_data);
-    std::vector<float> query_values = numeric_matrix_to_row_major_float(query_data);
-    std::vector<float> layout_values = numeric_matrix_to_float(landmark_layout);
+    std::vector<float> landmark_values = metal_copy_float_matrix_row_major(
+      landmark_data, "landmark_data"
+    );
+    std::vector<float> query_values = metal_copy_float_matrix_row_major(
+      query_data, "query_data"
+    );
+    std::vector<float> layout_values = metal_copy_float_vector(
+      landmark_layout, "landmark_layout"
+    );
     std::vector<float> out(static_cast<std::size_t>(n) * n_components, 0.0f);
 
     id<MTLBuffer> landmark_data_buffer = [state.device newBufferWithBytes:landmark_values.data()
@@ -7183,22 +7205,28 @@ NumericMatrix landmark_project_interpolate_metal_impl(NumericMatrix landmark_dat
   }
 }
 
-List landmark_project_interpolate_knn_confidence_metal_impl(NumericMatrix landmark_data,
-                                                            NumericMatrix query_data,
-                                                            NumericMatrix landmark_layout,
+List landmark_project_interpolate_knn_confidence_metal_impl(SEXP landmark_data,
+                                                            SEXP query_data,
+                                                            SEXP landmark_layout,
                                                             IntegerVector landmark_indices,
                                                             int k) {
-  const int n_landmarks = landmark_data.nrow();
-  const int n = query_data.nrow();
-  const int n_features = landmark_data.ncol();
-  const int n_components = landmark_layout.ncol();
+  const std::pair<int, int> landmark_dims =
+    metal_matrix_dims(landmark_data, "landmark_data");
+  const std::pair<int, int> query_dims =
+    metal_matrix_dims(query_data, "query_data");
+  const std::pair<int, int> layout_dims =
+    metal_matrix_dims(landmark_layout, "landmark_layout");
+  const int n_landmarks = landmark_dims.first;
+  const int n = query_dims.first;
+  const int n_features = landmark_dims.second;
+  const int n_components = layout_dims.second;
   if (n_landmarks < 1) Rcpp::stop("landmark_data must have at least one row");
   if (n < 1) Rcpp::stop("query_data must have at least one row");
   if (n_features < 1) Rcpp::stop("landmark_data must have at least one column");
-  if (query_data.ncol() != n_features) {
+  if (query_dims.second != n_features) {
     Rcpp::stop("landmark_data and query_data must have the same number of columns");
   }
-  if (landmark_layout.nrow() != n_landmarks) {
+  if (layout_dims.first != n_landmarks) {
     Rcpp::stop("landmark_layout rows must match landmark_data rows");
   }
   if (n_components < 1) Rcpp::stop("landmark_layout must have at least one column");
@@ -7218,9 +7246,15 @@ List landmark_project_interpolate_knn_confidence_metal_impl(NumericMatrix landma
 
   @autoreleasepool {
     MetalEmbeddingState& state = metal_embedding_state();
-    std::vector<float> landmark_values = numeric_matrix_to_row_major_float(landmark_data);
-    std::vector<float> query_values = numeric_matrix_to_row_major_float(query_data);
-    std::vector<float> layout_values = numeric_matrix_to_float(landmark_layout);
+    std::vector<float> landmark_values = metal_copy_float_matrix_row_major(
+      landmark_data, "landmark_data"
+    );
+    std::vector<float> query_values = metal_copy_float_matrix_row_major(
+      query_data, "query_data"
+    );
+    std::vector<float> layout_values = metal_copy_float_vector(
+      landmark_layout, "landmark_layout"
+    );
     std::vector<float> out(static_cast<std::size_t>(n) * n_components, 0.0f);
     std::vector<int> projection_indices(static_cast<std::size_t>(n) * k, 1);
     std::vector<float> projection_distances(static_cast<std::size_t>(n) * k, 0.0f);
@@ -7787,7 +7821,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector offsets,
 }
 
 NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
-                                              NumericMatrix distances,
+                                              SEXP distances,
                                               IntegerVector row_ids,
                                               NumericMatrix init_embedding,
                                               int n_epochs,
@@ -7796,7 +7830,10 @@ NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
                                               double learning_rate,
                                               double repulsion_strength,
                                               int seed) {
-  if (indices.nrow() != distances.nrow() || indices.ncol() != distances.ncol()) {
+  const std::pair<int, int> distance_dims = metal_matrix_dims(
+    distances, "projection distances"
+  );
+  if (indices.nrow() != distance_dims.first || indices.ncol() != distance_dims.second) {
     Rcpp::stop("indices and distances must have the same dimensions");
   }
   if (row_ids.size() != indices.nrow()) {
@@ -7842,6 +7879,9 @@ NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
   const int index_offset = (min_idx >= 1 && max_idx <= n) ? 1 : 0;
 
   std::vector<std::int32_t> neighbors(static_cast<std::size_t>(m) * static_cast<std::size_t>(k));
+  std::vector<float> column_major_distances = metal_copy_float_vector(
+    distances, "projection distances"
+  );
   std::vector<float> distance_values(neighbors.size(), std::numeric_limits<float>::infinity());
   long double distance_sum = 0.0L;
   std::size_t distance_count = 0u;
@@ -7852,7 +7892,9 @@ NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix indices,
         static_cast<std::size_t>(j);
       const int nb = indices(i, j) - index_offset;
       neighbors[pos] = (nb >= 0 && nb < n) ? static_cast<std::int32_t>(nb) : -1;
-      const double d = distances(i, j);
+      const float d = column_major_distances[
+        static_cast<std::size_t>(j) * m + i
+      ];
       if (std::isfinite(d)) {
         distance_values[pos] = static_cast<float>(d);
         if (d >= 0.0) {

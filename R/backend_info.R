@@ -63,7 +63,7 @@ resolve_native_gpu_backend <- function(need_knn = FALSE,
   stop(
     "No native GPU backend is available for ",
     paste(need, collapse = " and "),
-    ". Use `faissR::backend_info()` to inspect available KNN backends.",
+    ". Rebuild fastEmbedR with the requested native backend enabled.",
     call. = FALSE
   )
 }
@@ -75,7 +75,7 @@ available_native_gpu_backend <- function(need_knn = FALSE,
     (!isTRUE(need_embedding) || backend_flag(embedding_cuda_available_cpp))
   if (cuda_ok) return("cuda")
 
-  metal_ok <- !isTRUE(need_knn) &&
+  metal_ok <- (!isTRUE(need_knn) || backend_flag(native_metal_knn_available_cpp)) &&
     (!isTRUE(need_embedding) || backend_flag(embedding_metal_available_cpp))
   if (metal_ok) return("metal")
 
@@ -106,11 +106,7 @@ resolve_embedding_backend <- function(backend) {
 
 embedding_knn_backend <- function(backend) {
   backend <- resolve_embedding_backend(backend)
-  if (identical(backend, "cuda")) {
-    "cuda"
-  } else {
-    "cpu"
-  }
+  backend
 }
 
 fixed_embedding_knn_backend <- function(backend) {

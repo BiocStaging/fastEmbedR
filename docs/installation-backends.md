@@ -2,7 +2,7 @@
 
 This page describes `fastEmbedR` embedding backends. The package contains its
 own CPU HNSW and Metal exact/IVF search code. CUDA builds link directly to the
-RAPIDS cuVS C API; they do not call `faissR` or Python for one-call KNN.
+RAPIDS cuVS C API; they do not call another R package or Python for one-call KNN.
 
 ## Standard Installation
 
@@ -10,10 +10,6 @@ RAPIDS cuVS C API; they do not call `faissR` or Python for one-call KNN.
 install.packages("remotes")
 remotes::install_github("tkcaccia/fastEmbedR")
 ```
-
-Install `faissR` separately only when its reusable public KNN/classification
-API is wanted. It is not a runtime dependency of one-call fastEmbedR
-embeddings.
 
 ## Backend Rule
 

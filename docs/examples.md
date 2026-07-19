@@ -18,10 +18,13 @@ library(fastEmbedR)
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-knn <- faissR::nn(x, k = 15, exclude_self = TRUE, backend = "auto", n_threads = 4)
-
-y_tsne <- fastEmbedR::opentsne_knn(knn, init_data = x, backend = "cpu", seed = 1)
-y_umap <- fastEmbedR::umap_knn(knn, backend = "cpu", graph_mode = "fuzzy", seed = 1)
+y_tsne <- fastEmbedR::opentsne(
+  x, perplexity = 10, backend = "cpu", n_threads = 4, seed = 1
+)$layout
+y_umap <- fastEmbedR::umap(
+  x, n_neighbors = 15, backend = "cpu", n_threads = 4,
+  graph_mode = "fuzzy", seed = 1
+)$layout
 
 plot(y_tsne, pch = 21, bg = labels)
 plot(y_umap, pch = 21, bg = labels)
@@ -46,9 +49,8 @@ Use `backend = "metal"` on Apple Silicon or `backend = "cuda"` on a CUDA build.
 Explicit GPU requests fail clearly if the backend is unavailable.
 For matrix input, CPU uses native HNSW and Metal uses native exact or
 recall-tuned IVF-Flat. CUDA uses package-native cuVS GPU-resident KNN. The
-internal non-self KNN width is `ceiling(perplexity)`. Use
-`opentsne_knn()` with an explicit `faissR::nn()` result when benchmarking alternative
-KNN algorithms.
+internal non-self KNN width is `ceiling(perplexity)`. Use `opentsne_knn()` with
+a plain precomputed host KNN list when benchmarking an alternative search.
 
 ## Iris One-Call UMAP
 
@@ -209,7 +211,6 @@ This run used:
 - RAM: 31.02 GB
 - R: 4.5.3
 - fastEmbedR: 0.1.0
-- faissR: 0.1.0
 - uwot: 0.2.4
 - Rtsne: 0.17
 - Requested benchmark threads: 4

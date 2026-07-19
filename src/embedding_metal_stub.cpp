@@ -28,11 +28,11 @@ NumericMatrix project_embedding_knn_metal_impl(NumericMatrix,
   Rcpp::stop("Metal projection backend is only available on macOS with Metal support.");
 }
 
-List project_embedding_affine_metal_impl(NumericMatrix,
-                                         NumericMatrix,
-                                         NumericMatrix,
+List project_embedding_affine_metal_impl(SEXP,
+                                         SEXP,
+                                         SEXP,
                                          IntegerMatrix,
-                                         NumericMatrix,
+                                         SEXP,
                                          int,
                                          double,
                                          double) {
@@ -47,17 +47,17 @@ NumericMatrix interpolate_landmark_layout_metal_impl(NumericMatrix,
   Rcpp::stop("Metal landmark interpolation backend is only available on macOS with Metal support.");
 }
 
-NumericMatrix landmark_project_interpolate_metal_impl(NumericMatrix,
-                                                      NumericMatrix,
-                                                      NumericMatrix,
+NumericMatrix landmark_project_interpolate_metal_impl(SEXP,
+                                                      SEXP,
+                                                      SEXP,
                                                       IntegerVector,
                                                       int) {
   Rcpp::stop("Metal fused landmark projection backend is only available on macOS with Metal support.");
 }
 
-List landmark_project_interpolate_knn_confidence_metal_impl(NumericMatrix,
-                                                            NumericMatrix,
-                                                            NumericMatrix,
+List landmark_project_interpolate_knn_confidence_metal_impl(SEXP,
+                                                            SEXP,
+                                                            SEXP,
                                                             IntegerVector,
                                                             int) {
   Rcpp::stop("Metal fused landmark projection/confidence backend is only available on macOS with Metal support.");
@@ -106,7 +106,7 @@ NumericMatrix knn_embed_metal_csr_impl(IntegerVector,
 }
 
 NumericMatrix knn_umap_refine_rows_metal_impl(IntegerMatrix,
-                                              NumericMatrix,
+                                              SEXP,
                                               IntegerVector,
                                               NumericMatrix,
                                               int,

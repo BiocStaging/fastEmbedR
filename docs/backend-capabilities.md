@@ -8,8 +8,7 @@ rule is simple: if a function is requested with `backend = "metal"` or
 
 | Function | CPU | Metal | CUDA | Notes |
 | --- | --- | --- | --- | --- |
-| Internal one-call KNN | native float32 HNSW | native exact or recall-tuned IVF-Flat | direct FAISS GPU exact or RAPIDS cuVS IVF-Flat | KNN selection is internal; fastEmbedR does not export an `nn()` function. |
-| `faissR::nn()` | optional public FAISS CPU search | not used for native Metal | optional RAPIDS cuVS / FAISS GPU search | Use faissR when a reusable public KNN object is required. |
+| `precompute_knn()` / internal one-call KNN | native float32 HNSW | native exact or recall-tuned IVF-Flat | direct FAISS GPU exact or RAPIDS cuVS IVF-Flat | KNN selection remains internal; the public function exposes only `k`, metric, backend, and CPU thread count. CUDA results stay device-resident. |
 | `umap_knn()` | native C++ CSR graph and optimizer | native Metal `atomic_inplace` optimizer | native CUDA pure-atomic optimizer | Metal/CUDA optimizers use the supplied graph; unavailable GPU backends fail clearly. |
 | `umap()` | native HNSW, then `umap_knn()` | native exact/IVF-Flat, then native Metal UMAP | native FAISS/cuVS device KNN, then native CUDA UMAP | CUDA KNN is not copied through R. Metal IVF exact-reranks candidates in the original dimensions and records its pilot recall. |
 | `opentsne_knn()` | native C++ FFT-grid optimizer | native Metal FFT-grid optimizer | native CUDA FFT-grid optimizer using cuFFT | Use `Y_init` or `init_data` for explicit PCA initialization. |
@@ -27,7 +26,7 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | `euclidean` | native HNSW | native exact/IVF-Flat | FAISS GPU exact or cuVS IVF-Flat | Validated default for UMAP/openTSNE. |
 | `cosine` | row normalization plus native HNSW | row normalization plus native exact/IVF-Flat | row normalization plus native cuVS | Candidate selection is approximate; returned distances use the transformed full-dimensional vectors. |
 | `correlation` | row centering/normalization plus native HNSW | row centering/normalization plus native exact/IVF-Flat | row centering/normalization plus native cuVS | Correlation is represented by Euclidean distance on centered unit rows. |
-| `inner_product` | faissR when installed | not supported by native Metal KNN | native cuVS | Explicit unsupported Metal requests fail; they do not fall back to CPU. |
+| `inner_product` | not supported | not supported | native CUDA route | Explicit unsupported requests fail; they do not fall back to another backend. |
 
 ## Backend Labels
 

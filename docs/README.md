@@ -13,7 +13,7 @@
 ## Main Pages
 
 - [Installation](installation.md): `fastEmbedR` CPU, Metal, and CUDA embedding
-  builds. FAISS/cuVS KNN setup lives in the companion `faissR` project.
+  builds, including optional direct FAISS GPU/cuVS linkage.
 - [Implementation](implementation.md): how UMAP and openTSNE are implemented
   across CPU, Metal, and CUDA.
 - [Backend performance engineering](backend-performance-engineering.md):

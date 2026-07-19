@@ -59,10 +59,7 @@ A \code{fastEmbedR_embedding} object.
 \code{\link{evaluate_embedding}} rather than inside the embedding call.
 }
 \examples{
-pkg <- "faissR"
-if (requireNamespace(pkg, quietly = TRUE)) {
-  x <- scale(as.matrix(iris[, 1:4]))
-  fit <- umap(x, n_neighbors = 15, seed = 1)
-  plot(fit)
-}
+x <- scale(as.matrix(iris[, 1:4]))
+fit <- umap(x, n_neighbors = 15, seed = 1)
+plot(fit)
 }

@@ -19,17 +19,22 @@ with modern openTSNE/FIt-SNE-style optimization and interpolation ideas [3-4].
 The package is intentionally KNN-first. fastEmbedR implements its CPU HNSW and
 Apple Metal exact/IVF-Flat one-call KNN paths natively. CUDA builds link
 directly to FAISS GPU for exact search and to the Apache-2.0 RAPIDS cuVS C API
-for IVF-Flat; they do not call `faissR`, Python, or `reticulate`. Graph/affinity construction,
+for IVF-Flat; they do not call another R package, Python, or `reticulate`. Graph/affinity construction,
 initialization, stochastic optimization, native fixed-reference transforms,
 backend reporting, and quality metrics remain inside fastEmbedR.
 
 The public package surface is deliberately small:
 
+- `precompute_knn()` exposes the same native backend policy used by the
+  one-call functions, while keeping algorithm and recall tuning internal.
 - `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
 - `opentsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
   then call the corresponding KNN entry point.
 - `pca()` computes backend-native truncated PCA scores and loadings, including
   a resident float32 Metal/MPS TSVD path.
+- `knn_graph()` builds one compact undirected graph from data, an embedding,
+  or supplied neighbours; `graph_cluster()` applies native Louvain, Leiden,
+  or Walktrap community detection.
 - `backend` is limited to `"cpu"`, `"metal"`, and `"cuda"`.
 - GPU requests fail clearly if native GPU code is unavailable. CPU fallback is
   never reported as Metal or CUDA work.
@@ -63,10 +68,11 @@ the final layout.
 
 ## Nearest-Neighbour Layer
 
-`fastEmbedR` does not re-export neighbour-search functions. Users call
-`faissR::nn()` directly when they want an independently reusable KNN object.
-The one-call embedding functions own a deliberately smaller internal search
-surface.
+`fastEmbedR` exports a focused precomputation boundary rather than a general
+nearest-neighbour algorithm menu. `precompute_knn()` exposes `k`, metric,
+backend, and CPU thread count; it applies the same internally selected search
+policy as the one-call embedding functions. The KNN-input functions also
+accept a plain host list of indices and distances from another implementation.
 
 The CPU implementation distils the HNSW organization in FAISS 1.14.3 [8]:
 exponentially sampled hierarchy levels, greedy descent through upper layers,
@@ -121,6 +127,37 @@ and a small/large data policy:
 This separation makes benchmark timing interpretable: KNN time, affinity/graph
 construction time, embedding time, and projection/transform time can be
 reported separately.
+
+## KNN Graphs And Community Detection
+
+`knn_graph()` deliberately reuses the package's existing nearest-neighbour
+boundary. It accepts raw data, a `fastEmbedR_embedding`, or supplied neighbour
+indices and distances; it does not expose another KNN algorithm selector.
+Graph construction is package-native C++ and produces one compact undirected
+edge list. The supported weights are Jaccard shared-neighbour similarity on
+observed KNN edges, inverse distance, and binary adjacency. Reciprocal-edge
+filtering and a final weight threshold are optional. Directed duplicates are
+collapsed once, so clustering does not repeat neighbour search or retain a
+dense adjacency matrix.
+
+`graph_cluster()` provides three CPU algorithms:
+
+- multilevel Louvain local moving and graph aggregation [14];
+- Leiden local moving, within-community refinement, and aggregation [15];
+- the Pons-Latapy Walktrap random-walk distance and adjacent-community
+  agglomeration [16].
+
+The Leiden phase organization is informed by the MIT-licensed NetworKit
+implementation [17], but fastEmbedR uses its own compact graph representation
+and does not link to NetworKit. Walktrap is the published random-walk method,
+not a sampled proximity approximation. Its exact transition storage is
+quadratic, so the implementation stops before an unsafe allocation and directs
+large graphs to Louvain or Leiden. `igraph` is used only as a guarded test
+oracle. External clustering implementations are neither linked nor called.
+
+The clustering backend is reported as CPU. CUDA or Metal can accelerate the
+KNN stage when `knn_graph()` starts from data, but fastEmbedR does not label
+that as GPU community detection.
 
 ## PCA And Truncated-SVD Initialization
 

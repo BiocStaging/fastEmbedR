@@ -198,6 +198,48 @@ List landmark_project_interpolate_knn_confidence_cuda_impl(NumericMatrix,
   Rcpp::stop("CUDA fused landmark projection is available only when the package is built with CUDA support.");
 }
 
+List landmark_tsne_transform_cuda_gpu_impl(SEXP,
+                                           SEXP,
+                                           SEXP,
+                                           SEXP,
+                                           double,
+                                           int,
+                                           int,
+                                           double,
+                                           double,
+                                           double,
+                                           double,
+                                           double,
+                                           double,
+                                           double,
+                                           int,
+                                           int,
+                                           int,
+                                           int,
+                                           double,
+                                           double) {
+  Rcpp::stop("CUDA GPU-resident landmark t-SNE is available only when the package is built with CUDA support.");
+}
+
+List landmark_umap_project_refine_cuda_gpu_impl(SEXP,
+                                                SEXP,
+                                                SEXP,
+                                                SEXP,
+                                                IntegerVector,
+                                                IntegerVector,
+                                                int,
+                                                int,
+                                                double,
+                                                int,
+                                                double,
+                                                double,
+                                                int,
+                                                int,
+                                                double,
+                                                double) {
+  Rcpp::stop("CUDA GPU-resident landmark UMAP is available only when the package is built with CUDA support.");
+}
+
 NumericVector knn_structure_score_cuda_impl(NumericMatrix,
                                             IntegerMatrix,
                                             IntegerVector,

@@ -67,7 +67,7 @@ test_that("evaluation cache keys include a data fingerprint", {
 test_that("one-call and KNN openTSNE agree with a shared initialization", {
   set.seed(13)
   x <- matrix(rnorm(60L * 5L), 60L, 5L)
-  knn <- fastEmbedR:::fastembedr_exact_knn_fallback(x, x, k = 16L)
+  knn <- test_exact_knn(x, x, k = 16L)
   y_init <- fastEmbedR::opentsne_pca_init(x, backend = "cpu", seed = 13L)
 
   full <- fastEmbedR::opentsne(

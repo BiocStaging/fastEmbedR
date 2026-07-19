@@ -11,7 +11,7 @@ coerce_knn_input <- function(indices,
     if (!is.list(indices) || !all(c("indices", "distances") %in% names(indices))) {
       stop(
         "`distances` is required unless `", arg_name,
-        "` is a KNN object returned by `faissR::nn()` or `faissR::nn_gpu()`.",
+        "` is a list containing `indices` and `distances`.",
         call. = FALSE
       )
     }
@@ -74,20 +74,11 @@ is_float32_matrix <- function(x) {
   inherits(x, "float32")
 }
 
-fastembedr_faiss_float_output <- function(data, backend) {
+fastembedr_knn_output_type <- function(data, backend) {
   if (!requireNamespace("float", quietly = TRUE)) return("double")
   if (is_float32_matrix(data)) return("float")
   if (backend %in% c("cpu", "cuda")) return("float")
   "double"
-}
-
-fastembedr_faiss_method_for_float <- function(data, backend) {
-  if (identical(fastembedr_faiss_float_output(data, backend), "float") &&
-      is_float32_matrix(data) &&
-      identical(backend, "cpu")) {
-    return("flat")
-  }
-  "auto"
 }
 
 knn_index_base <- function(indices, n = nrow(indices)) {

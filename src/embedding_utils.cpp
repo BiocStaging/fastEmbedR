@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "native_knn_common.h"
+
 using Rcpp::IntegerMatrix;
 using Rcpp::IntegerVector;
 using Rcpp::List;
@@ -33,6 +35,12 @@ IntegerMatrix float32_data_slot(SEXP x) {
 
 float int_bits_to_float(const int value) {
   float out;
+  std::memcpy(&out, &value, sizeof(float));
+  return out;
+}
+
+int float_to_int_bits(const float value) {
+  int out;
   std::memcpy(&out, &value, sizeof(float));
   return out;
 }
@@ -156,82 +164,6 @@ void parallel_for_rows(const int n, const int n_threads, Function fn) {
   for (auto& worker : workers) worker.join();
 }
 
-void weighted_projection_row(const NumericMatrix& reference_layout,
-                             const IntegerMatrix& projection_indices,
-                             const NumericMatrix& projection_distances,
-                             const int row,
-                             NumericMatrix& layout,
-                             std::vector<float>& adjusted,
-                             std::vector<float>& positive,
-                             std::vector<float>& row_distances) {
-  const int n_reference = reference_layout.nrow();
-  const int n_components = reference_layout.ncol();
-  const int projection_k = projection_indices.ncol();
-  const double eps = std::sqrt(std::numeric_limits<double>::epsilon());
-  int zero_count = 0;
-  double rho = std::numeric_limits<double>::infinity();
-  row_distances.clear();
-  for (int j = 0; j < projection_k; ++j) {
-    const int idx = projection_indices(row, j);
-    if (idx < 1 || idx > n_reference) Rcpp::stop("projection indices out of range");
-    const double d = projection_distances(row, j);
-    if (!std::isfinite(d) || d < 0.0) {
-      Rcpp::stop("projection distances must be finite and non-negative");
-    }
-    row_distances.push_back(static_cast<float>(d));
-    if (d <= eps) ++zero_count;
-    if (d < rho) rho = d;
-  }
-
-  if (zero_count > 0) {
-    const double inv_zero_count = 1.0 / static_cast<double>(zero_count);
-    for (int c = 0; c < n_components; ++c) {
-      double value = 0.0;
-      for (int j = 0; j < projection_k; ++j) {
-        if (static_cast<double>(row_distances[static_cast<std::size_t>(j)]) <= eps) {
-          value += inv_zero_count * reference_layout(projection_indices(row, j) - 1, c);
-        }
-      }
-      layout(row, c) = value;
-    }
-    return;
-  }
-
-  adjusted.clear();
-  positive.clear();
-  for (int j = 0; j < projection_k; ++j) {
-    const double value = std::max(
-      0.0,
-      static_cast<double>(row_distances[static_cast<std::size_t>(j)]) - rho
-    );
-    adjusted.push_back(static_cast<float>(value));
-    if (value > eps) positive.push_back(static_cast<float>(value));
-  }
-
-  double sigma = positive.empty() ? median_inplace(row_distances) : median_inplace(positive);
-  if (!std::isfinite(sigma) || sigma < eps) sigma = eps;
-
-  double weight_sum = 0.0;
-  for (int j = 0; j < projection_k; ++j) {
-    const double w = std::exp(-adjusted[static_cast<std::size_t>(j)] / sigma);
-    adjusted[static_cast<std::size_t>(j)] = static_cast<float>(w);
-    weight_sum += w;
-  }
-  if (!std::isfinite(weight_sum) || weight_sum <= 0.0) {
-    weight_sum = static_cast<double>(projection_k);
-    std::fill(adjusted.begin(), adjusted.end(), 1.0f);
-  }
-
-  for (int c = 0; c < n_components; ++c) {
-    double value = 0.0;
-    for (int j = 0; j < projection_k; ++j) {
-      value += static_cast<double>(adjusted[static_cast<std::size_t>(j)]) *
-        reference_layout(projection_indices(row, j) - 1, c);
-    }
-    layout(row, c) = value / weight_sum;
-  }
-}
-
 } // namespace
 
 // [[Rcpp::export]]
@@ -318,6 +250,196 @@ List standardize_cpu_cpp(NumericMatrix data) {
     Rcpp::Named("center") = center,
     Rcpp::Named("scale") = scale
   );
+}
+
+// [[Rcpp::export]]
+List standardize_float32_cpp(SEXP data, int n_threads = 0) {
+  if (!is_float32_s4(data)) {
+    Rcpp::stop("`data` must be a float::float32 matrix");
+  }
+  IntegerMatrix source = float32_data_slot(data);
+  const int n = source.nrow();
+  const int p = source.ncol();
+  if (n < 1 || p < 1) Rcpp::stop("data must have at least one row and one column");
+
+  IntegerMatrix payload(n, p);
+  NumericVector center(p);
+  NumericVector scale(p);
+  const int* source_ptr = INTEGER(source);
+  int* destination_ptr = INTEGER(payload);
+  double* center_ptr = REAL(center);
+  double* scale_ptr = REAL(scale);
+  const double denom = static_cast<double>(std::max(1, n - 1));
+  const int threads = resolve_projection_threads(n_threads, p);
+  std::atomic<bool> finite(true);
+  parallel_for_rows(p, threads, [&](const int begin, const int end, const int) {
+    for (int col = begin; col < end; ++col) {
+      const std::size_t base = static_cast<std::size_t>(col) * n;
+      double sum = 0.0;
+      bool column_finite = true;
+      for (int row = 0; row < n; ++row) {
+        const float value = int_bits_to_float(source_ptr[base + row]);
+        if (!std::isfinite(value)) {
+          column_finite = false;
+          finite.store(false, std::memory_order_relaxed);
+          break;
+        }
+        sum += static_cast<double>(value);
+      }
+      if (!column_finite) continue;
+      const double mean = sum / static_cast<double>(n);
+      center_ptr[col] = mean;
+      double ss = 0.0;
+      for (int row = 0; row < n; ++row) {
+        const double centered =
+          static_cast<double>(int_bits_to_float(source_ptr[base + row])) - mean;
+        ss += centered * centered;
+      }
+      double sd = std::sqrt(ss / denom);
+      if (!std::isfinite(sd) || sd == 0.0) sd = 1.0;
+      scale_ptr[col] = sd;
+      const double inv_sd = 1.0 / sd;
+      for (int row = 0; row < n; ++row) {
+        const double centered =
+          static_cast<double>(int_bits_to_float(source_ptr[base + row])) - mean;
+        destination_ptr[base + row] = float_to_int_bits(
+          static_cast<float>(centered * inv_sd)
+        );
+      }
+    }
+  });
+  if (!finite.load(std::memory_order_relaxed)) {
+    Rcpp::stop("data must contain only finite values");
+  }
+
+  Rcpp::S4 out("float32");
+  out.slot("Data") = payload;
+  return List::create(
+    Rcpp::Named("data") = out,
+    Rcpp::Named("center") = center,
+    Rcpp::Named("scale") = scale
+  );
+}
+
+// [[Rcpp::export]]
+List split_float32_rows_cpp(SEXP data,
+                            IntegerVector landmark_rows,
+                            IntegerVector query_rows,
+                            int n_threads = 0) {
+  if (!is_float32_s4(data)) {
+    Rcpp::stop("`data` must be a float::float32 matrix");
+  }
+  IntegerMatrix source = float32_data_slot(data);
+  const int n = source.nrow();
+  const int p = source.ncol();
+  const int n_landmarks = landmark_rows.size();
+  const int n_query = query_rows.size();
+  if (n_landmarks < 1 || n_query < 1) {
+    Rcpp::stop("landmark and query row sets must both be non-empty");
+  }
+
+  std::vector<int> landmark_zero(static_cast<std::size_t>(n_landmarks));
+  std::vector<int> query_zero(static_cast<std::size_t>(n_query));
+  std::vector<unsigned char> seen(static_cast<std::size_t>(n), 0);
+  for (int i = 0; i < n_landmarks; ++i) {
+    const int row = landmark_rows[i] - 1;
+    if (row < 0 || row >= n || seen[static_cast<std::size_t>(row)] != 0) {
+      Rcpp::stop("`landmark_rows` must contain unique, valid row indices");
+    }
+    landmark_zero[static_cast<std::size_t>(i)] = row;
+    seen[static_cast<std::size_t>(row)] = 1;
+  }
+  for (int i = 0; i < n_query; ++i) {
+    const int row = query_rows[i] - 1;
+    if (row < 0 || row >= n || seen[static_cast<std::size_t>(row)] != 0) {
+      Rcpp::stop("`query_rows` must be valid, unique, and disjoint from `landmark_rows`");
+    }
+    query_zero[static_cast<std::size_t>(i)] = row;
+    seen[static_cast<std::size_t>(row)] = 1;
+  }
+  if (n_landmarks + n_query != n) {
+    Rcpp::stop("landmark and query rows must partition every input row");
+  }
+
+  IntegerMatrix landmark_payload(n_landmarks, p);
+  IntegerMatrix query_payload(n_query, p);
+  const int* source_ptr = INTEGER(source);
+  int* landmark_ptr = INTEGER(landmark_payload);
+  int* query_ptr = INTEGER(query_payload);
+  const int threads = resolve_projection_threads(n_threads, p);
+  parallel_for_rows(p, threads, [&](const int begin, const int end, const int) {
+    for (int col = begin; col < end; ++col) {
+      const std::size_t source_base = static_cast<std::size_t>(col) * n;
+      const std::size_t landmark_base = static_cast<std::size_t>(col) * n_landmarks;
+      const std::size_t query_base = static_cast<std::size_t>(col) * n_query;
+      for (int row = 0; row < n_landmarks; ++row) {
+        landmark_ptr[landmark_base + row] = source_ptr[
+          source_base + landmark_zero[static_cast<std::size_t>(row)]
+        ];
+      }
+      for (int row = 0; row < n_query; ++row) {
+        query_ptr[query_base + row] = source_ptr[
+          source_base + query_zero[static_cast<std::size_t>(row)]
+        ];
+      }
+    }
+  });
+
+  Rcpp::S4 landmarks("float32");
+  landmarks.slot("Data") = landmark_payload;
+  Rcpp::S4 query("float32");
+  query.slot("Data") = query_payload;
+  return List::create(
+    Rcpp::Named("landmarks") = landmarks,
+    Rcpp::Named("query") = query
+  );
+}
+
+// [[Rcpp::export]]
+NumericMatrix landmark_projection_float32_cpp(SEXP data,
+                                               NumericMatrix directions,
+                                               int n_direct = 4,
+                                               int n_threads = 0) {
+  if (!is_float32_s4(data)) {
+    Rcpp::stop("`data` must be a float::float32 matrix");
+  }
+  IntegerMatrix source = float32_data_slot(data);
+  const int n = source.nrow();
+  const int p = source.ncol();
+  const int n_random = directions.ncol();
+  n_direct = std::max(0, std::min(n_direct, p));
+  if (directions.nrow() != p || n_random < 1) {
+    Rcpp::stop("`directions` must have ncol(data) rows and at least one column");
+  }
+
+  NumericMatrix projected(n, n_direct + n_random);
+  const int* source_ptr = INTEGER(source);
+  const double* direction_ptr = REAL(directions);
+  double* projected_ptr = REAL(projected);
+  const int threads = resolve_projection_threads(n_threads, n);
+  parallel_for_rows(n, threads, [&](const int begin, const int end, const int) {
+    for (int row = begin; row < end; ++row) {
+      for (int col = 0; col < n_direct; ++col) {
+        projected_ptr[static_cast<std::size_t>(col) * n + row] =
+          static_cast<double>(int_bits_to_float(
+            source_ptr[static_cast<std::size_t>(col) * n + row]
+          ));
+      }
+      for (int component = 0; component < n_random; ++component) {
+        double value = 0.0;
+        const std::size_t direction_base = static_cast<std::size_t>(component) * p;
+        for (int feature = 0; feature < p; ++feature) {
+          value += static_cast<double>(int_bits_to_float(
+            source_ptr[static_cast<std::size_t>(feature) * n + row]
+          )) * direction_ptr[direction_base + feature];
+        }
+        projected_ptr[
+          static_cast<std::size_t>(n_direct + component) * n + row
+        ] = value;
+      }
+    }
+  });
+  return projected;
 }
 
 // [[Rcpp::export]]
@@ -1022,19 +1144,25 @@ Rcpp::NumericMatrix exact_structure_metrics_cpp(NumericMatrix high,
   const std::size_t matrix_size = static_cast<std::size_t>(n) * n;
   std::vector<double> high_dist(matrix_size, 0.0);
   std::vector<double> low_dist(matrix_size, 0.0);
+  const int high_p = high.ncol();
+  const int low_p = low.ncol();
+  const double* const high_data = REAL(high);
+  const double* const low_data = REAL(low);
   n_threads = std::max(1, std::min(n_threads, n));
 
   auto distance_range = [&](const int begin, const int end) {
     for (int i = begin; i < end; ++i) {
       for (int j = i + 1; j < n; ++j) {
         double high_d2 = 0.0;
-        for (int c = 0; c < high.ncol(); ++c) {
-          const double delta = high(i, c) - high(j, c);
+        for (int c = 0; c < high_p; ++c) {
+          const std::size_t offset = static_cast<std::size_t>(c) * n;
+          const double delta = high_data[offset + i] - high_data[offset + j];
           high_d2 += delta * delta;
         }
         double low_d2 = 0.0;
-        for (int c = 0; c < low.ncol(); ++c) {
-          const double delta = low(i, c) - low(j, c);
+        for (int c = 0; c < low_p; ++c) {
+          const std::size_t offset = static_cast<std::size_t>(c) * n;
+          const double delta = low_data[offset + i] - low_data[offset + j];
           low_d2 += delta * delta;
         }
         const std::size_t ij = static_cast<std::size_t>(i) * n + j;
@@ -1745,36 +1873,52 @@ List project_embedding_affine_cpp(NumericMatrix reference_data,
 }
 
 // [[Rcpp::export]]
-List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
-                                           NumericMatrix query_data,
-                                           NumericMatrix reference_layout,
+List project_embedding_affine_parallel_cpp(SEXP reference_data_sexp,
+                                           SEXP query_data_sexp,
+                                           SEXP reference_layout_sexp,
                                            IntegerMatrix projection_indices,
-                                           NumericMatrix projection_distances,
+                                           SEXP projection_distances_sexp,
                                            int max_neighbors = 12,
                                            double ridge = 1e-3,
                                            double max_extrapolation = 2.5,
                                            int n_threads = 1) {
-  const int n_reference = reference_layout.nrow();
-  const int n_components = reference_layout.ncol();
+  fastembedr::FloatMatrix reference_data =
+    fastembedr::matrix_to_row_major_float(
+      reference_data_sexp, fastembedr::KnnMetric::Euclidean
+    );
+  fastembedr::FloatMatrix query_data =
+    fastembedr::matrix_to_row_major_float(
+      query_data_sexp, fastembedr::KnnMetric::Euclidean
+    );
+  fastembedr::FloatMatrix reference_layout =
+    fastembedr::matrix_to_row_major_float(
+      reference_layout_sexp, fastembedr::KnnMetric::Euclidean
+    );
+  fastembedr::FloatMatrix projection_distances =
+    fastembedr::matrix_to_row_major_float(
+      projection_distances_sexp, fastembedr::KnnMetric::Euclidean
+    );
+  const int n_reference = reference_layout.nrow;
+  const int n_components = reference_layout.ncol;
   const int n_query = projection_indices.nrow();
   const int projection_k = projection_indices.ncol();
-  const int n_features = reference_data.ncol();
+  const int n_features = reference_data.ncol;
 
   if (n_reference < 1) Rcpp::stop("reference_layout must have at least one row");
-  if (reference_data.nrow() != n_reference) {
+  if (reference_data.nrow != n_reference) {
     Rcpp::stop("reference_data and reference_layout must have the same number of rows");
   }
-  if (query_data.nrow() != n_query) {
+  if (query_data.nrow != n_query) {
     Rcpp::stop("query_data and projection_indices must have the same number of rows");
   }
-  if (query_data.ncol() != n_features) {
+  if (query_data.ncol != n_features) {
     Rcpp::stop("reference_data and query_data must have the same number of columns");
   }
   if (n_components < 1) Rcpp::stop("reference_layout must have at least one column");
   if (n_query < 1) Rcpp::stop("projection_indices must have at least one row");
   if (projection_k < 1) Rcpp::stop("projection_indices must have at least one column");
-  if (projection_distances.nrow() != n_query ||
-      projection_distances.ncol() != projection_k) {
+  if (projection_distances.nrow != n_query ||
+      projection_distances.ncol != projection_k) {
     Rcpp::stop("projection_indices and projection_distances must have the same dimensions");
   }
   if (max_neighbors < 3) max_neighbors = 3;
@@ -1786,7 +1930,9 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
   for (int i = 0; i < n_query; ++i) {
     for (int j = 0; j < projection_k; ++j) {
       const int idx = projection_indices(i, j);
-      const double d = projection_distances(i, j);
+      const double d = projection_distances.values[
+        static_cast<std::size_t>(i) * projection_k + j
+      ];
       if (idx < 1 || idx > n_reference) Rcpp::stop("projection indices out of range");
       if (!std::isfinite(d) || d < 0.0) {
         Rcpp::stop("projection distances must be finite and non-negative");
@@ -1800,12 +1946,33 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
   IntegerVector fallback(n_query);
   const double eps = std::sqrt(std::numeric_limits<double>::epsilon());
   const int threads = resolve_projection_threads(n_threads, n_query);
+  const auto reference_value = [&](const int row, const int col) -> double {
+    return static_cast<double>(reference_data.values[
+      static_cast<std::size_t>(row) * n_features + col
+    ]);
+  };
+  const auto query_value = [&](const int row, const int col) -> double {
+    return static_cast<double>(query_data.values[
+      static_cast<std::size_t>(row) * n_features + col
+    ]);
+  };
+  const auto layout_value = [&](const int row, const int col) -> double {
+    return static_cast<double>(reference_layout.values[
+      static_cast<std::size_t>(row) * n_components + col
+    ]);
+  };
+  const auto distance_value = [&](const int row, const int col) -> double {
+    return static_cast<double>(projection_distances.values[
+      static_cast<std::size_t>(row) * projection_k + col
+    ]);
+  };
 
   parallel_for_rows(n_query, threads, [&](const int begin, const int end, const int) {
     std::vector<double> weights(static_cast<std::size_t>(max_neighbors), 0.0);
     std::vector<double> x_center(static_cast<std::size_t>(n_features), 0.0);
     std::vector<double> y_center(static_cast<std::size_t>(n_components), 0.0);
-    std::vector<double> x_centered(static_cast<std::size_t>(max_neighbors) * n_features, 0.0);
+    std::vector<double> centered(static_cast<std::size_t>(max_neighbors), 0.0);
+    std::vector<double> row_norm(static_cast<std::size_t>(max_neighbors), 0.0);
     std::vector<double> y_rhs(static_cast<std::size_t>(max_neighbors) * n_components, 0.0);
     std::vector<double> kernel(static_cast<std::size_t>(max_neighbors) * max_neighbors, 0.0);
     std::vector<double> q(static_cast<std::size_t>(max_neighbors), 0.0);
@@ -1818,17 +1985,68 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
     weighted_positive.reserve(static_cast<std::size_t>(projection_k));
     weighted_distances.reserve(static_cast<std::size_t>(projection_k));
 
+    auto weighted_fallback = [&](const int row) {
+      weighted_adjusted.clear();
+      weighted_positive.clear();
+      weighted_distances.clear();
+      double rho = std::numeric_limits<double>::infinity();
+      int zero_count = 0;
+      for (int j = 0; j < projection_k; ++j) {
+        const double d = distance_value(row, j);
+        weighted_distances.push_back(static_cast<float>(d));
+        rho = std::min(rho, d);
+        if (d <= eps) ++zero_count;
+      }
+      if (zero_count > 0) {
+        for (int c = 0; c < n_components; ++c) {
+          double value = 0.0;
+          for (int j = 0; j < projection_k; ++j) {
+            if (distance_value(row, j) <= eps) {
+              value += layout_value(projection_indices(row, j) - 1, c);
+            }
+          }
+          layout(row, c) = value / static_cast<double>(zero_count);
+        }
+        return;
+      }
+      for (int j = 0; j < projection_k; ++j) {
+        const double adjusted = std::max(0.0, distance_value(row, j) - rho);
+        weighted_adjusted.push_back(static_cast<float>(adjusted));
+        if (adjusted > eps) weighted_positive.push_back(static_cast<float>(adjusted));
+      }
+      double sigma = weighted_positive.empty() ?
+        median_inplace(weighted_distances) : median_inplace(weighted_positive);
+      if (!std::isfinite(sigma) || sigma < eps) sigma = eps;
+      double weight_sum = 0.0;
+      for (int j = 0; j < projection_k; ++j) {
+        const double weight = std::exp(
+          -static_cast<double>(weighted_adjusted[static_cast<std::size_t>(j)]) / sigma
+        );
+        weighted_adjusted[static_cast<std::size_t>(j)] = static_cast<float>(weight);
+        weight_sum += weight;
+      }
+      if (!std::isfinite(weight_sum) || weight_sum <= 0.0) weight_sum = projection_k;
+      for (int c = 0; c < n_components; ++c) {
+        double value = 0.0;
+        for (int j = 0; j < projection_k; ++j) {
+          value += static_cast<double>(weighted_adjusted[static_cast<std::size_t>(j)]) *
+            layout_value(projection_indices(row, j) - 1, c);
+        }
+        layout(row, c) = value / weight_sum;
+      }
+    };
+
     for (int i = begin; i < end; ++i) {
       int zero_col = -1;
       double rho = std::numeric_limits<double>::infinity();
       for (int j = 0; j < projection_k; ++j) {
-        const double d = projection_distances(i, j);
+        const double d = distance_value(i, j);
         if (d <= eps && zero_col < 0) zero_col = j;
         rho = std::min(rho, d);
       }
       if (zero_col >= 0) {
         const int ref = projection_indices(i, zero_col) - 1;
-        for (int c = 0; c < n_components; ++c) layout(i, c) = reference_layout(ref, c);
+        for (int c = 0; c < n_components; ++c) layout(i, c) = layout_value(ref, c);
         confidence[i] = 1.0;
         used_neighbors[i] = 1;
         fallback[i] = 0;
@@ -1838,7 +2056,7 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
       const int m = std::min(max_neighbors, projection_k);
       positive.clear();
       for (int j = 0; j < projection_k; ++j) {
-        const double adjusted = std::max(0.0, projection_distances(i, j) - rho);
+        const double adjusted = std::max(0.0, distance_value(i, j) - rho);
         if (adjusted > eps) positive.push_back(static_cast<float>(adjusted));
       }
       double sigma = positive.empty() ? std::max(rho, eps) : median_inplace(positive);
@@ -1847,23 +2065,14 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
       double weight_sum = 0.0;
       double weight_sq_sum = 0.0;
       for (int j = 0; j < m; ++j) {
-        const double adjusted = std::max(0.0, projection_distances(i, j) - rho);
+        const double adjusted = std::max(0.0, distance_value(i, j) - rho);
         const double w = std::exp(-adjusted / sigma);
         weights[static_cast<std::size_t>(j)] = w;
         weight_sum += w;
         weight_sq_sum += w * w;
       }
       if (!std::isfinite(weight_sum) || weight_sum <= 0.0) {
-        weighted_projection_row(
-          reference_layout,
-          projection_indices,
-          projection_distances,
-          i,
-          layout,
-          weighted_adjusted,
-          weighted_positive,
-          weighted_distances
-        );
+        weighted_fallback(i);
         confidence[i] = 0.0;
         used_neighbors[i] = m;
         fallback[i] = 1;
@@ -1876,25 +2085,17 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
       for (int j = 0; j < m; ++j) {
         const int ref = projection_indices(i, j) - 1;
         const double w = weights[static_cast<std::size_t>(j)];
-        for (int f = 0; f < n_features; ++f) x_center[static_cast<std::size_t>(f)] += w * reference_data(ref, f);
-        for (int c = 0; c < n_components; ++c) y_center[static_cast<std::size_t>(c)] += w * reference_layout(ref, c);
+        for (int f = 0; f < n_features; ++f) x_center[static_cast<std::size_t>(f)] += w * reference_value(ref, f);
+        for (int c = 0; c < n_components; ++c) y_center[static_cast<std::size_t>(c)] += w * layout_value(ref, c);
       }
 
       double layout_radius_sq = 0.0;
-      double trace = 0.0;
       for (int a = 0; a < m; ++a) {
         const int ref_a = projection_indices(i, a) - 1;
         const double sqrt_wa = std::sqrt(weights[static_cast<std::size_t>(a)]);
-        double row_norm = 0.0;
         double y_radius = 0.0;
-        for (int f = 0; f < n_features; ++f) {
-          const double xc = reference_data(ref_a, f) - x_center[static_cast<std::size_t>(f)];
-          x_centered[static_cast<std::size_t>(a) * n_features + f] = xc;
-          row_norm += xc * xc;
-        }
-        trace += weights[static_cast<std::size_t>(a)] * row_norm;
         for (int c = 0; c < n_components; ++c) {
-          const double yc = reference_layout(ref_a, c) - y_center[static_cast<std::size_t>(c)];
+          const double yc = layout_value(ref_a, c) - y_center[static_cast<std::size_t>(c)];
           y_rhs[static_cast<std::size_t>(a) * n_components + c] = sqrt_wa * yc;
           y_radius += yc * yc;
         }
@@ -1902,16 +2103,35 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
       }
 
       std::fill(kernel.begin(), kernel.end(), 0.0);
+      std::fill(q.begin(), q.end(), 0.0);
+      std::fill(row_norm.begin(), row_norm.end(), 0.0);
+      for (int f = 0; f < n_features; ++f) {
+        const double center_f = x_center[static_cast<std::size_t>(f)];
+        const double query_centered = query_value(i, f) - center_f;
+        for (int a = 0; a < m; ++a) {
+          const int ref_a = projection_indices(i, a) - 1;
+          const double value = reference_value(ref_a, f) - center_f;
+          centered[static_cast<std::size_t>(a)] = value;
+          row_norm[static_cast<std::size_t>(a)] += value * value;
+          q[static_cast<std::size_t>(a)] += query_centered * value;
+        }
+        for (int a = 0; a < m; ++a) {
+          const double xa = centered[static_cast<std::size_t>(a)];
+          for (int b = 0; b <= a; ++b) {
+            kernel[static_cast<std::size_t>(a) * m + b] +=
+              xa * centered[static_cast<std::size_t>(b)];
+          }
+        }
+      }
+      double trace = 0.0;
       for (int a = 0; a < m; ++a) {
         const double sqrt_wa = std::sqrt(weights[static_cast<std::size_t>(a)]);
+        trace += weights[static_cast<std::size_t>(a)] * row_norm[static_cast<std::size_t>(a)];
+        q[static_cast<std::size_t>(a)] *= sqrt_wa;
         for (int b = 0; b <= a; ++b) {
-          const double sqrt_wb = std::sqrt(weights[static_cast<std::size_t>(b)]);
-          double dot = 0.0;
-          for (int f = 0; f < n_features; ++f) {
-            dot += x_centered[static_cast<std::size_t>(a) * n_features + f] *
-              x_centered[static_cast<std::size_t>(b) * n_features + f];
-          }
-          const double value = sqrt_wa * sqrt_wb * dot;
+          const double value = sqrt_wa *
+            std::sqrt(weights[static_cast<std::size_t>(b)]) *
+            kernel[static_cast<std::size_t>(a) * m + b];
           kernel[static_cast<std::size_t>(a) * m + b] = value;
           kernel[static_cast<std::size_t>(b) * m + a] = value;
         }
@@ -1922,30 +2142,11 @@ List project_embedding_affine_parallel_cpp(NumericMatrix reference_data,
       bool ok = cholesky_decompose_inplace(kernel, m) &&
         cholesky_solve_inplace(kernel, y_rhs, m, n_components);
       if (!ok) {
-        weighted_projection_row(
-          reference_layout,
-          projection_indices,
-          projection_distances,
-          i,
-          layout,
-          weighted_adjusted,
-          weighted_positive,
-          weighted_distances
-        );
+        weighted_fallback(i);
         confidence[i] = 0.0;
         used_neighbors[i] = m;
         fallback[i] = 1;
         continue;
-      }
-
-      for (int a = 0; a < m; ++a) {
-        const double sqrt_wa = std::sqrt(weights[static_cast<std::size_t>(a)]);
-        double dot = 0.0;
-        for (int f = 0; f < n_features; ++f) {
-          dot += (query_data(i, f) - x_center[static_cast<std::size_t>(f)]) *
-            x_centered[static_cast<std::size_t>(a) * n_features + f];
-        }
-        q[static_cast<std::size_t>(a)] = sqrt_wa * dot;
       }
 
       double disp_sq = 0.0;

@@ -257,20 +257,14 @@ get_or_compute_evaluation_reference <- function(x_high,
     cached$cache_hit <- TRUE
     return(normalize_evaluation_reference(cached, n, max_k))
   }
-  raw <- tryCatch(
-    fastembedr_faissr_nn(
-      x_high,
-      x_high,
-      k = max_k + 1L,
-      backend = backend,
-      n_threads = n_threads
-    ),
-    error = function(e) fastembedr_exact_knn_fallback(
-      x_high,
-      x_high,
-      k = max_k + 1L,
-      include_self = TRUE
-    )
+  raw <- fastembedr_nn_without_self(
+    x_high,
+    k = max_k,
+    backend = backend,
+    method = "auto",
+    metric = "euclidean",
+    n_threads = n_threads,
+    target_recall = 0.99
   )
   out <- normalize_supplied_knn(raw, n, max_k)
   out$backend <- knn_backend_label(raw)
@@ -425,8 +419,7 @@ local_density_radius_metrics <- function(high_distances,
 #'   metrics. The default `NULL` preserves the historical k = 15 behavior when
 #'   possible.
 #' @param reference_nn Optional precomputed high-dimensional nearest-neighbor
-#'   list. It may include a self-neighbor column, like
-#'   \code{faissR::nn(x, x, k + 1)}.
+#'   list. It may include a self-neighbor column.
 #' @param sample_size_for_global_metrics Maximum deterministic subsample size
 #'   for all-pairs global distance metrics.
 #' @param sample_size_for_local_metrics Maximum deterministic subsample size for
@@ -554,12 +547,14 @@ evaluate_embedding <- function(x_high,
     normalize_evaluation_reference(reference_nn, local_n, max_k)
   }
   embed_nn_raw <- tryCatch(
-    fastembedr_faissr_nn(
+    fastembedr_nn_without_self(
       local_embedding,
-      local_embedding,
-      max_k + 1L,
+      k = max_k,
       backend = metric_backend,
-      n_threads = n_threads
+      method = "auto",
+      metric = "euclidean",
+      n_threads = n_threads,
+      target_recall = 0.99
     ),
     error = function(e) {
       metric_backend_reason <<- append_metric_backend_reason(
@@ -567,20 +562,14 @@ evaluate_embedding <- function(x_high,
         conditionMessage(e)
       )
       metric_backend <<- "cpu"
-      tryCatch(
-        fastembedr_faissr_nn(
-          local_embedding,
-          local_embedding,
-          max_k + 1L,
-          backend = "cpu",
-          n_threads = n_threads
-        ),
-        error = function(e2) fastembedr_exact_knn_fallback(
-          local_embedding,
-          local_embedding,
-          k = max_k + 1L,
-          include_self = TRUE
-        )
+      fastembedr_nn_without_self(
+        local_embedding,
+        k = max_k,
+        backend = "cpu",
+        method = "hnsw",
+        metric = "euclidean",
+        n_threads = n_threads,
+        target_recall = 0.99
       )
     }
   )

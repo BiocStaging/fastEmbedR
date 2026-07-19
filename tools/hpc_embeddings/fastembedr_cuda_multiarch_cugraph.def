@@ -2,8 +2,7 @@ Bootstrap: docker
 From: mambaorg/micromamba:2.3.3
 
 %files
-    faissR_0.1.0.tar.gz /opt/src/faissR_0.1.0.tar.gz
-    fastEmbedR_0.1.0.tar.gz /opt/src/fastEmbedR_0.1.0.tar.gz
+    fastEmbedR_source.tar.gz /opt/src/fastEmbedR_source.tar.gz
     /mnt/sata_ssd/cuvs_nndescent_shmem_patch_20260625_175420/cuvs/cpp/build/libcuvs.so /opt/rapids/lib/libcuvs.so
     /mnt/sata_ssd/cuvs_nndescent_shmem_patch_20260625_175420/cuvs/cpp/build/c/libcuvs_c.so /opt/rapids/lib/libcuvs_c.so
     patched_libs/libnvrtc.so.11.2 /opt/rapids/lib/libnvrtc.so.11.2
@@ -36,11 +35,6 @@ From: mambaorg/micromamba:2.3.3
     export FASTEMBEDR_USE_CUDA=1
     export FASTEMBEDR_USE_CUML=1
     export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
-    export FAISSR_USE_FAISS=1
-    export FAISSR_USE_CUDA=1
-    export FAISSR_USE_CUVS=1
-    export FAISSR_USE_CUGRAPH=1
-    export FAISSR_CUDA_ARCHITECTURES=80,86,89,90,120
     export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
     export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}
     export LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
@@ -149,10 +143,6 @@ From: mambaorg/micromamba:2.3.3
     export FASTEMBEDR_USE_CUDA=1
     export FASTEMBEDR_USE_CUML=1
     export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
-    export FAISSR_USE_FAISS=1
-    export FAISSR_USE_CUDA=1
-    export FAISSR_USE_CUVS=1
-    export FAISSR_USE_CUGRAPH=1
     export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
     export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}
     export LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
@@ -256,10 +246,9 @@ except Exception as exc:
     raise SystemExit("RAPIDS cuML TSNE is not importable: " + repr(exc))
 EOF_PY
 
-    R CMD INSTALL /opt/src/faissR_0.1.0.tar.gz
     Rscript -e "remotes::install_github('tkcaccia/fastPLS', upgrade = 'never', dependencies = TRUE)" || \
       echo "Optional fastPLS installation skipped; current fastPLS may require a newer R than this RAPIDS image."
-    R CMD INSTALL /opt/src/fastEmbedR_0.1.0.tar.gz
+    R CMD INSTALL /opt/src/fastEmbedR_source.tar.gz
 
     Rscript - <<'EOF_R'
 .libPaths('/opt/conda/lib/R/library')
@@ -270,13 +259,15 @@ as_embedding_matrix <- function(x) {
   }
   stop('Embedding result is not a matrix and has no matrix layout/embedding/Y field')
 }
-pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'faissR', 'fastEmbedR')
+pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'fastEmbedR')
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop('Missing R packages: ', paste(missing, collapse = ', '))
-print(faissR::backend_info())
 stopifnot(file.exists('/opt/rapids/lib/libcugraph.so') || file.exists('/opt/conda/lib/libcugraph.so'))
 stopifnot(file.exists('/opt/rapids/lib/libcugraph_c.so') || file.exists('/opt/conda/lib/libcugraph_c.so'))
-stopifnot(faissR::faiss_available())
+print(fastEmbedR:::backend_info())
+# GPU devices are not exposed while Apptainer executes %post. CUDA runtime
+# availability is therefore validated after the image is built with
+# `apptainer exec --nv` by tools/build_chiamaka_singularity_cugraph.sh.
 set.seed(1)
 x <- matrix(rnorm(200), 50, 4)
 n <- nrow(x)
@@ -305,11 +296,12 @@ as_embedding_matrix <- function(x) {
   }
   stop('Embedding result is not a matrix and has no matrix layout/embedding/Y field')
 }
-pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'faissR', 'fastEmbedR')
+pkgs <- c('float', 'Rnanoflann', 'RcppAnnoy', 'BiocNeighbors', 'RANN', 'RcppHNSW', 'uwot', 'umap', 'Rtsne', 'tsne', 'FNN', 'fastEmbedR')
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop('Missing R packages: ', paste(missing, collapse = ', '))
-stopifnot(faissR::faiss_available())
-print(faissR::backend_info())
+print(fastEmbedR:::backend_info())
+# `%test` may also run without NVIDIA device passthrough. Runtime CUDA
+# assertions belong to the external `apptainer exec --nv` validation.
 stopifnot(file.exists('/opt/rapids/lib/libcugraph.so') || file.exists('/opt/conda/lib/libcugraph.so'))
 stopifnot(file.exists('/opt/rapids/lib/libcugraph_c.so') || file.exists('/opt/conda/lib/libcugraph_c.so'))
 set.seed(1)

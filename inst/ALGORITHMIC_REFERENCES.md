@@ -4,6 +4,33 @@ This file records implementation ideas studied for `fastEmbedR`. It is meant
 to keep future code changes traceable, especially when an idea comes from a
 permissively licensed project.
 
+## Graph construction and community detection
+
+- Blondel VD, Guillaume JL, Lambiotte R, Lefebvre E. Fast unfolding of
+  communities in large networks. J Stat Mech. 2008;2008:P10008.
+- Traag VA, Waltman L, van Eck NJ. From Louvain to Leiden: guaranteeing
+  well-connected communities. Sci Rep. 2019;9:5233.
+- Pons P, Latapy M. Computing communities in large networks using random
+  walks. J Graph Algorithms Appl. 2006;10:191-218.
+- NetworKit repository: <https://github.com/networkit/networkit>
+- NetworKit license: MIT
+
+Current use in `fastEmbedR`:
+
+- `src/graph_clustering.cpp` implements compact graph storage, KNN-edge graph
+  construction, multilevel Louvain, and Leiden local-move/refine/aggregate
+  phases. The Leiden phase organization is informed by NetworKit's
+  MIT-licensed ParallelLeiden implementation; no NetworKit library or source
+  file is linked or vendored.
+- `src/walktrap.cpp` independently implements the Pons-Latapy transition
+  probabilities, degree-scaled random-walk distance, Ward/Lance-Williams
+  updates on adjacent communities, and modularity-selected cut.
+- `tests/testthat/test-graph-clustering.R` compares canonical and stochastic
+  graph results with guarded igraph reference implementations. igraph is not a
+  runtime dependency.
+- cuGraph was evaluated as a possible GPU dependency and deliberately omitted:
+  this package surface does not justify the additional runtime stack.
+
 ## annembed
 
 - Repository: <https://github.com/jean-pierreBoth/annembed>

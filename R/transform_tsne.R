@@ -9,7 +9,7 @@
 #' @param reference_layout Numeric reference embedding matrix, or a
 #'   `fastEmbedR_embedding` object.
 #' @param knn Optional query-to-reference KNN list with `indices` and
-#'   `distances`, usually returned by `faissR::nn(reference_data, new_data, k)`.
+#'   `distances`.
 #' @param reference_data Reference observations in the same preprocessing space
 #'   used to fit `reference_layout`. Required only when `knn` is `NULL`.
 #' @param new_data Query observations in the same preprocessing space as
@@ -124,11 +124,11 @@ transform_tsne <- function(reference_layout,
       k <- min(nrow(reference_data), max(25L, ceiling(3 * perplexity)))
     }
     k <- transform_embedding_k(k, nrow(reference_data))
-    raw_knn <- fastembedr_faissr_nn(
+    raw_knn <- fastembedr_native_query_knn(
       reference_data,
       new_data,
       k = k,
-      backend = backend,
+      metric = "euclidean",
       n_threads = n_threads
     )
     projection <- transform_projection_knn(
@@ -412,23 +412,24 @@ landmark_projection_approx_params <- function(n_landmarks, k) {
   list(n_projections = n_projections, window = window)
 }
 
-should_use_landmark_projection_approx <- function(backend,
-                                                  n_landmarks,
-                                                  n_queries,
-                                                  n_features,
-                                                  k) {
-  mode <- landmark_projection_mode()
-  if (identical(mode, "exact")) return(FALSE)
-  if (!backend %in% c("auto", "cpu", "cpu_approx")) {
-    return(identical(mode, "approx"))
-  }
-  if (identical(mode, "approx")) return(TRUE)
-  min_rows <- landmark_projection_min_rows()
-  if (n_landmarks < min_rows || n_queries < min_rows || k < 2L) {
-    return(FALSE)
-  }
-  work <- as.double(n_landmarks) * as.double(n_queries) * as.double(n_features)
-  work >= landmark_projection_min_work()
+landmark_reference_knn <- function(x_landmarks,
+                                   k,
+                                   backend,
+                                   n_threads,
+                                   metric = "euclidean") {
+  knn_backend <- embedding_knn_backend(backend)
+  fastembedr_nn_without_self(
+    x_landmarks,
+    k = k,
+    backend = knn_backend,
+    method = "auto",
+    metric = metric,
+    output = fastembedr_knn_output_type(x_landmarks, knn_backend),
+    n_threads = n_threads,
+    tuning = "auto",
+    target_recall = 0.99,
+    keep_gpu = identical(knn_backend, "cuda")
+  )
 }
 
 landmark_projection_knn <- function(x_landmarks,
@@ -446,45 +447,35 @@ landmark_projection_knn <- function(x_landmarks,
     backend <- "auto"
   }
   n_threads <- normalize_nn_threads(n_threads)
-  use_fused_projection <- isTRUE(getOption("fastEmbedR.landmark_projection_fused", FALSE))
 
   if (backend %in% c("metal", "gpu") &&
       isTRUE(embedding_metal_available_cpp()) &&
       !is.null(landmark_layout) &&
       !is.null(all_data) &&
       !is.null(landmark_indices) &&
-      !is.null(query_rows) &&
-      isTRUE(use_fused_projection)) {
-    fused <- tryCatch(
-      landmark_project_interpolate_knn_confidence_metal_cpp(
-        x_landmarks,
-        all_data,
-        landmark_layout,
-        as.integer(landmark_indices),
-        as.integer(k)
-      ),
-      error = function(e) {
-        attr(e, "fastEmbedR_projection_backend") <- "metal_fused_projection"
-        NULL
-      }
+      !is.null(query_rows)) {
+    fused <- landmark_project_interpolate_knn_confidence_metal_cpp(
+      x_landmarks,
+      all_data,
+      landmark_layout,
+      as.integer(landmark_indices),
+      as.integer(k)
     )
-    if (!is.null(fused)) {
-      keep <- as.integer(query_rows)
-      out <- list(
-        indices = fused$indices[keep, , drop = FALSE],
-        distances = fused$distances[keep, , drop = FALSE]
-      )
-      result <- finish_nn_result(out, "metal_fused_projection", k, FALSE, exact = TRUE)
-      attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
-      attr(result, "confidence") <- fused$confidence[keep]
-      attr(result, "metal_kernel") <- "landmark_project_interpolate_knn_confidence"
-      attr(result, "approximation") <- list(
-        strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
-        backend = "metal",
-        kernel = "landmark_project_interpolate_knn_confidence"
-      )
-      return(result)
-    }
+    keep <- as.integer(query_rows)
+    out <- list(
+      indices = fused$indices[keep, , drop = FALSE],
+      distances = fused$distances[keep, , drop = FALSE]
+    )
+    result <- finish_nn_result(out, "metal_fused_projection", k, FALSE, exact = TRUE)
+    attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
+    attr(result, "confidence") <- fused$confidence[keep]
+    attr(result, "metal_kernel") <- "landmark_project_interpolate_knn_confidence"
+    attr(result, "approximation") <- list(
+      strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
+      backend = "metal",
+      kernel = "landmark_project_interpolate_knn_confidence"
+    )
+    return(result)
   }
 
   if (backend %in% c("cuda", "gpu") &&
@@ -492,94 +483,54 @@ landmark_projection_knn <- function(x_landmarks,
       !is.null(landmark_layout) &&
       !is.null(all_data) &&
       !is.null(landmark_indices) &&
-      !is.null(query_rows) &&
-      isTRUE(use_fused_projection)) {
-    fused <- tryCatch(
-      landmark_project_interpolate_knn_confidence_cuda_cpp(
-        x_landmarks,
-        all_data,
-        landmark_layout,
-        as.integer(landmark_indices),
-        as.integer(k)
-      ),
-      error = function(e) {
-        attr(e, "fastEmbedR_projection_backend") <- "cuda_fused_projection"
-        NULL
-      }
-    )
-    if (!is.null(fused)) {
-      keep <- as.integer(query_rows)
-      out <- list(
-        indices = fused$indices[keep, , drop = FALSE],
-        distances = fused$distances[keep, , drop = FALSE]
-      )
-      result <- finish_nn_result(out, "cuda_fused_projection", k, FALSE, exact = TRUE)
-      attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
-      attr(result, "confidence") <- fused$confidence[keep]
-      attr(result, "cuda_kernel") <- "landmark_project_interpolate_knn_confidence"
-      attr(result, "approximation") <- list(
-        strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
-        backend = "cuda",
-        kernel = "landmark_project_interpolate_knn_confidence"
-      )
-      return(result)
-    }
-  }
-
-  if (backend %in% c("cuda", "gpu") &&
-      isTRUE(embedding_cuda_available_cpp())) {
-    out <- tryCatch(
-      fastembedr_faissr_nn(
-        x_landmarks,
-        x_query,
-        k = k,
-        backend = "cuda",
-        n_threads = n_threads
-      ),
-      error = function(e) NULL
-    )
-    if (!is.null(out)) {
-      attr(out, "approximation") <- list(
-        strategy = "query_only_exact_cuda_projection_knn",
-        backend = attr(out, "backend") %||% "cuda"
-      )
-      return(out)
-    }
-  }
-
-  if (should_use_landmark_projection_approx(
-    backend = backend,
-    n_landmarks = nrow(x_landmarks),
-    n_queries = nrow(x_query),
-    n_features = ncol(x_landmarks),
-    k = k
-  )) {
-    projection_backend <- embedding_knn_backend(backend)
-    result <- fastembedr_faissr_nn(
+      !is.null(query_rows)) {
+    fused <- landmark_project_interpolate_knn_confidence_cuda_cpp(
       x_landmarks,
-      x_query,
-      k = k,
-      backend = projection_backend,
-      n_threads = n_threads
+      all_data,
+      landmark_layout,
+      as.integer(landmark_indices),
+      as.integer(k)
     )
-    approximation <- attr(result, "approximation", exact = TRUE)
-    if (is.null(approximation)) approximation <- list()
-    approximation$strategy <- "faissR_landmark_query_knn"
-    approximation$requested_by <- "fastEmbedR::landmark_projection_knn"
-    approximation$seed <- as.integer(seed)
-    approximation$n_threads <- as.integer(max(1L, min(8L, normalize_nn_threads(n_threads))))
-    attr(result, "approximation") <- approximation
+    keep <- as.integer(query_rows)
+    out <- list(
+      indices = fused$indices[keep, , drop = FALSE],
+      distances = fused$distances[keep, , drop = FALSE]
+    )
+    result <- finish_nn_result(out, "cuda_fused_projection", k, FALSE, exact = TRUE)
+    attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
+    attr(result, "confidence") <- fused$confidence[keep]
+    attr(result, "cuda_kernel") <- "landmark_project_interpolate_knn_confidence"
+    attr(result, "approximation") <- list(
+      strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
+      backend = "cuda",
+      kernel = "landmark_project_interpolate_knn_confidence"
+    )
     return(result)
   }
 
-  fallback_backend <- if (identical(backend, "metal")) "cpu" else backend
-  fastembedr_faissr_nn(
+  if (backend %in% c("metal", "cuda", "gpu")) {
+    stop(
+      "Native GPU landmark KNN requires the fused fastEmbedR projection path; ",
+      "no CPU or external-package fallback was used.",
+      call. = FALSE
+    )
+  }
+
+  result <- fastembedr_native_query_knn(
     x_landmarks,
     x_query,
     k = k,
-    backend = fallback_backend,
+    metric = "euclidean",
+    output = fastembedr_knn_output_type(x_landmarks, "cpu"),
     n_threads = n_threads
   )
+  attr(result, "approximation") <- list(
+    strategy = "native_hnsw_landmark_query",
+    backend = "cpu",
+    target_recall = 0.99,
+    seed = as.integer(seed)
+  )
+  result
 }
 
 landmark_affine_projection <- function(x_landmarks,
@@ -599,9 +550,11 @@ landmark_affine_projection <- function(x_landmarks,
     max_neighbors <- min(12L, ncol(projection_knn$indices))
   }
   backend <- as.character(backend)[1L]
+  metal_work <- as.double(nrow(x_query)) * as.double(ncol(x_query))
   use_metal <- ncol(landmark_layout) == 2L &&
     backend %in% c("metal", "gpu") &&
-    isTRUE(embedding_metal_available_cpp())
+    isTRUE(embedding_metal_available_cpp()) &&
+    metal_work >= 5e6
   if (use_metal) {
     out <- tryCatch(
       project_embedding_affine_metal_cpp(
@@ -635,10 +588,11 @@ landmark_affine_projection <- function(x_landmarks,
     }
   }
   n_threads <- normalize_nn_threads(n_threads)
-  use_parallel <- n_threads > 1L &&
-    exists("project_embedding_affine_parallel_cpp",
-           envir = asNamespace("fastEmbedR"),
-           inherits = FALSE)
+  use_parallel <- exists(
+    "project_embedding_affine_parallel_cpp",
+    envir = asNamespace("fastEmbedR"),
+    inherits = FALSE
+  )
   affine_fun <- if (use_parallel) {
     project_embedding_affine_parallel_cpp
   } else {
@@ -847,14 +801,12 @@ resident_projection_result <- function(backend, k) {
 #'   transform optimization. Native GPU stages ignore this argument.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
-#' if (requireNamespace("faissR", quietly = TRUE)) {
-#'   fit <- landmark_tsne(
-#'     as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
-#'     early_exaggeration_iter = 5, n_iter = 10,
-#'     transform_iter = 5, seed = 1
-#'   )
-#'   plot(fit, labels = iris$Species)
-#' }
+#' fit <- landmark_tsne(
+#'   as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
+#'   early_exaggeration_iter = 5, n_iter = 10,
+#'   transform_iter = 5, seed = 1
+#' )
+#' plot(fit, labels = iris$Species)
 #' @export
 landmark_tsne <- function(data,
                           landmarks = TRUE,
@@ -900,7 +852,12 @@ landmark_tsne <- function(data,
     }
   }
 
-  landmark_indices <- resolve_landmarks(landmarks, x, seed)
+  landmark_indices <- resolve_landmarks(
+    landmarks,
+    x,
+    seed,
+    n_threads = n_threads
+  )
   if (is.null(landmark_indices)) {
     return(opentsne(
       x,
@@ -917,14 +874,22 @@ landmark_tsne <- function(data,
     ))
   }
 
-  x_landmarks <- x[landmark_indices, , drop = FALSE]
+  non_landmarks <- setdiff(seq_len(n), landmark_indices)
+  partition <- split_landmark_data(
+    x,
+    landmark_indices,
+    non_landmarks,
+    n_threads = n_threads
+  )
+  x_landmarks <- partition$landmarks
+  x_query <- partition$query
   n_landmarks <- nrow(x_landmarks)
   landmark_neighbors <- min(n_neighbors, n_landmarks - 1L)
   reference_time <- system.time({
-    reference_knn <- fastembedr_nn_without_self(
+    reference_knn <- landmark_reference_knn(
       x_landmarks,
       k = landmark_neighbors,
-      backend = embedding_knn_backend(backend),
+      backend = backend,
       n_threads = n_threads
     )
     reference_layout <- opentsne_knn(
@@ -976,7 +941,6 @@ landmark_tsne <- function(data,
     knn = if (isTRUE(keep_knn)) reference_knn else NULL
   )
 
-  non_landmarks <- setdiff(seq_len(n), landmark_indices)
   if (is.null(transform_k)) {
     transform_k <- min(n_landmarks, max(25L, ceiling(3 * transform_perplexity)))
   }
@@ -1022,7 +986,7 @@ landmark_tsne <- function(data,
         if (identical(resident_backend, "metal")) {
           landmark_tsne_transform_resident_metal_cpp(
             x_landmarks,
-            x[non_landmarks, , drop = FALSE],
+            x_query,
             reference_fit$layout,
             as.integer(transform_k),
             as.numeric(transform_perplexity),
@@ -1042,7 +1006,7 @@ landmark_tsne <- function(data,
         } else {
           landmark_tsne_transform_resident_cuda_cpp(
             x_landmarks,
-            x[non_landmarks, , drop = FALSE],
+            x_query,
             reference_fit$layout,
             as.integer(transform_k),
             as.numeric(transform_perplexity),
@@ -1098,7 +1062,7 @@ landmark_tsne <- function(data,
     projection_time <- system.time({
       projection_knn <- landmark_projection_knn(
         x_landmarks,
-        x[non_landmarks, , drop = FALSE],
+        x_query,
         k = transform_k,
         backend = backend,
         seed = seed + 503L,
@@ -1109,70 +1073,103 @@ landmark_tsne <- function(data,
         query_rows = non_landmarks
       )
     })
-    projection_y_init <- attr(projection_knn, "projected_layout", exact = TRUE)
-    affine_y_init <- landmark_affine_projection(
-      x_landmarks,
-      x[non_landmarks, , drop = FALSE],
-      reference_fit$layout,
-      projection_knn,
-      n_threads = n_threads,
-      backend = backend
-    )
-    if (is.matrix(affine_y_init) &&
-        nrow(affine_y_init) == length(non_landmarks) &&
-        ncol(affine_y_init) == n_components) {
-      projection_y_init <- affine_y_init
-      projection_init_backend <- attr(affine_y_init, "projection_backend") %||% NA_character_
-      projection_init_method <- attr(affine_y_init, "projection_method") %||% NA_character_
-    } else if (is.null(projection_y_init) ||
-               !is.matrix(projection_y_init) ||
-               nrow(projection_y_init) != length(non_landmarks) ||
-               ncol(projection_y_init) != n_components) {
-      projection_y_init <- NULL
-    }
-    if (transform_iter == 0L) {
-      if (is.null(projection_y_init)) {
-        projection_y_init <- project_embedding_knn_cpp(
-          reference_fit$layout,
-          projection_knn$indices,
-          projection_knn$distances
-        )
-        projection_init_backend <- "cpu"
-        projection_init_method <- "weighted_knn_fallback"
-      }
-      projected <- projection_y_init
-      attr(projected, "backend") <- attr(projection_knn, "backend") %||% backend
-      attr(projected, "fastEmbedR_config") <- list(
-        optimizer = "projection_only",
-        repulsion = "none",
-        n_negatives = 0L,
-        initialization = initialization,
-        backend = attr(projected, "backend")
-      )
-    } else {
+    cuda_resident_projection <- identical(backend, "cuda") &&
+      fastembedr_is_gpu_knn(projection_knn)
+    if (cuda_resident_projection) {
       transform_time <- system.time({
-        projected <- transform_tsne(
+        resident <- landmark_tsne_transform_cuda_gpu_cpp(
+          projection_knn,
+          x_landmarks,
+          x_query,
           reference_fit$layout,
-          knn = projection_knn,
-          perplexity = transform_perplexity,
-          initialization = initialization,
-          Y_init = projection_y_init,
-          n_iter = transform_iter,
-          early_exaggeration_iter = transform_early_exaggeration_iter,
-          learning_rate = resident_learning_rate,
-          early_exaggeration = resident_early_exaggeration,
-          exaggeration = resident_exaggeration,
-          initial_momentum = resident_initial_momentum,
-          final_momentum = resident_final_momentum,
-          max_grad_norm = resident_max_grad_norm,
-          max_step_norm = resident_max_step_norm,
-          n_negatives = transform_n_negatives,
-          n_threads = n_threads,
-          seed = seed + 1009L,
-          backend = backend,
-          verbose = verbose
+          as.numeric(transform_perplexity),
+          as.integer(transform_iter),
+          as.integer(transform_early_exaggeration_iter),
+          resident_learning_rate,
+          resident_early_exaggeration,
+          resident_exaggeration,
+          resident_initial_momentum,
+          resident_final_momentum,
+          resident_max_grad_norm,
+          resident_max_step_norm,
+          as.integer(resident_n_negatives),
+          as.integer(resident_exact_repulsion_threshold),
+          as.integer(seed + 1009L),
+          12L,
+          1e-3,
+          2.5
         )
+        projected <- resident$Y
+        attr(projected, "backend") <- "cuda"
+        attr(projected, "fastEmbedR_config") <- resident$config
       })
+      projection_init_backend <- "cuda"
+      projection_init_method <- "local_affine_knn_projection_cuda_resident"
+    } else {
+      projection_y_init <- attr(projection_knn, "projected_layout", exact = TRUE)
+      affine_y_init <- landmark_affine_projection(
+        x_landmarks,
+        x_query,
+        reference_fit$layout,
+        projection_knn,
+        n_threads = n_threads,
+        backend = backend
+      )
+      if (embedding_layout_dims_match(
+        affine_y_init, length(non_landmarks), n_components
+      )) {
+        projection_y_init <- affine_y_init
+        projection_init_backend <- attr(affine_y_init, "projection_backend") %||% NA_character_
+        projection_init_method <- attr(affine_y_init, "projection_method") %||% NA_character_
+      } else if (!embedding_layout_dims_match(
+        projection_y_init, length(non_landmarks), n_components
+      )) {
+        projection_y_init <- NULL
+      }
+      if (transform_iter == 0L) {
+        if (is.null(projection_y_init)) {
+          projection_y_init <- project_embedding_knn_cpp(
+            reference_fit$layout,
+            projection_knn$indices,
+            projection_knn$distances
+          )
+          projection_init_backend <- "cpu"
+          projection_init_method <- "weighted_knn_fallback"
+        }
+        projected <- projection_y_init
+        attr(projected, "backend") <- attr(projection_knn, "backend") %||% backend
+        attr(projected, "fastEmbedR_config") <- list(
+          optimizer = "projection_only",
+          repulsion = "none",
+          n_negatives = 0L,
+          initialization = initialization,
+          backend = attr(projected, "backend")
+        )
+      } else {
+        transform_time <- system.time({
+          projected <- transform_tsne(
+            reference_fit$layout,
+            knn = projection_knn,
+            perplexity = transform_perplexity,
+            initialization = initialization,
+            Y_init = projection_y_init,
+            n_iter = transform_iter,
+            early_exaggeration_iter = transform_early_exaggeration_iter,
+            learning_rate = resident_learning_rate,
+            early_exaggeration = resident_early_exaggeration,
+            exaggeration = resident_exaggeration,
+            initial_momentum = resident_initial_momentum,
+            final_momentum = resident_final_momentum,
+            max_grad_norm = resident_max_grad_norm,
+            max_step_norm = resident_max_step_norm,
+            n_negatives = transform_n_negatives,
+            n_threads = n_threads,
+            seed = seed + 1009L,
+            backend = backend,
+            verbose = verbose
+          )
+        })
+      }
     }
   }
   if (!exists("projection_init_backend", inherits = FALSE)) {
@@ -1182,10 +1179,15 @@ landmark_tsne <- function(data,
     projection_init_method <- NA_character_
   }
 
-  layout <- matrix(NA_real_, nrow = n, ncol = n_components)
-  layout[landmark_indices, ] <- reference_fit$layout
-  layout[non_landmarks, ] <- projected
-  colnames(layout) <- colnames(reference_fit$layout)
+  layout <- assemble_landmark_layout(
+    reference_fit$layout,
+    projected,
+    landmark_indices,
+    non_landmarks,
+    n,
+    prefix = "openTSNE",
+    return_float32 = is_float32_matrix(x)
+  )
 
   timings <- rbind(
     preprocess = preprocess_time,

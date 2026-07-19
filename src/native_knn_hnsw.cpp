@@ -99,6 +99,47 @@ class CompactHNSW {
     for (std::thread& worker : workers) worker.join();
   }
 
+  void search_queries(const std::vector<float>& queries,
+                      int n_queries,
+                      int k,
+                      int n_threads,
+                      std::vector<int>& output_ids,
+                      std::vector<float>& output_distances) const {
+    output_ids.assign(static_cast<std::size_t>(n_queries) * k, -1);
+    output_distances.assign(
+      static_cast<std::size_t>(n_queries) * k,
+      std::numeric_limits<float>::infinity()
+    );
+    std::atomic<int> next(0);
+    n_threads = std::max(1, std::min(n_threads, n_queries));
+    std::vector<std::thread> workers;
+    workers.reserve(n_threads);
+    for (int thread_id = 0; thread_id < n_threads; ++thread_id) {
+      workers.emplace_back([&, thread_id]() {
+        (void)thread_id;
+        VisitTable visited(n_);
+        while (true) {
+          const int query_id = next.fetch_add(1, std::memory_order_relaxed);
+          if (query_id >= n_queries) break;
+          const float* query = queries.data() +
+            static_cast<std::size_t>(query_id) * p_;
+          std::vector<NodeDistance> candidates = search_vector(
+            query, std::max(k, ef_search_), visited
+          );
+          if (static_cast<int>(candidates.size()) < k) {
+            candidates = exact_query(query, k);
+          }
+          for (int rank = 0; rank < k; ++rank) {
+            const std::size_t pos = static_cast<std::size_t>(query_id) * k + rank;
+            output_ids[pos] = candidates[static_cast<std::size_t>(rank)].id;
+            output_distances[pos] = candidates[static_cast<std::size_t>(rank)].distance;
+          }
+        }
+      });
+    }
+    for (std::thread& worker : workers) worker.join();
+  }
+
   std::size_t graph_bytes() const {
     return neighbors_.size() * sizeof(std::int32_t) + levels_.size() * sizeof(int) +
       node_offsets_.size() * sizeof(std::size_t) + level_offsets_.size() * sizeof(std::size_t) +
@@ -319,12 +360,36 @@ class CompactHNSW {
   }
 
   std::vector<NodeDistance> search_query(int query_id, int ef, VisitTable& visited) const {
-    const float* query = point(query_id);
+    return search_vector(point(query_id), ef, visited);
+  }
+
+  std::vector<NodeDistance> search_vector(const float* query,
+                                          int ef,
+                                          VisitTable& visited) const {
     int nearest = entry_point_;
     float nearest_distance = distance(query, point(nearest));
     for (int level = current_max_level_; level >= 1; --level)
       nearest = greedy_search(query, nearest, level, nearest_distance);
     return search_layer(query, nearest, ef, 0, visited);
+  }
+
+  std::vector<NodeDistance> exact_query(const float* query, int k) const {
+    std::priority_queue<NodeDistance, std::vector<NodeDistance>, FartherFirst> heap;
+    for (int candidate = 0; candidate < n_; ++candidate) {
+      NodeDistance value{distance(query, point(candidate)), candidate};
+      if (heap.size() < static_cast<std::size_t>(k) || closer(value, heap.top())) {
+        heap.push(value);
+        if (heap.size() > static_cast<std::size_t>(k)) heap.pop();
+      }
+    }
+    std::vector<NodeDistance> exact;
+    exact.reserve(static_cast<std::size_t>(k));
+    while (!heap.empty()) {
+      exact.push_back(heap.top());
+      heap.pop();
+    }
+    std::sort(exact.begin(), exact.end(), closer);
+    return exact;
   }
 
   void exact_fill(int query, int k, int used, std::vector<int>& output_ids, std::vector<float>& output_distances) const {
@@ -406,5 +471,82 @@ Rcpp::List native_hnsw_knn_impl(SEXP data_sexp,
   result.attr("method") = "native_hnsw";
   result.attr("target_recall") = target_recall;
   result.attr("metric") = metric_name;
+  return result;
+}
+
+Rcpp::List native_hnsw_query_impl(SEXP data_sexp,
+                                  SEXP query_sexp,
+                                  int k,
+                                  int n_threads,
+                                  const std::string& metric_name,
+                                  double target_recall) {
+  using Clock = std::chrono::steady_clock;
+  const auto start = Clock::now();
+  const fastembedr::KnnMetric metric = fastembedr::parse_knn_metric(metric_name);
+  if (metric == fastembedr::KnnMetric::InnerProduct) {
+    Rcpp::stop("Native CPU HNSW does not support raw inner-product distance.");
+  }
+  fastembedr::FloatMatrix input =
+    fastembedr::matrix_to_row_major_float(data_sexp, metric);
+  fastembedr::FloatMatrix query =
+    fastembedr::matrix_to_row_major_float(query_sexp, metric);
+  const auto converted = Clock::now();
+  const int n = input.nrow;
+  const int p = input.ncol;
+  const int n_queries = query.nrow;
+  if (n < 1 || n_queries < 1 || p < 1 || query.ncol != p || k < 1 || k > n) {
+    Rcpp::stop("Invalid native HNSW query input.");
+  }
+  const bool large_high_dim = n >= 50000 && p >= 128 && k <= 30;
+  const int m = large_high_dim ? 10 : 16;
+  const int ef_construction = large_high_dim ? 40 : 80;
+  const int ef_search = large_high_dim ? 40 : 64;
+  CompactHNSW index(
+    std::move(input.values), n, p, m, ef_construction, ef_search
+  );
+  index.build();
+  const auto built = Clock::now();
+  std::vector<int> ids;
+  std::vector<float> squared_distances;
+  index.search_queries(
+    query.values, n_queries, k, n_threads, ids, squared_distances
+  );
+  const auto searched = Clock::now();
+  Rcpp::IntegerMatrix indices(n_queries, k);
+  Rcpp::NumericMatrix distances(n_queries, k);
+  for (int i = 0; i < n_queries; ++i) {
+    for (int j = 0; j < k; ++j) {
+      const std::size_t pos = static_cast<std::size_t>(i) * k + j;
+      indices(i, j) = ids[pos] + 1;
+      distances(i, j) = fastembedr::output_distance(
+        squared_distances[pos], metric
+      );
+    }
+  }
+  Rcpp::List result = Rcpp::List::create(
+    Rcpp::Named("indices") = indices,
+    Rcpp::Named("distances") = distances,
+    Rcpp::Named("backend") = "cpu",
+    Rcpp::Named("method") = "native_hnsw_query",
+    Rcpp::Named("metric") = metric_name,
+    Rcpp::Named("target_recall") = target_recall,
+    Rcpp::Named("M") = m,
+    Rcpp::Named("efConstruction") = ef_construction,
+    Rcpp::Named("efSearch") = ef_search,
+    Rcpp::Named("graph_bytes") = static_cast<double>(index.graph_bytes()),
+    Rcpp::Named("timing") = Rcpp::NumericVector::create(
+      Rcpp::Named("convert") =
+        std::chrono::duration<double>(converted - start).count(),
+      Rcpp::Named("build") =
+        std::chrono::duration<double>(built - converted).count(),
+      Rcpp::Named("query") =
+        std::chrono::duration<double>(searched - built).count()
+    )
+  );
+  result.attr("backend") = "cpu";
+  result.attr("method") = "native_hnsw_query";
+  result.attr("target_recall") = target_recall;
+  result.attr("metric") = metric_name;
+  result.attr("exclude_self") = false;
   return result;
 }

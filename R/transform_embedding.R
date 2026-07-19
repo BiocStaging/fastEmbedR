@@ -1,6 +1,5 @@
 transform_embedding_matrix <- function(x, name, min_rows = 1L) {
-  x <- as.matrix(x)
-  storage.mode(x) <- "double"
+  x <- embedding_dense_double_matrix(x)
   if (nrow(x) < min_rows || ncol(x) < 1L) {
     stop(
       "`", name, "` must have at least ", min_rows,
@@ -12,6 +11,56 @@ transform_embedding_matrix <- function(x, name, min_rows = 1L) {
     stop("`", name, "` must contain only finite values.", call. = FALSE)
   }
   x
+}
+
+embedding_layout_dims_match <- function(x, n, p) {
+  (is.matrix(x) || is_float32_matrix(x)) &&
+    identical(as.integer(dim(x)), as.integer(c(n, p)))
+}
+
+assemble_landmark_layout <- function(reference_layout,
+                                     projected_layout,
+                                     landmark_indices,
+                                     non_landmark_indices,
+                                     n,
+                                     prefix,
+                                     return_float32 = FALSE) {
+  n_components <- ncol(reference_layout)
+  if (!embedding_layout_dims_match(
+    reference_layout, length(landmark_indices), n_components
+  )) {
+    stop("Invalid landmark reference layout dimensions.", call. = FALSE)
+  }
+  if (!embedding_layout_dims_match(
+    projected_layout, length(non_landmark_indices), n_components
+  )) {
+    stop("Invalid projected landmark layout dimensions.", call. = FALSE)
+  }
+
+  # Only the two-dimensional layouts cross through double here. The large
+  # feature, KNN-distance, graph, and optimizer buffers remain float32.
+  layout <- matrix(NA_real_, nrow = n, ncol = n_components)
+  layout[landmark_indices, ] <- embedding_dense_double_matrix(reference_layout)
+  layout[non_landmark_indices, ] <- embedding_dense_double_matrix(projected_layout)
+  finalize_embedding_layout(layout, prefix, return_float32 = return_float32)
+}
+
+split_landmark_data <- function(x,
+                                landmark_indices,
+                                non_landmark_indices,
+                                n_threads = NULL) {
+  if (is_float32_matrix(x)) {
+    return(split_float32_rows_cpp(
+      x,
+      as.integer(landmark_indices),
+      as.integer(non_landmark_indices),
+      as.integer(normalize_nn_threads(n_threads))
+    ))
+  }
+  list(
+    landmarks = x[landmark_indices, , drop = FALSE],
+    query = x[non_landmark_indices, , drop = FALSE]
+  )
 }
 
 transform_embedding_k <- function(k, max_k) {
@@ -33,7 +82,11 @@ transform_projection_knn <- function(knn, n_reference, k = NULL) {
   indices <- knn$indices
   distances <- knn$distances
   if (!is.matrix(indices)) indices <- as.matrix(indices)
-  if (!is.matrix(distances)) distances <- as.matrix(distances)
+  if (is_float32_matrix(distances)) {
+    distances <- embedding_dense_double_matrix(distances)
+  } else if (!is.matrix(distances)) {
+    distances <- as.matrix(distances)
+  }
   if (!is.integer(indices)) storage.mode(indices) <- "integer"
   if (!identical(typeof(distances), "double")) storage.mode(distances) <- "double"
 

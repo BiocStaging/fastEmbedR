@@ -34,8 +34,8 @@ opentsne(
 )
 }
 \arguments{
-\item{data}{Numeric matrix/data frame with observations in rows, or a KNN
-object returned by [faissR::nn()].}
+\item{data}{Numeric matrix/data frame with observations in rows, or a list
+containing KNN `indices` and `distances`.}
 
 \item{perplexity}{t-SNE perplexity. The one-call API uses
 `ceiling(perplexity)` non-self neighbours internally. If `NULL`, uses the
@@ -124,11 +124,9 @@ matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
 }
 \examples{
-if (requireNamespace("faissR", quietly = TRUE)) {
-  fit <- opentsne(
-    as.matrix(iris[, 1:4]), perplexity = 5,
-    early_exaggeration_iter = 10, n_iter = 20, seed = 1
-  )
-  plot(fit, labels = iris$Species)
-}
+fit <- opentsne(
+  as.matrix(iris[, 1:4]), perplexity = 5,
+  early_exaggeration_iter = 5, n_iter = 10, seed = 1
+)
+plot(fit, labels = iris$Species)
 }

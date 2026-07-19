@@ -1166,13 +1166,16 @@ fast_knn_opentsne_core <- function(indices,
 #' @inheritParams opentsne_knn
 #' @return A prepared openTSNE KNN object.
 #' @examples
-#' if (requireNamespace("faissR", quietly = TRUE)) {
-#'   x <- scale(as.matrix(iris[, 1:4]))
-#'   knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-#'   prep <- prepare_opentsne_knn(knn, perplexity = 10)
-#'   y1 <- opentsne_knn(prep, seed = 1, early_exaggeration_iter = 50, n_iter = 100)
-#'   y2 <- opentsne_knn(prep, seed = 2, early_exaggeration_iter = 50, n_iter = 100)
-#' }
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' d <- as.matrix(stats::dist(x))
+#' diag(d) <- Inf
+#' k <- 15L
+#' idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+#' dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+#'   nrow = nrow(d), byrow = TRUE)
+#' prep <- prepare_opentsne_knn(idx, dst, perplexity = 5)
+#' y1 <- opentsne_knn(prep, seed = 1, early_exaggeration_iter = 5, n_iter = 10)
+#' y2 <- opentsne_knn(prep, seed = 2, early_exaggeration_iter = 5, n_iter = 10)
 #' @export
 prepare_opentsne_knn <- function(indices,
                                  distances = NULL,
@@ -1201,15 +1204,14 @@ prepare_opentsne_knn <- function(indices,
 #' Run native openTSNE-style t-SNE from precomputed KNN
 #'
 #' `opentsne_knn()` is the direct KNN-input entry point for the native
-#' openTSNE-style optimizer. It accepts either an object returned by
-#' [faissR::nn()] or
-#' separate KNN index and distance matrices. No neighbour search, scaling, or
-#' PCA is done inside this function.
+#' openTSNE-style optimizer. It accepts either a list containing KNN `indices`
+#' and `distances` or separate KNN index and distance matrices. No neighbour
+#' search, scaling, or PCA is done inside this function.
 #'
-#' @param indices A KNN object returned by [faissR::nn()], or an integer KNN index
-#'   matrix.
+#' @param indices A list containing KNN `indices` and `distances`, or an integer
+#'   KNN index matrix.
 #' @param distances Numeric KNN distance matrix matching `indices`. Leave
-#'   `NULL` when `indices` is a [faissR::nn()] result.
+#'   `NULL` when `indices` is a KNN list.
 #' @param n_neighbors Optional number of non-self neighbor columns to use from
 #'   the supplied KNN graph. This lets you compute a wide KNN once and reuse
 #'   its first columns for comparable tests.
@@ -1222,15 +1224,15 @@ prepare_opentsne_knn <- function(indices,
 #' @return A numeric embedding matrix with settings stored in
 #'   `attr(layout, "fastEmbedR_config")`.
 #' @examples
-#' if (requireNamespace("faissR", quietly = TRUE)) {
-#'   x <- scale(as.matrix(iris[, 1:4]))
-#'   knn <- faissR::nn(x, k = 31, exclude_self = TRUE)
-#'   layout <- opentsne_knn(knn, init_data = x, perplexity = 10,
-#'     early_exaggeration_iter = 100, n_iter = 250)
-#'   if (all(is.finite(layout))) {
-#'     plot(layout, pch = 21, bg = iris$Species)
-#'   }
-#' }
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' d <- as.matrix(stats::dist(x))
+#' diag(d) <- Inf
+#' k <- 15L
+#' idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+#' dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+#'   nrow = nrow(d), byrow = TRUE)
+#' layout <- opentsne_knn(idx, dst, init_data = x, perplexity = 5,
+#'   early_exaggeration_iter = 5, n_iter = 10)
 #' @export
 opentsne_knn <- function(indices,
                          distances = NULL,
@@ -1265,7 +1267,8 @@ opentsne_knn <- function(indices,
     if (isTRUE(gpu_info$has_self)) {
       stop(
         "CUDA GPU-resident openTSNE requires non-self KNN. ",
-        "Use `faissR::nn_gpu(..., exclude_self = TRUE)`.",
+        "Use fastEmbedR's native matrix-input CUDA route or provide a native ",
+        "fastEmbedR GPU KNN object with non-self neighbors.",
         call. = FALSE
       )
     }
@@ -1387,8 +1390,8 @@ opentsne_knn <- function(indices,
 #' matching package-native GPU optimizer when compiled and fail clearly if the
 #' requested backend is unavailable.
 #'
-#' @param data Numeric matrix/data frame with observations in rows, or a KNN
-#'   object returned by [faissR::nn()].
+#' @param data Numeric matrix/data frame with observations in rows, or a list
+#'   containing KNN `indices` and `distances`.
 #' @param perplexity t-SNE perplexity. The one-call API uses
 #'   `ceiling(perplexity)` non-self neighbours internally. If `NULL`, uses the
 #'   largest safe value up to 30 that is available for the input.
@@ -1442,13 +1445,11 @@ opentsne_knn <- function(indices,
 #' @param ... Additional low-level parameters passed to [opentsne_knn()].
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
-#' if (requireNamespace("faissR", quietly = TRUE)) {
-#'   fit <- opentsne(
-#'     as.matrix(iris[, 1:4]), perplexity = 5,
-#'     early_exaggeration_iter = 10, n_iter = 20, seed = 1
-#'   )
-#'   plot(fit, labels = iris$Species)
-#' }
+#' fit <- opentsne(
+#'   as.matrix(iris[, 1:4]), perplexity = 5,
+#'   early_exaggeration_iter = 5, n_iter = 10, seed = 1
+#' )
+#' plot(fit, labels = iris$Species)
 #' @export
 opentsne <- function(data,
                      perplexity = NULL,
@@ -1726,7 +1727,7 @@ opentsne <- function(data,
         backend = knn_policy$backend,
         method = knn_policy$method,
         metric = metric,
-        output = fastembedr_faiss_float_output(x, knn_policy$backend),
+        output = fastembedr_knn_output_type(x, knn_policy$backend),
         n_threads = n_threads,
         tuning = knn_policy$tuning,
         target_recall = knn_policy$target_recall,

@@ -18,6 +18,6 @@ requests fail clearly at run time.
 
 ## Downstream and optional packages
 
-Optional graph clustering support uses `igraph` and `leidenbase` only when they
-are installed. Examples and tests guard optional functionality with
-`requireNamespace()`.
+Graph construction and Louvain, Leiden, and Walktrap community detection are
+implemented natively. `igraph` is suggested only for guarded validation tests
+and optional comparisons.

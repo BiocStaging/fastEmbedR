@@ -44,10 +44,8 @@ prepare_embedding_data <- function(data,
                                    pca_dims,
                                    seed,
                                    backend = "cpu") {
-  keep_float32 <- is_float32_matrix(data) &&
-    !isTRUE(standardize) &&
-    is.null(pca_dims)
-  x <- if (keep_float32) {
+  input_float32 <- is_float32_matrix(data)
+  x <- if (input_float32) {
     data
   } else {
     x <- as.matrix(data)
@@ -57,7 +55,7 @@ prepare_embedding_data <- function(data,
   if (nrow(x) < 2L || ncol(x) < 1L) {
     stop("`data` must have at least two rows and one column.", call. = FALSE)
   }
-  finite_input <- if (keep_float32) {
+  finite_input <- if (input_float32) {
     float32_all_finite_cpp(x)
   } else {
     all(is.finite(x))
@@ -76,11 +74,18 @@ prepare_embedding_data <- function(data,
     pca_power = NA_integer_,
     pca_backend_reason = NA_character_,
     preprocess_backend = if (isTRUE(standardize)) "cpu" else "none",
-    preprocess_backend_reason = if (keep_float32) "float32_input_preserved_without_preprocessing" else NA_character_
+    preprocess_backend_reason = if (input_float32) "float32_input_preserved" else NA_character_
   )
   if (isTRUE(standardize)) {
     used_native <- FALSE
-    if (identical(backend, "cuda") && cuda_metric_available()) {
+    if (input_float32) {
+      standardized <- standardize_float32_cpp(x)
+      x <- standardized$data
+      used_native <- TRUE
+      preprocess$standardize_backend <- "cpu_float32"
+      preprocess$preprocess_backend <- "cpu_float32"
+      preprocess$preprocess_backend_reason <- "native_float32_column_standardization"
+    } else if (identical(backend, "cuda") && cuda_metric_available()) {
       standardized <- tryCatch(
         standardize_cuda_cpp(x),
         error = function(e) {
@@ -822,7 +827,7 @@ auto_landmark_count <- function(n) {
   as.integer(min(n - 1L, max(300L, ceiling(sqrt(n) * 7))))
 }
 
-resolve_landmarks <- function(landmarks, x, seed) {
+resolve_landmarks <- function(landmarks, x, seed, n_threads = NULL) {
   n <- nrow(x)
   if (is.null(landmarks) || identical(landmarks, FALSE)) {
     return(NULL)
@@ -830,7 +835,7 @@ resolve_landmarks <- function(landmarks, x, seed) {
 
   if (identical(landmarks, TRUE)) {
     count <- auto_landmark_count(n)
-    return(select_landmark_rows(x, count, seed))
+    return(select_landmark_rows(x, count, seed, n_threads = n_threads))
   }
 
   if (length(landmarks) == 1L && is.numeric(landmarks)) {
@@ -849,7 +854,7 @@ resolve_landmarks <- function(landmarks, x, seed) {
     if (count >= n) {
       return(NULL)
     }
-    return(select_landmark_rows(x, count, seed))
+    return(select_landmark_rows(x, count, seed, n_threads = n_threads))
   }
 
   if (!is.numeric(landmarks)) {
@@ -865,14 +870,14 @@ resolve_landmarks <- function(landmarks, x, seed) {
   idx
 }
 
-select_landmark_rows <- function(x, count, seed) {
+select_landmark_rows <- function(x, count, seed, n_threads = NULL) {
   n <- nrow(x)
   count <- as.integer(min(max(2L, count), n))
   if (count >= n) {
     return(seq_len(n))
   }
 
-  z <- landmark_selection_features(x, seed)
+  z <- landmark_selection_features(x, seed, n_threads = n_threads)
   if (count <= 2000L) {
     candidate_count <- min(n, max(count, min(12000L, max(500L, 4L * count))))
     candidates <- projection_quantile_rows(z, candidate_count, seed)
@@ -892,11 +897,10 @@ select_landmark_rows <- function(x, count, seed) {
   selected
 }
 
-landmark_selection_features <- function(x, seed) {
-  x <- as.matrix(x)
+landmark_selection_features <- function(x, seed, n_threads = NULL) {
   n <- nrow(x)
   p <- ncol(x)
-  direct <- x[, seq_len(min(4L, p)), drop = FALSE]
+  n_direct <- min(4L, p)
   n_random <- min(4L, p)
 
   restore_seed <- set_local_seed(seed)
@@ -905,7 +909,18 @@ landmark_selection_features <- function(x, seed) {
   norms <- sqrt(colSums(directions * directions))
   norms[!is.finite(norms) | norms == 0] <- 1
   directions <- sweep(directions, 2L, norms, "/")
-  z <- cbind(direct, x %*% directions)
+  if (is_float32_matrix(x)) {
+    z <- landmark_projection_float32_cpp(
+      x,
+      directions,
+      n_direct = n_direct,
+      n_threads = as.integer(normalize_nn_threads(n_threads))
+    )
+  } else {
+    x <- as.matrix(x)
+    direct <- x[, seq_len(n_direct), drop = FALSE]
+    z <- cbind(direct, x %*% directions)
+  }
   z <- as.matrix(z)
   storage.mode(z) <- "double"
 
@@ -1001,11 +1016,11 @@ sampled_score_indices <- function(x,
     end <- min(length(keep), start + batch_size - 1L)
     rows <- start:end
     batch_keep <- keep[rows]
-    raw <- fastembedr_faissr_nn(
+    raw <- fastembedr_native_query_knn(
       x,
       x[batch_keep, , drop = FALSE],
       k = query_k,
-      backend = backend,
+      metric = "euclidean",
       n_threads = n_threads
     )
     for (local_i in seq_along(batch_keep)) {

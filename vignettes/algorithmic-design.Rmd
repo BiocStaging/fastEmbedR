@@ -1,6 +1,10 @@
 ---
 title: "Algorithmic design and acknowledgements"
-output: BiocStyle::html_document
+author: "Stefano Caccia"
+output:
+  BiocStyle::html_document:
+    toc: true
+    number_sections: true
 vignette: >
   %\VignetteIndexEntry{Algorithmic design and acknowledgements}
   %\VignetteEngine{knitr::rmarkdown}
@@ -11,37 +15,24 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-`fastEmbedR` is built around a KNN-first design. Nearest-neighbour search is
-handled by the companion `faissR` package; `fastEmbedR` consumes those
-neighbours to run UMAP and openTSNE-style t-SNE embeddings.
+`fastEmbedR` is built around a KNN-first design. The package implements native
+one-call nearest-neighbor routes for CPU, Metal, and optional CUDA builds, then
+consumes the resulting graph in native UMAP or openTSNE-style t-SNE code. It
+also exposes those native routes through `precompute_knn()` and accepts plain
+precomputed host KNN index and distance matrices.
 
 This vignette explains what is implemented, what was removed, and which papers
 or software projects inspired the current code.
 
-## Package Boundaries
+## Package Boundary
 
-The current project is split into two packages.
-
-| Package | Main responsibility |
-| --- | --- |
-| `faissR` | FAISS/cuVS nearest neighbours, candidate KNN, KNN graphs, KNN prediction, and k-means. |
-| `fastEmbedR` | UMAP, openTSNE-style t-SNE, landmark transforms, and quality metrics. |
-
-Use `faissR::nn()` directly so the same KNN object can be shared across UMAP
-and openTSNE runs.
-
-```r
-library(fastEmbedR)
-
-nn <- getExportedValue("faissR", "nn")
-knn <- nn(x, k = 50, exclude_self = TRUE, backend = "cpu", method = "auto", n_threads = 4)
-y_umap <- umap_knn(knn, backend = "cpu", seed = 1)
-y_tsne <- opentsne_knn(knn, init_data = x, backend = "cpu", seed = 1)
-```
-
-The practical advantage is that KNN time and embedding time are separated.
-This is important for fair comparisons with `uwot`, `Rtsne`, FIt-SNE, and GPU
-implementations.
+`fastEmbedR` owns its one-call KNN routes, PCA initialization, UMAP,
+openTSNE-style t-SNE, KNN graph construction, community detection, landmark
+transforms, and quality metrics. It does not call another R package for
+nearest-neighbour search. A reusable host KNN may still be passed as a plain
+list containing `indices` and `distances`; this separates KNN and embedding
+time for controlled comparisons. A CUDA result from `precompute_knn()` remains
+device-resident and is reusable directly by the CUDA KNN-input embedding APIs.
 
 The embedding functions also accept plain precomputed KNN matrices, so the
 core package can be checked without any external nearest-neighbour library:
@@ -60,6 +51,31 @@ dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
 layout <- umap_knn(idx, dst, graph_mode = "fuzzy", n_threads = 1, seed = 1)
 dim(layout)
 ```
+
+## Graph construction and community detection
+
+`knn_graph()` consumes only neighbour indices and distances after the KNN
+boundary. Its deliberately small weighting surface contains SNN/Jaccard,
+inverse-distance, and binary edges. Duplicate directed KNN observations are
+collapsed into one undirected edge, and graph construction is parallelized by
+source row.
+
+`graph_cluster()` has three native CPU methods:
+
+1. multilevel Louvain local moving and graph aggregation;
+2. Leiden local moving, within-community refinement, and aggregation;
+3. exact Pons-Latapy Walktrap random-walk distances and adjacent-community
+   agglomeration.
+
+Leiden's phase organization follows Traag et al. and is informed by the
+MIT-licensed NetworKit implementation. The package uses its own compact graph
+representation and does not link to NetworKit. Walktrap is not the earlier
+sampled-proximity approximation: it computes the published degree-scaled
+random-walk distance and Ward update. Because its transition matrix is
+quadratic in the number of vertices, the implementation stops before an
+unsafe allocation and directs large analyses to Leiden or Louvain. `igraph`
+is used only as a test oracle, not as a runtime dependency. cuGraph is not
+required.
 
 ## UMAP
 
@@ -124,15 +140,20 @@ The CUDA UMAP backend uses native CUDA kernels when `fastEmbedR` is built with
 CUDA support. The cleaned public path is the pure atomic CUDA optimizer. Older
 CUDA hybrid and deterministic variants were removed.
 
-CUDA KNN is not implemented in `fastEmbedR`; it comes from `faissR`. The
-one-call embedding API requests the faissR CUDA backend on CUDA, and faissR
-selects the concrete method automatically. KNN-first workflows can use other
-explicit `faissR::nn()` settings for benchmarking.
+For one-call CUDA embeddings, fastEmbedR invokes native FAISS GPU exact search
+for smaller inputs and RAPIDS cuVS IVF-Flat for larger inputs. The packed KNN
+buffers stay on the selected CUDA device through graph or affinity
+construction and optimization. External GPU objects are not materialized by
+fastEmbedR; callers must convert them explicitly to host KNN matrices.
 
 ```r
-nn <- getExportedValue("faissR", "nn")
-knn_cuda <- nn(x, k = 50, exclude_self = TRUE, backend = "cuda", method = "auto", n_threads = 4)
-y_cuda <- umap_knn(knn_cuda, backend = "cuda", seed = 1)
+y_cuda <- umap(
+  x,
+  n_neighbors = 50,
+  backend = "cuda",
+  graph_mode = "fuzzy",
+  seed = 1
+)
 ```
 
 ## openTSNE-Style t-SNE
@@ -262,11 +283,11 @@ The backend rule is simple:
 - `backend = "cuda"` must run native CUDA/cuFFT code or fail;
 - CPU fallback is never reported as GPU work.
 
-Use `faissR::backend_info()` to inspect the current KNN build:
+Every result records the backend and KNN route that actually ran:
 
 ```r
-backend_info <- getExportedValue("faissR", "backend_info")
-backend_info()
+fit <- umap(x, n_neighbors = 30, backend = "cpu", seed = 1)
+fit$parameters[c("backend", "nn_backend", "graph_mode")]
 ```
 
 ```{r sessionInfo}
@@ -285,6 +306,9 @@ Key references are listed in AACR journal style.
 6. Belkina AC, Ciccolella CO, Anno R, Halpert R, Spidlen J, Snyder-Cappione JE. Automated optimized parameters for T-distributed stochastic neighbor embedding improve visualization and analysis of large datasets. Nat Commun 2019;10:5415.
 7. McInnes L, Healy J, Melville J. UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction. arXiv 2018;1802.03426.
 8. Johnson J, Douze M, Jegou H. Billion-scale similarity search with GPUs. IEEE Trans Big Data 2021;7:535-547.
+9. Blondel VD, Guillaume JL, Lambiotte R, Lefebvre E. Fast unfolding of communities in large networks. J Stat Mech 2008;2008:P10008.
+10. Traag VA, Waltman L, van Eck NJ. From Louvain to Leiden: guaranteeing well-connected communities. Sci Rep 2019;9:5233.
+11. Pons P, Latapy M. Computing communities in large networks using random walks. J Graph Algorithms Appl 2006;10:191-218.
 
 Software acknowledgements include `uwot`, `Rtsne`, FAISS, RAPIDS cuVS,
 AppleSiliconFFT, `mlx-vis`, and `annembed`. See `inst/NOTICE`,

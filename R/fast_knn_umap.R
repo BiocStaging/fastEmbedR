@@ -1,11 +1,11 @@
 #' Fast UMAP from precomputed nearest neighbors
 #'
 #' @param indices Integer matrix of nearest-neighbor indices, one row per point,
-#'   or a list returned by [faissR::nn()]. Indices may be 1-based, as returned by R
-#'   packages, or 0-based. If a self-neighbor first column is present it is
-#'   removed automatically.
+#'   or a list containing `indices` and `distances`. Indices may be 1-based, as
+#'   returned by R packages, or 0-based. If a self-neighbor first column is
+#'   present it is removed automatically.
 #' @param distances Numeric matrix matching `indices`. Leave as `NULL` when
-#'   `indices` is a [faissR::nn()] result.
+#'   `indices` is a KNN list.
 #' @param n_components Output dimensionality.
 #' @param seed Integer random seed.
 #' @param verbose Print progress from C++.
@@ -547,7 +547,8 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
   if (isTRUE(gpu_info$has_self)) {
     stop(
       "CUDA GPU-resident UMAP requires non-self KNN. ",
-      "Use `faissR::nn_gpu(..., exclude_self = TRUE).",
+      "Use fastEmbedR's native matrix-input CUDA route or provide a native ",
+      "fastEmbedR GPU KNN object with non-self neighbors.",
       call. = FALSE
     )
   }
@@ -635,13 +636,16 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
 #' @return A prepared UMAP object containing the KNN, CSR graph, and resolved
 #'   UMAP graph schedule.
 #' @examples
-#' if (requireNamespace("faissR", quietly = TRUE)) {
-#'   x <- scale(as.matrix(iris[, 1:4]))
-#'   knn <- faissR::nn(x, k = 15, exclude_self = TRUE)
-#'   prep <- prepare_umap_knn(knn)
-#'   y1 <- umap_knn(prep, seed = 1)
-#'   y2 <- umap_knn(prep, seed = 2)
-#' }
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' d <- as.matrix(stats::dist(x))
+#' diag(d) <- Inf
+#' k <- 15L
+#' idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+#' dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+#'   nrow = nrow(d), byrow = TRUE)
+#' prep <- prepare_umap_knn(idx, dst)
+#' y1 <- umap_knn(prep, seed = 1)
+#' y2 <- umap_knn(prep, seed = 2)
 #' @export
 prepare_umap_knn <- function(indices,
                              distances = NULL,

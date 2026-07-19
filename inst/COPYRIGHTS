@@ -33,6 +33,16 @@ Comment: Minimal stable DLPack C ABI declarations required by the optional
          RAPIDS cuVS C headers. The full upstream license is installed as
          LICENSES/DLPACK-LICENSE.
 
+Files: src/graph_clustering.cpp
+Copyright: NetworKit contributors
+           Stefano Caccia
+License: MIT
+Comment: The native Leiden local-move, refinement, and aggregation phase
+         organization is informed by NetworKit's MIT-licensed ParallelLeiden
+         implementation and by Traag et al. (2019). The package code uses its
+         own compact graph representation and does not link to NetworKit. The
+         complete upstream license is installed as LICENSES/NETWORKIT-LICENSE.
+
 Files: *
 Copyright: Stefano Caccia
 License: MIT
