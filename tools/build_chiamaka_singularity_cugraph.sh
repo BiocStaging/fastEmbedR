@@ -9,7 +9,9 @@ REMOTE_EXEC="${REMOTE_EXEC:-singularity exec --nv}"
 LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG_TARBALL="${PKG_TARBALL:-}"
 DEF_FILE="${LOCAL_ROOT}/tools/hpc_embeddings/fastembedr_cuda_multiarch_cugraph.def"
+KODAMA_PATCH="${LOCAL_ROOT}/tools/hpc_embeddings/kodama_opentsne_small_data.patch"
 REMOTE_DEF="${REMOTE_DIR}/fastembedr_cuda_multiarch_cugraph.def"
+REMOTE_KODAMA_PATCH="${REMOTE_DIR}/kodama_opentsne_small_data.patch"
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 REMOTE_SIF="${REMOTE_SIF:-${REMOTE_DIR}/fastembedr_cuda_${STAMP}.sif}"
 REMOTE_LOG="${REMOTE_LOG:-${REMOTE_DIR}/build_fastembedr_cuda_cugraph_${STAMP}.log}"
@@ -30,6 +32,10 @@ if [[ ! -s "${DEF_FILE}" ]]; then
   echo "Missing Singularity definition: ${DEF_FILE}" >&2
   exit 1
 fi
+if [[ ! -s "${KODAMA_PATCH}" ]]; then
+  echo "Missing KODAMA correctness patch: ${KODAMA_PATCH}" >&2
+  exit 1
+fi
 
 echo "Remote:       ${REMOTE}"
 echo "Remote dir:   ${REMOTE_DIR}"
@@ -41,6 +47,7 @@ echo "Build log:    ${REMOTE_LOG}"
 ${SSH_CMD} "${REMOTE}" "mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/patched_libs'"
 ${SCP_CMD} "${PKG_TARBALL}" "${REMOTE}:${REMOTE_DIR}/fastEmbedR_source.tar.gz"
 ${SCP_CMD} "${DEF_FILE}" "${REMOTE}:${REMOTE_DEF}"
+${SCP_CMD} "${KODAMA_PATCH}" "${REMOTE}:${REMOTE_KODAMA_PATCH}"
 
 ${SSH_CMD} "${REMOTE}" "cd '${REMOTE_DIR}' && \
   (apptainer build --fakeroot --notest --force '${REMOTE_SIF}' '${REMOTE_DEF}' || singularity build --fakeroot --notest --force '${REMOTE_SIF}' '${REMOTE_DEF}') \
@@ -166,7 +173,7 @@ u_cuda <- KODAMA.visualization(
   n.epochs = 20, seed = 11
 )
 t_cuda <- KODAMA.visualization(
-  km_cuda, 'openTSNE', k = 10, perplexity = 5, backend = 'cuda',
+  km_cuda, 'opentsne', k = 10, perplexity = 5, backend = 'cuda',
   n.cores = 4, n.iter = 50, seed = 11
 )
 stopifnot(all(dim(u_cpu) == c(240L, 2L)))
