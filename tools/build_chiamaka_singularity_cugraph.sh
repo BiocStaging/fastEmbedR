@@ -19,11 +19,10 @@ BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fastembedr-singularity-build.XXXXXX")"
 trap 'rm -rf "${BUILD_ROOT}"' EXIT
 
 if [[ -z "${PKG_TARBALL}" ]]; then
-  echo "Building current fastEmbedR source archive"
-  (
-    cd "${BUILD_ROOT}"
-    R CMD build --no-build-vignettes "${LOCAL_ROOT}"
-  )
+  echo "Building fastEmbedR source archive from committed files"
+  mkdir -p "${BUILD_ROOT}/fastEmbedR"
+  git -C "${LOCAL_ROOT}" archive --format=tar HEAD | tar -xf - -C "${BUILD_ROOT}/fastEmbedR"
+  (cd "${BUILD_ROOT}" && R CMD build --no-build-vignettes fastEmbedR)
   PKG_TARBALL="$(find "${BUILD_ROOT}" -maxdepth 1 -name 'fastEmbedR_*.tar.gz' -print -quit)"
 fi
 [[ -s "${PKG_TARBALL}" ]] || { echo "Missing fastEmbedR archive" >&2; exit 1; }
@@ -120,6 +119,60 @@ u_cuda_knn <- fastEmbedR::umap_knn(
 stopifnot(all(layout_dim(u_cuda_knn) == c(5000L, 2L)))
 
 cat('OK\\n')
+EOF_R"
+
+${SSH_CMD} "${REMOTE}" "${REMOTE_EXEC} '${REMOTE_SIF}' Rscript - <<'EOF_R'
+library(kodamaR)
+
+cat('kodamaR diagnostics\\n')
+print(KODAMA.diagnostics(all = TRUE))
+
+set.seed(11)
+x <- matrix(rnorm(240 * 12), nrow = 240)
+labels <- rep(1:4, each = 60)
+
+cat('KODAMA CPU/CUDA KNNCV smoke\\n')
+cv_cpu <- KNNCV(x, labels, folds = 3, k = 5, backend = 'cpu', n.cores = 4)
+cv_cuda <- KNNCV(x, labels, folds = 3, k = 5, backend = 'cuda', n.cores = 4)
+stopifnot(is.finite(cv_cpu\$accuracy), is.finite(cv_cuda\$accuracy))
+
+cat('KODAMA CPU/CUDA PCA smoke\\n')
+pc_cpu <- KODAMA.pca(x, ncomp = 3, backend = 'cpu', n.cores = 4)
+pc_cuda <- KODAMA.pca(x, ncomp = 3, backend = 'cuda', n.cores = 4)
+stopifnot(all(dim(pc_cpu\$scores) == c(240L, 3L)))
+stopifnot(all(dim(pc_cuda\$scores) == c(240L, 3L)))
+
+cat('KODAMA CPU/CUDA matrix smoke\\n')
+km_cpu <- KODAMA.matrix(
+  x, classifier = 'knn', backend = 'cpu', M = 2, Tcycle = 2,
+  landmarks = 160, splitting = 12, graph.neighbors = 10, knn.k = 5,
+  n.cores = 4, seed = 11, progress = FALSE
+)
+km_cuda <- KODAMA.matrix(
+  x, classifier = 'knn', backend = 'cuda', M = 2, Tcycle = 2,
+  landmarks = 160, splitting = 12, graph.neighbors = 10, knn.k = 5,
+  n.cores = 4, seed = 11, progress = FALSE
+)
+stopifnot(length(km_cpu\$best_labels) == nrow(x))
+stopifnot(length(km_cuda\$best_labels) == nrow(x))
+
+cat('KODAMA CPU/CUDA visualization smoke\\n')
+u_cpu <- KODAMA.visualization(
+  km_cpu, 'UMAP', k = 10, backend = 'cpu', n.cores = 4,
+  n.epochs = 20, seed = 11
+)
+u_cuda <- KODAMA.visualization(
+  km_cuda, 'UMAP', k = 10, backend = 'cuda', n.cores = 4,
+  n.epochs = 20, seed = 11
+)
+t_cuda <- KODAMA.visualization(
+  km_cuda, 'openTSNE', k = 10, perplexity = 5, backend = 'cuda',
+  n.cores = 4, n.iter = 50, seed = 11
+)
+stopifnot(all(dim(u_cpu) == c(240L, 2L)))
+stopifnot(all(dim(u_cuda) == c(240L, 2L)))
+stopifnot(all(dim(t_cuda) == c(240L, 2L)))
+cat('KODAMA CPU/CUDA smoke tests OK\\n')
 EOF_R"
 
 ${SSH_CMD} "${REMOTE}" "${REMOTE_EXEC} '${REMOTE_SIF}' python - <<'EOF_PY'
