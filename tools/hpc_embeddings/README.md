@@ -32,6 +32,8 @@ precomputed object is missing, the driver creates it once under
 - `jobs_by_dataset/run_<dataset>_cuda.sh`: one-GPU Slurm job for one dataset.
 - `jobs_by_dataset/job_manifest.csv`: complete list of the 33 generated jobs.
 - `generate_reviewer_dataset_jobs.R`: reproducibly regenerates those launchers.
+- `submit_reviewer_dataset_jobs.sh`: submits each selected launcher as a
+  separate Slurm job and records the returned job IDs.
 - `run_reviewer_hpc_cpu.sh` and `run_reviewer_hpc_cuda.sh`: legacy aggregate
   launchers retained for compatibility.
 - `run_reviewer_local_cpu_metal.sh`: native macOS CPU and Metal run.
@@ -90,6 +92,20 @@ mkdir -p /scratch/firenze/NN/benchmark_logs
 sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cpu1.sh
 sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cpu4.sh
 sbatch /scratch/firenze/NN/jobs_by_dataset/run_MetRef_cuda.sh
+```
+
+Submit all 33 jobs independently with:
+
+```bash
+bash /scratch/firenze/NN/submit_reviewer_dataset_jobs.sh
+```
+
+Submit one backend group only with `PROFILE=cpu1`, `PROFILE=cpu4`, or
+`PROFILE=cuda`. Use `DRY_RUN=true` to inspect the commands without submitting:
+
+```bash
+PROFILE=cuda DRY_RUN=true \
+  bash /scratch/firenze/NN/submit_reviewer_dataset_jobs.sh
 ```
 
 Equivalent triples exist for every dataset in the analysis cohort. CPU-1 jobs
