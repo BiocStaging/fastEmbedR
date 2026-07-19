@@ -34,6 +34,15 @@ precomputed object is missing, the driver creates it once under
 - `generate_reviewer_dataset_jobs.R`: reproducibly regenerates those launchers.
 - `submit_reviewer_dataset_jobs.sh`: submits each selected launcher as a
   separate Slurm job and records the returned job IDs.
+- `run_landmark_dataset_job.sh`: matched full-versus-landmark execution for one
+  dataset/backend.
+- `landmark_jobs_by_dataset/run_landmark_<dataset>_<profile>.sh`: independent
+  CPU-1, CPU-4, and CUDA landmark-validation jobs for every dataset.
+- `generate_landmark_dataset_jobs.R`: reproducibly regenerates all 33
+  landmark launchers.
+- `submit_landmark_dataset_jobs.sh`: submits the landmark jobs by backend
+  profile and records their Slurm job IDs.
+- `run_landmark_local_cpu_metal.sh`: matched native CPU/Metal landmark run.
 - `run_reviewer_hpc_cpu.sh` and `run_reviewer_hpc_cuda.sh`: legacy aggregate
   launchers retained for compatibility.
 - `run_reviewer_local_cpu_metal.sh`: native macOS CPU and Metal run.
@@ -150,6 +159,46 @@ Rscript /scratch/firenze/NN/generate_reviewer_dataset_jobs.R \
   /scratch/firenze/NN/jobs_by_dataset
 ```
 
+## Landmark Validation
+
+Landmarking is validated only for fastEmbedR openTSNE and UMAP. Each row using
+50% landmarks is paired with a full-data run using the same dataset, backend,
+thread count, seed, and neighbourhood size. UMAP landmarking is compared with
+the package's binary-graph full UMAP because `landmark_umap()` uses that graph
+definition internally. Nearest-neighbour search, reference embedding,
+projection, optional refinement, and transformation are all included in total
+elapsed time.
+
+The dedicated jobs run seeds `4,17,42` and report full/landmark runtime and
+memory, speedup, trustworthiness, KNN preservation, label KNN accuracy,
+Procrustes agreement, embedding-neighbour overlap, and separate reference,
+projection-KNN, refinement, and transform times. The projected non-landmark
+points are evaluated separately so a good landmark fit cannot conceal a poor
+projection. Scientific plots contain points only. Small datasets may be slower
+with landmarking; conclusions should be based on the complete dataset panel.
+
+Submit all 33 CPU/CUDA landmark jobs with:
+
+```bash
+bash /scratch/firenze/NN/submit_landmark_dataset_jobs.sh
+```
+
+Or submit one profile at a time:
+
+```bash
+PROFILE=cpu1 bash /scratch/firenze/NN/submit_landmark_dataset_jobs.sh
+PROFILE=cpu4 bash /scratch/firenze/NN/submit_landmark_dataset_jobs.sh
+PROFILE=cuda bash /scratch/firenze/NN/submit_landmark_dataset_jobs.sh
+```
+
+Set `LANDMARK_FRACTION` before submission to test a different fraction. The
+default and publication reference is `0.5`. Use `DRY_RUN=true` to inspect all
+commands without submitting. Native CPU/Metal validation on the Mac is:
+
+```bash
+bash /Users/stefano/Documents/umap/tools/hpc_embeddings/run_landmark_local_cpu_metal.sh
+```
+
 ## Run On macOS
 
 Metal must be tested with the native macOS package. A Linux Singularity image
@@ -187,6 +236,8 @@ fuzzy/binary graph-weight agreement.
 - `benchmark_summary_median_variability.csv`: medians and variability across
   successful repeats.
 - `stability_pairwise.csv`: within-method stability across seeds.
+- `landmark_validation_vs_full.csv`: paired speed, memory, quality,
+  Procrustes, and projected-point validation for landmark runs.
 - `pca_vs_irlba_agreement.csv`: fastEmbedR PCA versus `irlba`.
 - `tsne_affinity_agreement_vs_python_opentsne.csv`: fastEmbedR versus openTSNE.
 - `umap_graph_agreement_vs_uwot.csv`: fastEmbedR versus uwot graph weights.

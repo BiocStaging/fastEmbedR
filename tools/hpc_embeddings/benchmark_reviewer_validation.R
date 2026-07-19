@@ -71,6 +71,7 @@ worker <- as_bool(args$worker, FALSE)
 precompute_worker <- as_bool(args$precompute_worker, FALSE)
 kodama_core_worker <- as_bool(args$kodama_core_worker, FALSE)
 force <- as_bool(args$force, FALSE)
+reference_validations <- as_bool(args$reference_validations, TRUE)
 threads_grid <- unique(as.integer(as_csv(args$threads_grid, "1,4")))
 threads_grid <- threads_grid[is.finite(threads_grid) & threads_grid > 0L]
 if (!length(threads_grid)) threads_grid <- c(1L, 4L)
@@ -86,6 +87,10 @@ quality_sample_n <- as_int(args$quality_sample_n, 3000L)
 quality_max_distance_ops <- as_num(args$quality_max_distance_ops, 2e8)
 validation_sample_n <- as_int(args$validation_sample_n, 2000L)
 pca_ncomp <- as_int(args$pca_ncomp, 2L)
+landmark_fraction <- as_num(args$landmark_fraction, 0.5)
+if (landmark_fraction <= 0 || landmark_fraction >= 1) {
+  stop("--landmark-fraction must be strictly between 0 and 1.", call. = FALSE)
+}
 kodama_m <- as_int(args$kodama_m, 100L)
 kodama_tcycle <- as_int(args$kodama_tcycle, 20L)
 kodama_ncomp <- as_int(args$kodama_ncomp, 50L)
@@ -381,6 +386,19 @@ method_family <- function(method) {
 }
 
 method_is_kodama <- function(method) startsWith(method, "KODAMA_")
+method_is_landmark <- function(method) {
+  startsWith(method, "fastEmbedR_") && grepl("_landmark$", method)
+}
+
+landmark_baseline_method <- function(method) {
+  if (!method_is_landmark(method)) return(NA_character_)
+  backend <- method_backend(method)
+  if (method_is_tsne(method)) {
+    sprintf("fastEmbedR_opentsne_%s_full", backend)
+  } else {
+    sprintf("fastEmbedR_umap_%s_binary_full", backend)
+  }
+}
 
 kodama_classifier_for_method <- function(method) {
   if (!method_is_kodama(method)) return(NA_character_)
@@ -400,6 +418,7 @@ method_backend <- function(method) {
 
 method_scope <- function(method) {
   if (method_is_kodama(method)) return("full_pipeline")
+  if (method_is_landmark(method)) return("landmark_pipeline")
   if (grepl("_knn$|_knn_|Rtsne_neighbors", method)) {
     return("embedding_from_precomputed_knn")
   }
@@ -464,6 +483,7 @@ parameter_record <- function(method, requested_threads) {
     family = family,
     backend = method_backend(method),
     timing_scope = scope,
+    landmark_fraction = if (method_is_landmark(method)) landmark_fraction else NA_real_,
     n_neighbors = if (family == "UMAP") k else NA_integer_,
     perplexity = if (family == "t-SNE") perplexity else NA_real_,
     pca_components = if (family == "PCA") pca_ncomp else if (family == "t-SNE") 2L else NA_integer_,
@@ -509,6 +529,8 @@ parameter_record <- function(method, requested_threads) {
     input_type = method_input_type(method),
     knn_boundary = if (method_is_kodama(method)) {
       "KODAMA graph is built once per classifier and reused by both visualizations"
+    } else if (method_is_landmark(method)) {
+      "landmark reference and projection KNN are internal and included in elapsed time"
     } else if (scope == "embedding_from_precomputed_knn") {
       "precomputed and excluded from elapsed time"
     } else if (family == "PCA") "not applicable" else "internal and included in elapsed time",
@@ -527,6 +549,11 @@ parameter_record <- function(method, requested_threads) {
         "classifier=%s; M=%d; Tcycle=%d; ncomp<=%d; landmarks<=%d; shared core charged once per workflow",
         kodama_classifier_for_method(method), kodama_m, kodama_tcycle,
         kodama_ncomp, kodama_landmarks
+      )
+    } else if (method_is_landmark(method)) {
+      sprintf(
+        "explicit %.0f%% landmark approximation; matched full run is %s",
+        100 * landmark_fraction, landmark_baseline_method(method)
       )
     } else if (grepl("binary", method)) "binary symmetric graph" else if (grepl("fuzzy", method)) "fuzzy simplicial graph" else "",
     stringsAsFactors = FALSE
@@ -1063,6 +1090,24 @@ run_method <- function(method, dataset_data) {
         x_fast, perplexity = perplexity, backend = "cuda", n_threads = threads,
         seed = seed, record_costs = FALSE
       ),
+      fastEmbedR_opentsne_cpu_landmark = fastEmbedR::landmark_tsne(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        perplexity = perplexity, standardize = FALSE, backend = "cpu",
+        n_threads = threads, seed = seed, keep_knn = FALSE,
+        verbose = FALSE
+      ),
+      fastEmbedR_opentsne_metal_landmark = fastEmbedR::landmark_tsne(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        perplexity = perplexity, standardize = FALSE, backend = "metal",
+        n_threads = threads, seed = seed, keep_knn = FALSE,
+        verbose = FALSE
+      ),
+      fastEmbedR_opentsne_cuda_landmark = fastEmbedR::landmark_tsne(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        perplexity = perplexity, standardize = FALSE, backend = "cuda",
+        n_threads = threads, seed = seed, keep_knn = FALSE,
+        verbose = FALSE
+      ),
       fastEmbedR_opentsne_cpu_knn = fastEmbedR::opentsne_knn(
         shared_knn_fast, n_neighbors = ceiling(perplexity), perplexity = perplexity,
         Y_init = pca_init_fast, backend = "cpu", n_threads = threads,
@@ -1125,6 +1170,21 @@ run_method <- function(method, dataset_data) {
       fastEmbedR_umap_cuda_binary_full = fastEmbedR::umap(
         x_fast, n_neighbors = k, backend = "cuda", n_threads = threads,
         graph_mode = "binary", seed = seed
+      ),
+      fastEmbedR_umap_cpu_binary_landmark = fastEmbedR::landmark_umap(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        standardize = FALSE, backend = "cpu", n_threads = threads,
+        seed = seed, keep_knn = FALSE, verbose = FALSE
+      ),
+      fastEmbedR_umap_metal_binary_landmark = fastEmbedR::landmark_umap(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        standardize = FALSE, backend = "metal", n_threads = threads,
+        seed = seed, keep_knn = FALSE, verbose = FALSE
+      ),
+      fastEmbedR_umap_cuda_binary_landmark = fastEmbedR::landmark_umap(
+        x_fast, landmarks = landmark_fraction, n_neighbors = k,
+        standardize = FALSE, backend = "cuda", n_threads = threads,
+        seed = seed, keep_knn = FALSE, verbose = FALSE
       ),
       fastEmbedR_umap_cpu_fuzzy_knn = fastEmbedR::umap_knn(
         shared_knn_fast, backend = "cpu", n_threads = threads,
@@ -1205,6 +1265,24 @@ run_method <- function(method, dataset_data) {
   if (startsWith(method, "fastEmbedR") && method_scope(method) == "full_pipeline") {
     component <- extract_fastembedr_timings(fit)
   }
+  landmark_extra <- list()
+  if (method_is_landmark(method)) {
+    fit_metrics <- fit$metrics[1L, , drop = FALSE]
+    value_or_na <- function(name) {
+      if (name %in% names(fit_metrics)) as.numeric(fit_metrics[[name]][[1L]]) else NA_real_
+    }
+    component[["preprocess_sec"]] <- value_or_na("preprocess_elapsed")
+    component[["embedding_sec"]] <- unname(elapsed) -
+      ifelse(is.finite(component[["preprocess_sec"]]), component[["preprocess_sec"]], 0)
+    landmark_extra <- list(
+      landmark_fraction = value_or_na("landmark_fraction"),
+      n_landmarks = as.integer(value_or_na("n_landmarks")),
+      reference_embedding_sec = value_or_na("reference_embedding_elapsed"),
+      landmark_projection_knn_sec = value_or_na("landmark_projection_knn_elapsed"),
+      landmark_refinement_sec = value_or_na("landmark_refinement_elapsed"),
+      landmark_transform_sec = value_or_na("transform_elapsed")
+    )
+  }
   if (method_scope(method) == "embedding_from_precomputed_knn") {
     component[["embedding_sec"]] <- unname(elapsed)
   }
@@ -1239,7 +1317,7 @@ run_method <- function(method, dataset_data) {
       kodama_core_cache_file = kodama_core$paths$fit,
       kodama_core_reused = TRUE
     )
-  } else list()
+  } else landmark_extra
   list(
     fit = fit, layout = publication_layout_matrix(layout),
     elapsed_sec = workflow_elapsed, component = component, extra = extra
@@ -1318,6 +1396,10 @@ worker_result_template <- function(dataset, method, status = "failed", error = N
     trustworthiness = NA_real_, knn_preservation_15 = NA_real_,
     knn_preservation_30 = NA_real_, knn_preservation_50 = NA_real_,
     silhouette = NA_real_, label_knn_accuracy = NA_real_, tsne_kl = NA_real_,
+    landmark_fraction = if (method_is_landmark(method)) landmark_fraction else NA_real_,
+    n_landmarks = NA_integer_, reference_embedding_sec = NA_real_,
+    landmark_projection_knn_sec = NA_real_, landmark_refinement_sec = NA_real_,
+    landmark_transform_sec = NA_real_,
     kodama_classifier = if (method_is_kodama(method)) {
       kodama_classifier_for_method(method)
     } else NA_character_,
@@ -1362,7 +1444,10 @@ worker_main <- function() {
     list(
       layout = layout, labels = data$labels, dataset = dataset_alias(dataset),
       method = method, backend = method_backend(method), seed = seed,
-      requested_threads = threads, timing_scope = method_scope(method)
+      requested_threads = threads, timing_scope = method_scope(method),
+      landmark_indices = if (method_is_landmark(method)) {
+        as.integer(result$fit$landmarks$indices %||% integer())
+      } else integer()
     ),
     layout_file, compress = FALSE
   )
@@ -1569,6 +1654,7 @@ run_isolated_worker <- function(
     paste0("--quality-max-distance-ops=", quality_max_distance_ops),
     paste0("--validation-sample-n=", validation_sample_n),
     paste0("--pca-ncomp=", pca_ncomp),
+    paste0("--landmark-fraction=", landmark_fraction),
     paste0("--kodama-m=", kodama_m),
     paste0("--kodama-tcycle=", kodama_tcycle),
     paste0("--kodama-ncomp=", kodama_ncomp),
@@ -1637,7 +1723,7 @@ aggregate_runs <- function(runs) {
   group_columns <- c(
     "dataset", "method", "family", "backend", "timing_scope",
     "requested_threads", "effective_threads", "n", "p", "k", "perplexity",
-    "input_type"
+    "input_type", "landmark_fraction"
   )
   metric_columns <- c(
     "total_runtime_sec", "preprocess_sec", "knn_sec", "init_sec",
@@ -1645,6 +1731,8 @@ aggregate_runs <- function(runs) {
     "peak_gpu_mb", "peak_gpu_delta_mb", "trustworthiness",
     "knn_preservation_15", "knn_preservation_30", "knn_preservation_50",
     "silhouette", "label_knn_accuracy", "tsne_kl",
+    "n_landmarks", "reference_embedding_sec", "landmark_projection_knn_sec",
+    "landmark_refinement_sec", "landmark_transform_sec",
     "kodama_core_sec", "kodama_visualization_sec",
     "kodama_core_peak_ram_gb", "kodama_visualization_peak_ram_gb",
     "kodama_core_peak_gpu_delta_mb",
@@ -1677,6 +1765,144 @@ aggregate_runs <- function(runs) {
 load_layout_record <- function(path) {
   if (is.na(path) || !file.exists(path)) return(NULL)
   tryCatch(readRDS(path), error = function(e) NULL)
+}
+
+landmark_row_overlap <- function(reference, candidate, selected, k) {
+  reference <- publication_knn_host(reference)$indices
+  candidate <- publication_knn_host(candidate)$indices
+  k <- min(as.integer(k), ncol(reference), ncol(candidate))
+  selected <- as.integer(selected)
+  selected <- selected[selected >= 1L & selected <= nrow(reference)]
+  if (!length(selected) || k < 1L || nrow(reference) != nrow(candidate)) {
+    return(NA_real_)
+  }
+  mean(vapply(selected, function(i) {
+    length(intersect(reference[i, seq_len(k)], candidate[i, seq_len(k)])) / k
+  }, numeric(1)))
+}
+
+landmark_validation_table <- function(runs) {
+  if (!nrow(runs) || !"landmark_fraction" %in% names(runs)) return(data.frame())
+  candidates <- runs[
+    runs$status == "success" & vapply(runs$method, method_is_landmark, logical(1)),
+    , drop = FALSE
+  ]
+  if (!nrow(candidates)) return(data.frame())
+  scalar <- function(row, name) {
+    if (name %in% names(row)) suppressWarnings(as.numeric(row[[name]][[1L]])) else NA_real_
+  }
+  safe_ratio <- function(numerator, denominator) {
+    if (!is.finite(numerator) || !is.finite(denominator) || denominator <= 0) {
+      return(NA_real_)
+    }
+    numerator / denominator
+  }
+  rows <- list()
+  for (i in seq_len(nrow(candidates))) {
+    landmark_run <- candidates[i, , drop = FALSE]
+    baseline_method <- landmark_baseline_method(landmark_run$method[[1L]])
+    baseline <- runs[
+      runs$status == "success" & runs$dataset == landmark_run$dataset[[1L]] &
+        runs$method == baseline_method &
+        runs$requested_threads == landmark_run$requested_threads[[1L]] &
+        runs$seed == landmark_run$seed[[1L]],
+      , drop = FALSE
+    ]
+    if (!nrow(baseline)) next
+    baseline <- baseline[1L, , drop = FALSE]
+    full_record <- load_layout_record(baseline$layout_file[[1L]])
+    landmark_record <- load_layout_record(landmark_run$layout_file[[1L]])
+    if (is.null(full_record) || is.null(landmark_record)) next
+    full_layout <- publication_layout_matrix(full_record$layout)
+    landmark_layout <- publication_layout_matrix(landmark_record$layout)
+    if (!identical(dim(full_layout), dim(landmark_layout))) next
+
+    validation <- readRDS(cache_paths(landmark_run$dataset[[1L]])$validation)
+    validation_rows <- validation$rows[validation$rows <= nrow(full_layout)]
+    if (length(validation_rows) < 3L) next
+    full_sample <- full_layout[validation_rows, , drop = FALSE]
+    landmark_sample <- landmark_layout[validation_rows, , drop = FALSE]
+    landmark_indices <- as.integer(landmark_record$landmark_indices %||% integer())
+    projected_positions <- which(!validation_rows %in% landmark_indices)
+    landmark_positions <- which(validation_rows %in% landmark_indices)
+    neighbor_k <- min(30L, nrow(full_sample) - 1L)
+    full_knn <- publication_exact_knn(full_sample, neighbor_k)
+    landmark_knn <- publication_exact_knn(landmark_sample, neighbor_k)
+    all_proc <- publication_procrustes(full_sample, landmark_sample)
+    projected_proc <- if (length(projected_positions) >= 3L) {
+      publication_procrustes(
+        full_sample[projected_positions, , drop = FALSE],
+        landmark_sample[projected_positions, , drop = FALSE]
+      )
+    } else data.frame(rmsd = NA_real_, correlation = NA_real_)
+    landmark_proc <- if (length(landmark_positions) >= 3L) {
+      publication_procrustes(
+        full_sample[landmark_positions, , drop = FALSE],
+        landmark_sample[landmark_positions, , drop = FALSE]
+      )
+    } else data.frame(rmsd = NA_real_, correlation = NA_real_)
+
+    rows[[length(rows) + 1L]] <- data.frame(
+      dataset = landmark_run$dataset[[1L]], family = landmark_run$family[[1L]],
+      backend = landmark_run$backend[[1L]],
+      requested_threads = landmark_run$requested_threads[[1L]],
+      seed = landmark_run$seed[[1L]], baseline_method = baseline_method,
+      landmark_method = landmark_run$method[[1L]],
+      landmark_fraction = scalar(landmark_run, "landmark_fraction"),
+      n_landmarks = scalar(landmark_run, "n_landmarks"),
+      n_projected = nrow(landmark_layout) - scalar(landmark_run, "n_landmarks"),
+      full_runtime_sec = scalar(baseline, "total_runtime_sec"),
+      landmark_runtime_sec = scalar(landmark_run, "total_runtime_sec"),
+      speedup_vs_full = safe_ratio(
+        scalar(baseline, "total_runtime_sec"),
+        scalar(landmark_run, "total_runtime_sec")
+      ),
+      full_peak_ram_gb = scalar(baseline, "peak_ram_gb"),
+      landmark_peak_ram_gb = scalar(landmark_run, "peak_ram_gb"),
+      ram_ratio_vs_full = safe_ratio(
+        scalar(landmark_run, "peak_ram_gb"),
+        scalar(baseline, "peak_ram_gb")
+      ),
+      full_peak_gpu_delta_mb = scalar(baseline, "peak_gpu_delta_mb"),
+      landmark_peak_gpu_delta_mb = scalar(landmark_run, "peak_gpu_delta_mb"),
+      gpu_memory_ratio_vs_full = safe_ratio(
+        scalar(landmark_run, "peak_gpu_delta_mb"),
+        scalar(baseline, "peak_gpu_delta_mb")
+      ),
+      trustworthiness_full = scalar(baseline, "trustworthiness"),
+      trustworthiness_landmark = scalar(landmark_run, "trustworthiness"),
+      trustworthiness_delta = scalar(landmark_run, "trustworthiness") -
+        scalar(baseline, "trustworthiness"),
+      knn_preservation_15_full = scalar(baseline, "knn_preservation_15"),
+      knn_preservation_15_landmark = scalar(landmark_run, "knn_preservation_15"),
+      knn_preservation_15_delta = scalar(landmark_run, "knn_preservation_15") -
+        scalar(baseline, "knn_preservation_15"),
+      label_knn_accuracy_full = scalar(baseline, "label_knn_accuracy"),
+      label_knn_accuracy_landmark = scalar(landmark_run, "label_knn_accuracy"),
+      label_knn_accuracy_delta = scalar(landmark_run, "label_knn_accuracy") -
+        scalar(baseline, "label_knn_accuracy"),
+      procrustes_rmsd_all = all_proc$rmsd[[1L]],
+      procrustes_correlation_all = all_proc$correlation[[1L]],
+      procrustes_rmsd_projected = projected_proc$rmsd[[1L]],
+      procrustes_correlation_projected = projected_proc$correlation[[1L]],
+      procrustes_rmsd_landmarks = landmark_proc$rmsd[[1L]],
+      procrustes_correlation_landmarks = landmark_proc$correlation[[1L]],
+      embedding_knn_overlap_15_all = landmark_row_overlap(
+        full_knn, landmark_knn, seq_len(nrow(full_sample)), min(15L, neighbor_k)
+      ),
+      embedding_knn_overlap_15_projected = landmark_row_overlap(
+        full_knn, landmark_knn, projected_positions, min(15L, neighbor_k)
+      ),
+      reference_embedding_sec = scalar(landmark_run, "reference_embedding_sec"),
+      projection_knn_sec = scalar(landmark_run, "landmark_projection_knn_sec"),
+      refinement_sec = scalar(landmark_run, "landmark_refinement_sec"),
+      transform_sec = scalar(landmark_run, "landmark_transform_sec"),
+      validation_sample_n = length(validation_rows),
+      projected_validation_n = length(projected_positions),
+      stringsAsFactors = FALSE
+    )
+  }
+  if (length(rows)) do.call(rbind, rows) else data.frame()
 }
 
 stability_table <- function(runs) {
@@ -1886,6 +2112,8 @@ write_reproducibility <- function() {
     paste0("quality_sample_n=", quality_sample_n),
     paste0("quality_max_distance_ops=", quality_max_distance_ops),
     paste0("validation_sample_n=", validation_sample_n),
+    paste0("landmark_fraction=", landmark_fraction),
+    paste0("reference_validations=", reference_validations),
     paste0("kodama_M=", kodama_m),
     paste0("kodama_Tcycle=", kodama_tcycle),
     paste0("kodama_ncomp=", kodama_ncomp),
@@ -1908,7 +2136,10 @@ make_summary_figures <- function(summary) {
   successful <- summary$status %in% c("success", "partial") &
     is.finite(summary$total_runtime_sec_median)
   if (!any(successful)) return(invisible(NULL))
-  plot_data <- summary[successful & summary$timing_scope == "full_pipeline", , drop = FALSE]
+  plot_data <- summary[
+    successful & summary$timing_scope %in% c("full_pipeline", "landmark_pipeline"),
+    , drop = FALSE
+  ]
   if (nrow(plot_data)) {
     png(file.path(out_dir, "runtime_median_iqr.png"), width = 2200, height = 1500, res = 180)
     old <- par(no.readonly = TRUE)
@@ -2242,6 +2473,18 @@ write.csv(summary_table, file.path(out_dir, "benchmark_summary_median_variabilit
 write_markdown(summary_table, file.path(out_dir, "benchmark_summary_median_variability.md"))
 stability <- stability_table(run_table)
 write.csv(stability, file.path(out_dir, "stability_pairwise.csv"), row.names = FALSE)
+landmark_validation <- landmark_validation_table(run_table)
+write.csv(
+  landmark_validation,
+  file.path(out_dir, "landmark_validation_vs_full.csv"),
+  row.names = FALSE
+)
+landmark_markdown <- file.path(out_dir, "landmark_validation_vs_full.md")
+if (ncol(landmark_validation)) {
+  write_markdown(landmark_validation, landmark_markdown)
+} else {
+  writeLines("No landmark methods were requested for this benchmark run.", landmark_markdown)
+}
 backend_validation <- backend_validation_table(validation_backends)
 write.csv(
   backend_validation,
@@ -2250,13 +2493,17 @@ write.csv(
 )
 pca_agreement <- pca_agreement_table(run_table)
 write.csv(pca_agreement, file.path(out_dir, "pca_vs_irlba_agreement.csv"), row.names = FALSE)
-reference_graph <- reference_graph_validation_table()
+reference_graph <- if (reference_validations) {
+  reference_graph_validation_table()
+} else data.frame()
 write.csv(
   reference_graph,
   file.path(out_dir, "umap_graph_agreement_vs_uwot.csv"),
   row.names = FALSE
 )
-reference_affinity <- reference_affinity_validation_table()
+reference_affinity <- if (reference_validations) {
+  reference_affinity_validation_table()
+} else data.frame()
 write.csv(
   reference_affinity,
   file.path(out_dir, "tsne_affinity_agreement_vs_python_opentsne.csv"),
