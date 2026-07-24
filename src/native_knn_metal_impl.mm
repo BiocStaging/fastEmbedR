@@ -10,7 +10,7 @@
  * This file is a new Objective-C++/Metal implementation. FAISS-derived
  * portions remain under the MIT license; portions adapted from the Faiss-mlx
  * fused list-scan/top-k organization remain under Apache-2.0. Modifications
- * are Copyright (c) 2026 Stefano Caccia. Redistributed derivatives must
+ * are Copyright (c) 2026 Stefano Cacciatore. Redistributed derivatives must
  * retain both upstream notices and licenses from inst/LICENSES/.
  */
 
@@ -37,7 +37,7 @@ namespace {
 constexpr int kMaxP = 1024;
 constexpr int kMaxLists = 1024;
 constexpr int kMaxK = 64;
-constexpr int kMaxProbe = 128;
+constexpr int kMaxProbe = 256;
 constexpr int kMaxShortlistPerGroup = 128;
 constexpr int kInitialShortlistPerGroup = 72;
 constexpr int kProjectionDim = 128;
@@ -52,7 +52,7 @@ constant uint SIMD_WIDTH = 32;
 constant uint MAX_P = 1024;
 constant uint MAX_Q = 128;
 constant uint MAX_K = 64;
-constant uint MAX_PROBE = 128;
+constant uint MAX_PROBE = 256;
 constant uint MAX_SHORTLIST = 128;
 
 struct ProjectParams {
@@ -77,6 +77,23 @@ struct SearchParams {
   uint k;
   uint query_offset;
   uint shortlist_per_group;
+};
+
+struct QuerySearchParams {
+  uint n_reference;
+  uint n_query;
+  uint p;
+  uint k;
+};
+
+struct QueryIvfParams {
+  uint n_reference;
+  uint n_query;
+  uint p;
+  uint qdim;
+  uint nlist;
+  uint nprobe;
+  uint k;
 };
 
 inline bool better_pair(float da, int ia, float db, int ib) {
@@ -262,6 +279,202 @@ kernel void exact_topk_simd(
       }
       out_dist[qlocal * params.k + rank] = best_d;
       out_ids[qlocal * params.k + rank] = best_i;
+      ++heads[best_g];
+    }
+  }
+}
+
+kernel void exact_query_topk_simd(
+    device const float* reference [[buffer(0)]],
+    device const float* query [[buffer(1)]],
+    device int* out_ids [[buffer(2)]],
+    device float* out_dist [[buffer(3)]],
+    constant QuerySearchParams& params [[buffer(4)]],
+    uint q [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float query_row[MAX_P];
+  threadgroup float local_dist[NSG * MAX_K];
+  threadgroup int local_id[NSG * MAX_K];
+  if (q >= params.n_query) return;
+  for (uint d = tid; d < params.p; d += NSG * SIMD_WIDTH) {
+    query_row[d] = query[q * params.p + d];
+  }
+  for (uint i = tid; i < NSG * params.k; i += NSG * SIMD_WIDTH) {
+    local_dist[i] = INFINITY;
+    local_id[i] = -1;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint base = sg * params.k;
+  for (uint candidate = sg; candidate < params.n_reference; candidate += NSG) {
+    float partial = 0.0f;
+    const device float* point = reference + candidate * params.p;
+    for (uint d = lane; d < params.p; d += SIMD_WIDTH) {
+      float delta = query_row[d] - point[d];
+      partial = fma(delta, delta, partial);
+    }
+    float distance = simd_sum(partial);
+    if (lane == 0) {
+      insert_sorted(
+        local_dist, local_id, base, params.k, distance, int(candidate)
+      );
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    uint heads[NSG];
+    for (uint g = 0; g < NSG; ++g) heads[g] = 0;
+    for (uint rank = 0; rank < params.k; ++rank) {
+      float best_d = INFINITY;
+      int best_i = -1;
+      uint best_g = 0;
+      for (uint g = 0; g < NSG; ++g) {
+        uint h = heads[g];
+        if (h < params.k) {
+          uint pos = g * params.k + h;
+          if (better_pair(local_dist[pos], local_id[pos], best_d, best_i)) {
+            best_d = local_dist[pos];
+            best_i = local_id[pos];
+            best_g = g;
+          }
+        }
+      }
+      out_dist[q * params.k + rank] = best_d;
+      out_ids[q * params.k + rank] = best_i;
+      ++heads[best_g];
+    }
+  }
+}
+
+kernel void ivf_query_topk_fused(
+    device const float* reference [[buffer(0)]],
+    device const float* query [[buffer(1)]],
+    device const float* query_projected [[buffer(2)]],
+    device const float* centroids [[buffer(3)]],
+    device const uint* list_offsets [[buffer(4)]],
+    device const int* list_ids [[buffer(5)]],
+    device int* out_ids [[buffer(6)]],
+    device float* out_dist [[buffer(7)]],
+    constant QueryIvfParams& params [[buffer(8)]],
+    uint q [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float query_row[MAX_P];
+  threadgroup float query_low[MAX_Q];
+  threadgroup float coarse_dist[NSG * MAX_PROBE];
+  threadgroup int coarse_id[NSG * MAX_PROBE];
+  threadgroup int probes[MAX_PROBE];
+  threadgroup float local_dist[NSG * MAX_K];
+  threadgroup int local_id[NSG * MAX_K];
+  if (q >= params.n_query || params.nprobe > MAX_PROBE) return;
+
+  for (uint d = tid; d < params.p; d += NSG * SIMD_WIDTH) {
+    query_row[d] = query[q * params.p + d];
+  }
+  for (uint d = tid; d < params.qdim; d += NSG * SIMD_WIDTH) {
+    query_low[d] = query_projected[q * params.qdim + d];
+  }
+  for (uint i = tid; i < NSG * params.nprobe; i += NSG * SIMD_WIDTH) {
+    coarse_dist[i] = INFINITY;
+    coarse_id[i] = -1;
+  }
+  for (uint i = tid; i < NSG * params.k; i += NSG * SIMD_WIDTH) {
+    local_dist[i] = INFINITY;
+    local_id[i] = -1;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint coarse_base = sg * params.nprobe;
+  for (uint c = sg; c < params.nlist; c += NSG) {
+    float partial = 0.0f;
+    const device float* centroid = centroids + c * params.qdim;
+    for (uint d = lane; d < params.qdim; d += SIMD_WIDTH) {
+      float delta = query_low[d] - centroid[d];
+      partial = fma(delta, delta, partial);
+    }
+    float distance = simd_sum(partial);
+    if (lane == 0) {
+      insert_sorted(
+        coarse_dist, coarse_id, coarse_base, params.nprobe, distance, int(c)
+      );
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    uint heads[NSG];
+    for (uint g = 0; g < NSG; ++g) heads[g] = 0;
+    for (uint rank = 0; rank < params.nprobe; ++rank) {
+      float best_d = INFINITY;
+      int best_i = -1;
+      uint best_g = 0;
+      for (uint g = 0; g < NSG; ++g) {
+        uint h = heads[g];
+        if (h < params.nprobe) {
+          uint pos = g * params.nprobe + h;
+          if (better_pair(coarse_dist[pos], coarse_id[pos], best_d, best_i)) {
+            best_d = coarse_dist[pos];
+            best_i = coarse_id[pos];
+            best_g = g;
+          }
+        }
+      }
+      probes[rank] = best_i;
+      ++heads[best_g];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint fine_base = sg * params.k;
+  for (uint probe = 0; probe < params.nprobe; ++probe) {
+    int list = probes[probe];
+    if (list < 0 || uint(list) >= params.nlist) continue;
+    uint begin = list_offsets[list];
+    uint end = list_offsets[list + 1];
+    for (uint pos = begin + sg; pos < end; pos += NSG) {
+      int candidate = list_ids[pos];
+      if (candidate < 0 || uint(candidate) >= params.n_reference) continue;
+      float partial = 0.0f;
+      const device float* point =
+        reference + uint(candidate) * params.p;
+      for (uint d = lane; d < params.p; d += SIMD_WIDTH) {
+        float delta = query_row[d] - point[d];
+        partial = fma(delta, delta, partial);
+      }
+      float distance = simd_sum(partial);
+      if (lane == 0) {
+        insert_sorted(
+          local_dist, local_id, fine_base, params.k, distance, candidate
+        );
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    uint heads[NSG];
+    for (uint g = 0; g < NSG; ++g) heads[g] = 0;
+    for (uint rank = 0; rank < params.k; ++rank) {
+      float best_d = INFINITY;
+      int best_i = -1;
+      uint best_g = 0;
+      for (uint g = 0; g < NSG; ++g) {
+        uint h = heads[g];
+        if (h < params.k) {
+          uint pos = g * params.k + h;
+          if (better_pair(local_dist[pos], local_id[pos], best_d, best_i)) {
+            best_d = local_dist[pos];
+            best_i = local_id[pos];
+            best_g = g;
+          }
+        }
+      }
+      out_dist[q * params.k + rank] = best_d;
+      out_ids[q * params.k + rank] = best_i;
       ++heads[best_g];
     }
   }
@@ -560,6 +773,12 @@ struct IndexParamsHost { std::uint32_t n, p, qdim, nlist; };
 struct SearchParamsHost {
   std::uint32_t n, p, qdim, nlist, nprobe, k, query_offset, shortlist_per_group;
 };
+struct QuerySearchParamsHost {
+  std::uint32_t n_reference, n_query, p, k;
+};
+struct QueryIvfParamsHost {
+  std::uint32_t n_reference, n_query, p, qdim, nlist, nprobe, k;
+};
 
 id<MTLComputePipelineState> make_pipeline(id<MTLDevice> device, id<MTLLibrary> library, NSString* name) {
   id<MTLFunction> function = [library newFunctionWithName:name];
@@ -581,6 +800,8 @@ struct MetalKnnState {
   id<MTLComputePipelineState> accumulate_centroids_pipeline = nil;
   id<MTLComputePipelineState> finalize_centroids_pipeline = nil;
   id<MTLComputePipelineState> exact_pipeline = nil;
+  id<MTLComputePipelineState> exact_query_pipeline = nil;
+  id<MTLComputePipelineState> ivf_query_pipeline = nil;
   id<MTLComputePipelineState> ivf_pipeline = nil;
   id<MTLComputePipelineState> shortlist_pipeline = nil;
   id<MTLComputePipelineState> rerank_pipeline = nil;
@@ -593,7 +814,9 @@ MetalKnnState& metal_knn_state() {
       state.clear_centroids_pipeline != nil &&
       state.accumulate_centroids_pipeline != nil &&
       state.finalize_centroids_pipeline != nil &&
-      state.exact_pipeline != nil && state.ivf_pipeline != nil &&
+      state.exact_pipeline != nil && state.exact_query_pipeline != nil &&
+      state.ivf_query_pipeline != nil &&
+      state.ivf_pipeline != nil &&
       state.shortlist_pipeline != nil && state.rerank_pipeline != nil) {
     return state;
   }
@@ -620,6 +843,12 @@ MetalKnnState& metal_knn_state() {
   state.accumulate_centroids_pipeline = make_pipeline(state.device, state.library, @"accumulate_centroids");
   state.finalize_centroids_pipeline = make_pipeline(state.device, state.library, @"finalize_centroids");
   state.exact_pipeline = make_pipeline(state.device, state.library, @"exact_topk_simd");
+  state.exact_query_pipeline = make_pipeline(
+    state.device, state.library, @"exact_query_topk_simd"
+  );
+  state.ivf_query_pipeline = make_pipeline(
+    state.device, state.library, @"ivf_query_topk_fused"
+  );
   state.ivf_pipeline = make_pipeline(state.device, state.library, @"ivf_topk_fused");
   state.shortlist_pipeline = make_pipeline(state.device, state.library, @"ivf_projected_shortlist");
   state.rerank_pipeline = make_pipeline(state.device, state.library, @"ivf_exact_rerank_shortlist");
@@ -1138,6 +1367,604 @@ Rcpp::List native_metal_knn_impl(SEXP data_sexp,
     [centroid_sum_buffer release]; [assignment_buffer release];
     [centroid_buffer release]; [project_params_buffer release]; [projected_buffer release];
     [sign_buffer release]; [feature_buffer release]; [offset_map_buffer release]; [data_buffer release];
+    return result;
+  }
+}
+
+Rcpp::List native_metal_query_knn_impl(SEXP data_sexp,
+                                       SEXP query_sexp,
+                                       int k,
+                                       const std::string& requested_method,
+                                       const std::string& metric_name,
+                                       double target) {
+  using Clock = std::chrono::steady_clock;
+  const auto t0 = Clock::now();
+  const fastembedr::KnnMetric metric =
+    fastembedr::parse_knn_metric(metric_name);
+  if (metric == fastembedr::KnnMetric::InnerProduct) {
+    Rcpp::stop(
+      "Native Metal query KNN does not yet support raw inner-product distance."
+    );
+  }
+  fastembedr::FloatMatrix reference =
+    fastembedr::matrix_to_row_major_float(data_sexp, metric);
+  fastembedr::FloatMatrix query =
+    fastembedr::matrix_to_row_major_float(query_sexp, metric);
+  const auto t_convert = Clock::now();
+  if (reference.nrow < 1 || query.nrow < 1 ||
+      reference.ncol < 1 || reference.ncol != query.ncol ||
+      reference.ncol > kMaxP || k < 1 || k > kMaxK ||
+      k > reference.nrow) {
+    Rcpp::stop(
+      "Native Metal query KNN requires matching 1-%d dimensional matrices "
+      "and k <= min(%d, nrow(reference)).",
+      kMaxP, kMaxK
+    );
+  }
+  std::string method = requested_method;
+  if (method == "auto") {
+    method = reference.nrow < 4096 ? "exact" : "ivf";
+  }
+  if (method != "exact" && method != "ivf") {
+    Rcpp::stop(
+      "Native Metal reference-query KNN supports `exact`, `ivf`, or `auto`."
+    );
+  }
+  const int qdim = projection_dim(reference.ncol);
+  const int nlist = std::max(
+    16,
+    std::min(
+      kMaxLists,
+      static_cast<int>(
+        std::ceil(4.0 * std::sqrt(static_cast<double>(reference.nrow)))
+      )
+    )
+  );
+
+  std::vector<std::uint32_t> feature_offsets(
+    static_cast<std::size_t>(qdim) + 1u, 0u
+  );
+  std::vector<std::vector<std::pair<std::uint32_t, std::int8_t>>> buckets(
+    qdim
+  );
+  for (int d = 0; d < reference.ncol; ++d) {
+    const std::uint32_t h =
+      static_cast<std::uint32_t>(d + 1) * 2654435761u;
+    const int bucket = static_cast<int>(
+      h & static_cast<std::uint32_t>(qdim - 1)
+    );
+    const std::int8_t sign =
+      ((h >> 17u) & 1u) ? std::int8_t(1) : std::int8_t(-1);
+    buckets[bucket].push_back(
+      {static_cast<std::uint32_t>(d), sign}
+    );
+  }
+  std::vector<std::uint32_t> feature_ids;
+  std::vector<std::int8_t> feature_signs;
+  feature_ids.reserve(reference.ncol);
+  feature_signs.reserve(reference.ncol);
+  for (int bucket = 0; bucket < qdim; ++bucket) {
+    feature_offsets[bucket] =
+      static_cast<std::uint32_t>(feature_ids.size());
+    for (const auto& item : buckets[bucket]) {
+      feature_ids.push_back(item.first);
+      feature_signs.push_back(item.second);
+    }
+  }
+  feature_offsets[qdim] =
+    static_cast<std::uint32_t>(feature_ids.size());
+
+  @autoreleasepool {
+    MetalKnnState& state = metal_knn_state();
+    id<MTLDevice> device = state.device;
+    const auto t_setup = Clock::now();
+    id<MTLBuffer> reference_buffer = [device
+      newBufferWithBytes:reference.values.data()
+      length:reference.values.size() * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> query_buffer = [device
+      newBufferWithBytes:query.values.data()
+      length:query.values.size() * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    const std::size_t output_items =
+      static_cast<std::size_t>(query.nrow) * k;
+    id<MTLBuffer> out_id_buffer = [device
+      newBufferWithLength:output_items * sizeof(int)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> out_dist_buffer = [device
+      newBufferWithLength:output_items * sizeof(float)
+      options:MTLResourceStorageModeShared];
+
+    auto exact_search = [&](id<MTLBuffer> queries,
+                            int n_queries,
+                            id<MTLBuffer> output_ids,
+                            id<MTLBuffer> output_distances) {
+      QuerySearchParamsHost params{
+        static_cast<std::uint32_t>(reference.nrow),
+        static_cast<std::uint32_t>(n_queries),
+        static_cast<std::uint32_t>(reference.ncol),
+        static_cast<std::uint32_t>(k)
+      };
+      id<MTLBuffer> params_buffer = [device
+        newBufferWithBytes:&params
+        length:sizeof(params)
+        options:MTLResourceStorageModeShared];
+      id<MTLCommandBuffer> command = [state.queue commandBuffer];
+      id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+      [encoder setComputePipelineState:state.exact_query_pipeline];
+      [encoder setBuffer:reference_buffer offset:0 atIndex:0];
+      [encoder setBuffer:queries offset:0 atIndex:1];
+      [encoder setBuffer:output_ids offset:0 atIndex:2];
+      [encoder setBuffer:output_distances offset:0 atIndex:3];
+      [encoder setBuffer:params_buffer offset:0 atIndex:4];
+      [encoder
+        dispatchThreadgroups:MTLSizeMake(n_queries, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      [encoder endEncoding];
+      run_and_wait(command);
+      [params_buffer release];
+    };
+
+    if (method == "exact") {
+      exact_search(
+        query_buffer, query.nrow, out_id_buffer, out_dist_buffer
+      );
+      const auto t_search = Clock::now();
+      const int* ids =
+        static_cast<const int*>([out_id_buffer contents]);
+      const float* internal_distances =
+        static_cast<const float*>([out_dist_buffer contents]);
+      Rcpp::IntegerMatrix indices(query.nrow, k);
+      Rcpp::NumericMatrix distances(query.nrow, k);
+      for (int i = 0; i < query.nrow; ++i) {
+        for (int j = 0; j < k; ++j) {
+          const std::size_t pos = static_cast<std::size_t>(i) * k + j;
+          indices(i, j) = ids[pos] + 1;
+          distances(i, j) =
+            fastembedr::output_distance(internal_distances[pos], metric);
+        }
+      }
+      const auto t_copy = Clock::now();
+      Rcpp::List result = Rcpp::List::create(
+        Rcpp::Named("indices") = indices,
+        Rcpp::Named("distances") = distances,
+        Rcpp::Named("backend") = "metal",
+        Rcpp::Named("method") = "native_metal_exact_query",
+        Rcpp::Named("metric") = metric_name,
+        Rcpp::Named("target_recall") = target,
+        Rcpp::Named("pilot_recall") = 1.0,
+        Rcpp::Named("target_met") = true,
+        Rcpp::Named("exact") = true,
+        Rcpp::Named("exclude_self") = false,
+        Rcpp::Named("n_reference") = reference.nrow,
+        Rcpp::Named("n_query") = query.nrow,
+        Rcpp::Named("timing") = Rcpp::NumericVector::create(
+          Rcpp::Named("convert") =
+            std::chrono::duration<double>(t_convert - t0).count(),
+          Rcpp::Named("metal_setup") =
+            std::chrono::duration<double>(t_setup - t_convert).count(),
+          Rcpp::Named("search") =
+            std::chrono::duration<double>(t_search - t_setup).count(),
+          Rcpp::Named("copy_to_R") =
+            std::chrono::duration<double>(t_copy - t_search).count()
+        )
+      );
+      result.attr("backend") = "metal";
+      result.attr("method") = "native_metal_exact_query";
+      result.attr("metric") = metric_name;
+      result.attr("exact") = true;
+      result.attr("target_met") = true;
+      result.attr("exclude_self") = false;
+      [out_dist_buffer release];
+      [out_id_buffer release];
+      [query_buffer release];
+      [reference_buffer release];
+      return result;
+    }
+
+    id<MTLBuffer> offset_map_buffer = [device
+      newBufferWithBytes:feature_offsets.data()
+      length:feature_offsets.size() * sizeof(std::uint32_t)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> feature_buffer = [device
+      newBufferWithBytes:feature_ids.data()
+      length:feature_ids.size() * sizeof(std::uint32_t)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> sign_buffer = [device
+      newBufferWithBytes:feature_signs.data()
+      length:feature_signs.size() * sizeof(std::int8_t)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> reference_projected_buffer = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(reference.nrow) * qdim * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> query_projected_buffer = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(query.nrow) * qdim * sizeof(float)
+      options:MTLResourceStorageModeShared];
+
+    auto project = [&](id<MTLBuffer> input_buffer,
+                       id<MTLBuffer> projected_buffer,
+                       int n_rows) {
+      ProjectParamsHost params{
+        static_cast<std::uint32_t>(n_rows),
+        static_cast<std::uint32_t>(reference.ncol),
+        static_cast<std::uint32_t>(qdim)
+      };
+      id<MTLBuffer> params_buffer = [device
+        newBufferWithBytes:&params
+        length:sizeof(params)
+        options:MTLResourceStorageModeShared];
+      id<MTLCommandBuffer> command = [state.queue commandBuffer];
+      id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+      [encoder setComputePipelineState:state.project_pipeline];
+      [encoder setBuffer:input_buffer offset:0 atIndex:0];
+      [encoder setBuffer:offset_map_buffer offset:0 atIndex:1];
+      [encoder setBuffer:feature_buffer offset:0 atIndex:2];
+      [encoder setBuffer:sign_buffer offset:0 atIndex:3];
+      [encoder setBuffer:projected_buffer offset:0 atIndex:4];
+      [encoder setBuffer:params_buffer offset:0 atIndex:5];
+      [encoder
+        dispatchThreadgroups:MTLSizeMake(n_rows, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(qdim, 1, 1)];
+      [encoder endEncoding];
+      run_and_wait(command);
+      [params_buffer release];
+    };
+    project(
+      reference_buffer, reference_projected_buffer, reference.nrow
+    );
+    project(query_buffer, query_projected_buffer, query.nrow);
+    const auto t_project = Clock::now();
+
+    const float* reference_projected =
+      static_cast<const float*>([reference_projected_buffer contents]);
+    std::mt19937 rng(4u);
+    std::vector<int> order(reference.nrow);
+    std::iota(order.begin(), order.end(), 0);
+    std::shuffle(order.begin(), order.end(), rng);
+    std::vector<float> centroids(
+      static_cast<std::size_t>(nlist) * qdim
+    );
+    for (int centroid = 0; centroid < nlist; ++centroid) {
+      std::memcpy(
+        centroids.data() + static_cast<std::size_t>(centroid) * qdim,
+        reference_projected +
+          static_cast<std::size_t>(order[centroid]) * qdim,
+        static_cast<std::size_t>(qdim) * sizeof(float)
+      );
+    }
+    id<MTLBuffer> centroid_buffer = [device
+      newBufferWithBytes:centroids.data()
+      length:centroids.size() * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> assignment_buffer = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(reference.nrow) * sizeof(int)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> centroid_sum_buffer = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(nlist) * qdim * sizeof(float)
+      options:MTLResourceStorageModePrivate];
+    id<MTLBuffer> centroid_count_buffer = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(nlist) * sizeof(std::uint32_t)
+      options:MTLResourceStorageModePrivate];
+    IndexParamsHost index_params{
+      static_cast<std::uint32_t>(reference.nrow),
+      static_cast<std::uint32_t>(reference.ncol),
+      static_cast<std::uint32_t>(qdim),
+      static_cast<std::uint32_t>(nlist)
+    };
+    id<MTLBuffer> index_params_buffer = [device
+      newBufferWithBytes:&index_params
+      length:sizeof(index_params)
+      options:MTLResourceStorageModeShared];
+
+    for (int iteration = 0; iteration < 4; ++iteration) {
+      id<MTLCommandBuffer> command = [state.queue commandBuffer];
+      id<MTLComputeCommandEncoder> assignment_encoder =
+        [command computeCommandEncoder];
+      [assignment_encoder setComputePipelineState:state.assign_pipeline];
+      [assignment_encoder
+        setBuffer:reference_projected_buffer offset:0 atIndex:0];
+      [assignment_encoder setBuffer:centroid_buffer offset:0 atIndex:1];
+      [assignment_encoder setBuffer:assignment_buffer offset:0 atIndex:2];
+      [assignment_encoder setBuffer:index_params_buffer offset:0 atIndex:3];
+      [assignment_encoder
+        dispatchThreadgroups:MTLSizeMake(reference.nrow, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      [assignment_encoder endEncoding];
+      if (iteration < 3) {
+        const std::size_t centroid_items =
+          static_cast<std::size_t>(nlist) * qdim;
+        id<MTLComputeCommandEncoder> clear_encoder =
+          [command computeCommandEncoder];
+        [clear_encoder
+          setComputePipelineState:state.clear_centroids_pipeline];
+        [clear_encoder setBuffer:centroid_sum_buffer offset:0 atIndex:0];
+        [clear_encoder setBuffer:centroid_count_buffer offset:0 atIndex:1];
+        [clear_encoder setBuffer:index_params_buffer offset:0 atIndex:2];
+        [clear_encoder
+          dispatchThreads:
+            MTLSizeMake(std::max<std::size_t>(centroid_items, nlist), 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [clear_encoder endEncoding];
+
+        id<MTLComputeCommandEncoder> accumulate_encoder =
+          [command computeCommandEncoder];
+        [accumulate_encoder
+          setComputePipelineState:state.accumulate_centroids_pipeline];
+        [accumulate_encoder
+          setBuffer:reference_projected_buffer offset:0 atIndex:0];
+        [accumulate_encoder setBuffer:assignment_buffer offset:0 atIndex:1];
+        [accumulate_encoder setBuffer:centroid_sum_buffer offset:0 atIndex:2];
+        [accumulate_encoder
+          setBuffer:centroid_count_buffer offset:0 atIndex:3];
+        [accumulate_encoder setBuffer:index_params_buffer offset:0 atIndex:4];
+        [accumulate_encoder
+          dispatchThreads:
+            MTLSizeMake(
+              static_cast<std::size_t>(reference.nrow) * qdim, 1, 1
+            )
+          threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [accumulate_encoder endEncoding];
+
+        id<MTLComputeCommandEncoder> finalize_encoder =
+          [command computeCommandEncoder];
+        [finalize_encoder
+          setComputePipelineState:state.finalize_centroids_pipeline];
+        [finalize_encoder setBuffer:centroid_sum_buffer offset:0 atIndex:0];
+        [finalize_encoder
+          setBuffer:centroid_count_buffer offset:0 atIndex:1];
+        [finalize_encoder setBuffer:centroid_buffer offset:0 atIndex:2];
+        [finalize_encoder setBuffer:index_params_buffer offset:0 atIndex:3];
+        [finalize_encoder
+          dispatchThreads:MTLSizeMake(centroid_items, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [finalize_encoder endEncoding];
+      }
+      run_and_wait(command);
+    }
+    const auto t_train = Clock::now();
+
+    const int* assignment =
+      static_cast<const int*>([assignment_buffer contents]);
+    std::vector<std::uint32_t> list_offsets(
+      static_cast<std::size_t>(nlist) + 1u, 0u
+    );
+    for (int row = 0; row < reference.nrow; ++row) {
+      if (assignment[row] >= 0 && assignment[row] < nlist) {
+        ++list_offsets[static_cast<std::size_t>(assignment[row]) + 1u];
+      }
+    }
+    for (int list = 0; list < nlist; ++list) {
+      list_offsets[list + 1] += list_offsets[list];
+    }
+    std::vector<std::uint32_t> cursor = list_offsets;
+    std::vector<int> list_ids(reference.nrow, -1);
+    for (int row = 0; row < reference.nrow; ++row) {
+      const int list = assignment[row];
+      if (list >= 0 && list < nlist) {
+        list_ids[cursor[list]++] = row;
+      }
+    }
+    id<MTLBuffer> list_offset_buffer = [device
+      newBufferWithBytes:list_offsets.data()
+      length:list_offsets.size() * sizeof(std::uint32_t)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> list_id_buffer = [device
+      newBufferWithBytes:list_ids.data()
+      length:list_ids.size() * sizeof(int)
+      options:MTLResourceStorageModeShared];
+    const auto t_pack = Clock::now();
+
+    auto ivf_search = [&](id<MTLBuffer> queries,
+                          id<MTLBuffer> projected_queries,
+                          int n_queries,
+                          int nprobe,
+                          id<MTLBuffer> output_ids,
+                          id<MTLBuffer> output_distances) {
+      QueryIvfParamsHost params{
+        static_cast<std::uint32_t>(reference.nrow),
+        static_cast<std::uint32_t>(n_queries),
+        static_cast<std::uint32_t>(reference.ncol),
+        static_cast<std::uint32_t>(qdim),
+        static_cast<std::uint32_t>(nlist),
+        static_cast<std::uint32_t>(nprobe),
+        static_cast<std::uint32_t>(k)
+      };
+      id<MTLBuffer> params_buffer = [device
+        newBufferWithBytes:&params
+        length:sizeof(params)
+        options:MTLResourceStorageModeShared];
+      id<MTLCommandBuffer> command = [state.queue commandBuffer];
+      id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+      [encoder setComputePipelineState:state.ivf_query_pipeline];
+      [encoder setBuffer:reference_buffer offset:0 atIndex:0];
+      [encoder setBuffer:queries offset:0 atIndex:1];
+      [encoder setBuffer:projected_queries offset:0 atIndex:2];
+      [encoder setBuffer:centroid_buffer offset:0 atIndex:3];
+      [encoder setBuffer:list_offset_buffer offset:0 atIndex:4];
+      [encoder setBuffer:list_id_buffer offset:0 atIndex:5];
+      [encoder setBuffer:output_ids offset:0 atIndex:6];
+      [encoder setBuffer:output_distances offset:0 atIndex:7];
+      [encoder setBuffer:params_buffer offset:0 atIndex:8];
+      [encoder
+        dispatchThreadgroups:MTLSizeMake(n_queries, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      [encoder endEncoding];
+      run_and_wait(command);
+      [params_buffer release];
+    };
+
+    const int pilot_n = std::min(query.nrow, 128);
+    id<MTLBuffer> exact_pilot_ids = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(pilot_n) * k * sizeof(int)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> exact_pilot_distances = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(pilot_n) * k * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> ivf_pilot_ids = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(pilot_n) * k * sizeof(int)
+      options:MTLResourceStorageModeShared];
+    id<MTLBuffer> ivf_pilot_distances = [device
+      newBufferWithLength:
+        static_cast<std::size_t>(pilot_n) * k * sizeof(float)
+      options:MTLResourceStorageModeShared];
+    exact_search(
+      query_buffer, pilot_n, exact_pilot_ids, exact_pilot_distances
+    );
+    const auto t_exact = Clock::now();
+
+    int nprobe = std::min(nlist, 8);
+    int low_fail = 0;
+    int high_pass = 0;
+    double measured = 0.0;
+    const double tune_target = std::min(1.0, target + 0.002);
+    std::vector<int> probe_trace;
+    std::vector<double> recall_trace;
+    while (true) {
+      ivf_search(
+        query_buffer, query_projected_buffer, pilot_n, nprobe,
+        ivf_pilot_ids, ivf_pilot_distances
+      );
+      measured = recall_at_k(
+        static_cast<const int*>([exact_pilot_ids contents]),
+        static_cast<const int*>([ivf_pilot_ids contents]),
+        pilot_n,
+        k
+      );
+      probe_trace.push_back(nprobe);
+      recall_trace.push_back(measured);
+      if (measured >= tune_target) {
+        high_pass = nprobe;
+        break;
+      }
+      low_fail = nprobe;
+      if (nprobe >= std::min(nlist, kMaxProbe)) {
+        break;
+      }
+      nprobe = std::min(
+        std::min(nlist, kMaxProbe),
+        std::max(nprobe + 1, static_cast<int>(std::ceil(nprobe * 1.5)))
+      );
+    }
+    while (high_pass > 0 && high_pass - low_fail > 1) {
+      const int candidate = low_fail + (high_pass - low_fail) / 2;
+      ivf_search(
+        query_buffer, query_projected_buffer, pilot_n, candidate,
+        ivf_pilot_ids, ivf_pilot_distances
+      );
+      const double candidate_recall = recall_at_k(
+        static_cast<const int*>([exact_pilot_ids contents]),
+        static_cast<const int*>([ivf_pilot_ids contents]),
+        pilot_n,
+        k
+      );
+      probe_trace.push_back(candidate);
+      recall_trace.push_back(candidate_recall);
+      if (candidate_recall >= tune_target) {
+        high_pass = candidate;
+        measured = candidate_recall;
+      } else {
+        low_fail = candidate;
+      }
+    }
+    if (high_pass > 0) {
+      nprobe = high_pass;
+    }
+    const auto t_tune = Clock::now();
+    ivf_search(
+      query_buffer, query_projected_buffer, query.nrow, nprobe,
+      out_id_buffer, out_dist_buffer
+    );
+    const auto t_search = Clock::now();
+
+    const int* ids =
+      static_cast<const int*>([out_id_buffer contents]);
+    const float* internal_distances =
+      static_cast<const float*>([out_dist_buffer contents]);
+    Rcpp::IntegerMatrix indices(query.nrow, k);
+    Rcpp::NumericMatrix distances(query.nrow, k);
+    for (int i = 0; i < query.nrow; ++i) {
+      for (int j = 0; j < k; ++j) {
+        const std::size_t pos = static_cast<std::size_t>(i) * k + j;
+        indices(i, j) = ids[pos] + 1;
+        distances(i, j) =
+          fastembedr::output_distance(internal_distances[pos], metric);
+      }
+    }
+    const auto t_copy = Clock::now();
+    Rcpp::List result = Rcpp::List::create(
+      Rcpp::Named("indices") = indices,
+      Rcpp::Named("distances") = distances,
+      Rcpp::Named("backend") = "metal",
+      Rcpp::Named("method") = "native_metal_ivf_query",
+      Rcpp::Named("metric") = metric_name,
+      Rcpp::Named("target_recall") = target,
+      Rcpp::Named("pilot_recall") = measured,
+      Rcpp::Named("target_met") = measured >= target,
+      Rcpp::Named("exact") = false,
+      Rcpp::Named("exclude_self") = false,
+      Rcpp::Named("n_reference") = reference.nrow,
+      Rcpp::Named("n_query") = query.nrow,
+      Rcpp::Named("nlist") = nlist,
+      Rcpp::Named("nprobe") = nprobe,
+      Rcpp::Named("projection_dim") = qdim,
+      Rcpp::Named("probe_trace") = probe_trace,
+      Rcpp::Named("recall_trace") = recall_trace,
+      Rcpp::Named("timing") = Rcpp::NumericVector::create(
+        Rcpp::Named("convert") =
+          std::chrono::duration<double>(t_convert - t0).count(),
+        Rcpp::Named("metal_setup") =
+          std::chrono::duration<double>(t_setup - t_convert).count(),
+        Rcpp::Named("projection") =
+          std::chrono::duration<double>(t_project - t_setup).count(),
+        Rcpp::Named("ivf_training") =
+          std::chrono::duration<double>(t_train - t_project).count(),
+        Rcpp::Named("list_pack") =
+          std::chrono::duration<double>(t_pack - t_train).count(),
+        Rcpp::Named("pilot_exact") =
+          std::chrono::duration<double>(t_exact - t_pack).count(),
+        Rcpp::Named("pilot_tune") =
+          std::chrono::duration<double>(t_tune - t_exact).count(),
+        Rcpp::Named("search") =
+          std::chrono::duration<double>(t_search - t_tune).count(),
+        Rcpp::Named("copy_to_R") =
+          std::chrono::duration<double>(t_copy - t_search).count()
+      )
+    );
+    result.attr("backend") = "metal";
+    result.attr("method") = "native_metal_ivf_query";
+    result.attr("metric") = metric_name;
+    result.attr("exact") = false;
+    result.attr("target_met") = measured >= target;
+    result.attr("exclude_self") = false;
+
+    [ivf_pilot_distances release];
+    [ivf_pilot_ids release];
+    [exact_pilot_distances release];
+    [exact_pilot_ids release];
+    [list_id_buffer release];
+    [list_offset_buffer release];
+    [index_params_buffer release];
+    [centroid_count_buffer release];
+    [centroid_sum_buffer release];
+    [assignment_buffer release];
+    [centroid_buffer release];
+    [query_projected_buffer release];
+    [reference_projected_buffer release];
+    [sign_buffer release];
+    [feature_buffer release];
+    [offset_map_buffer release];
+    [out_dist_buffer release];
+    [out_id_buffer release];
+    [query_buffer release];
+    [reference_buffer release];
     return result;
   }
 }

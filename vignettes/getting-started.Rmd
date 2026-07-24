@@ -1,6 +1,11 @@
 ---
 title: "fastEmbedR: native UMAP and openTSNE workflows"
-author: "Stefano Caccia"
+author:
+  - "Moussa Kassim"
+  - "Martin Ocharo"
+  - "Alessia Vignoli"
+  - "Leonardo Tenori"
+  - "Stefano Cacciatore"
 output:
   BiocStyle::html_document:
     toc: true
@@ -428,11 +433,54 @@ that reference. It is never activated silently by `umap()` or `opentsne()`.
 The final layout still has one row per input observation. Reference and
 projection searches use fastEmbedR's native KNN routes.
 
+The staged API keeps selection, reference fitting, and projection separate.
+This is useful when the same landmark reference will be reused:
+
+```{r staged-landmarking}
+landmark_selection <- select_landmarks(
+  x,
+  landmarks = 0.5,
+  seed = 4,
+  n_threads = 2
+)
+
+umap_reference <- fit_landmark_model(
+  x,
+  landmark_selection,
+  method = "umap",
+  n_neighbors = 15,
+  graph_mode = "fuzzy",
+  backend = "cpu",
+  n_threads = 2,
+  seed = 4
+)
+
+umap_projected <- project_landmark_model(
+  umap_reference,
+  x,
+  refinement_epochs = 50,
+  n_threads = 2
+)
+```
+
+`fit_landmark_model()` invokes the ordinary production `umap()` or
+`opentsne()` implementation on the reference rows. Consequently, UMAP
+`graph_mode`, optimizer settings, seed, and backend are explicit and
+consistent with a full-data fit. `project_landmark_model()` computes only the
+query-to-reference neighbours. It does not recompute neighbours among
+landmarks or among query observations. Passing a matrix of new observations
+instead of `x` projects those observations into the same fixed reference
+embedding.
+
+The one-call functions below perform the same workflow when the intermediate
+selection and model do not need to be retained.
+
 ```{r landmarking}
 fit_landmark_umap <- landmark_umap(
   x,
   landmarks = 0.5,
   n_neighbors = 15,
+  graph_mode = "fuzzy",
   standardize = FALSE,
   n_threads = 2,
   seed = 4
@@ -470,11 +518,13 @@ plot_embedding(fit_landmark_umap$layout, labels, "Landmark UMAP")
 par(old_par)
 ```
 
-CPU projection is parallelized by query row. Metal uses native fused
-projection and fixed-reference kernels. CUDA keeps projection KNN, layouts,
-and refinement buffers resident on the GPU and returns only the final layout.
-The result records landmark count, fraction, projection backend, and stage
-timings so a landmark approximation cannot be mistaken for a full embedding.
+CPU uses native HNSW for query-to-reference search. Metal uses native exact
+search for small references and recall-tuned IVF-Flat for larger references,
+followed by fixed-reference transforms. CUDA uses native exact or IVF-Flat
+query search and keeps KNN, layouts, and refinement buffers resident on the
+GPU. The result records landmark count, fraction, projection backend, and
+separate reference, query-KNN, and transform timings so a landmark
+approximation cannot be mistaken for a full embedding.
 
 # Measuring embedding quality
 

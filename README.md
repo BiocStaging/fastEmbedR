@@ -95,7 +95,10 @@ and quality metrics without changing the stored layout.
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
 | `pca()` | Backend-native truncated PCA; set `opentsne_init = TRUE` to return a ready-to-use openTSNE initialization. |
-| `landmark_tsne()` / `landmark_umap()` | Landmark embedding and projection workflows. |
+| `select_landmarks()` | Select and retain a reusable landmark/reference split. |
+| `fit_landmark_model()` | Fit ordinary UMAP or openTSNE on the landmark reference. |
+| `project_landmark_model()` | Project held-out or new observations into the fixed reference. |
+| `landmark_tsne()` / `landmark_umap()` | One-call landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
 | `knn_graph()` | Compact graph from data, an embedding, or supplied neighbours. |
 | `graph_cluster()` | Native Louvain, Leiden, or exact Walktrap communities. |

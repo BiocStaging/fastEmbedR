@@ -3,7 +3,7 @@
  * FAISS 1.14.3, commit 0ca9df4792b173d573044ee14ca0704780176e82.
  *
  * Copyright (c) Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2026 Stefano Caccia.
+ * Copyright (c) 2026 Stefano Cacciatore.
  *
  * Licensed under the MIT License. The FAISS copyright and MIT license must be
  * retained with redistributed derivatives of this file.
@@ -17,11 +17,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <numeric>
 #include <queue>
 #include <random>
@@ -62,11 +64,17 @@ class CompactHNSW {
     allocate_graph();
   }
 
-  void build() {
+  void build(int n_threads) {
     if (n_ == 0) return;
     entry_point_ = 0;
     current_max_level_ = levels_[0];
-    for (int point = 1; point < n_; ++point) add_point(point);
+    BuildScratch scratch(n_, ef_construction_, 2 * m_);
+    BuildParallelState parallel(this, n_threads, 2 * m_);
+    for (int point = 1; point < n_; ++point) {
+      add_point(point, scratch, parallel);
+    }
+    // Distances accelerate reciprocal pruning only; queries need the graph IDs.
+    std::vector<float>().swap(neighbor_distances_);
   }
 
   void search_all(int k, int n_threads, std::vector<int>& output_ids, std::vector<float>& output_distances) const {
@@ -161,6 +169,137 @@ class CompactHNSW {
     std::uint32_t generation;
   };
 
+  struct ReciprocalScratch {
+    explicit ReciprocalScratch(int max_neighbors) {
+      candidates.reserve(static_cast<std::size_t>(max_neighbors) + 1u);
+      selected.reserve(static_cast<std::size_t>(max_neighbors));
+      selected_distances.reserve(static_cast<std::size_t>(max_neighbors));
+      rejected.reserve(static_cast<std::size_t>(max_neighbors) + 1u);
+    }
+
+    std::vector<NodeDistance> candidates;
+    std::vector<int> selected;
+    std::vector<float> selected_distances;
+    std::vector<NodeDistance> rejected;
+  };
+
+  struct BuildScratch {
+    BuildScratch(int n, int ef, int max_neighbors) : visited(n) {
+      candidate_heap.reserve(static_cast<std::size_t>(ef) + max_neighbors + 1u);
+      result_heap.reserve(static_cast<std::size_t>(ef) + 1u);
+      layer_candidates.reserve(static_cast<std::size_t>(ef));
+      selected.reserve(static_cast<std::size_t>(max_neighbors));
+      selected_distances.reserve(static_cast<std::size_t>(max_neighbors));
+      rejected.reserve(static_cast<std::size_t>(ef));
+    }
+
+    VisitTable visited;
+    std::vector<NodeDistance> candidate_heap;
+    std::vector<NodeDistance> result_heap;
+    std::vector<NodeDistance> layer_candidates;
+    std::vector<int> selected;
+    std::vector<float> selected_distances;
+    std::vector<NodeDistance> rejected;
+  };
+
+  // Reciprocal links from one insertion touch distinct graph rows, so a barrier
+  // can parallelize them without changing the sequential point insertion order.
+  struct BuildParallelState {
+    BuildParallelState(CompactHNSW* owner,
+                       int n_threads,
+                       int max_neighbors)
+        : owner(owner),
+          n_threads(std::max(1, std::min(n_threads, owner->n_))) {
+      reciprocal_scratch.reserve(static_cast<std::size_t>(this->n_threads));
+      for (int i = 0; i < this->n_threads; ++i) {
+        reciprocal_scratch.emplace_back(max_neighbors);
+      }
+      workers.reserve(static_cast<std::size_t>(this->n_threads - 1));
+      for (int thread_id = 1; thread_id < this->n_threads; ++thread_id) {
+        workers.emplace_back([this, thread_id]() {
+          std::uint64_t observed_generation = 0;
+          while (true) {
+            {
+              std::unique_lock<std::mutex> lock(mutex);
+              work_ready.wait(lock, [&]() {
+                return stopping || generation != observed_generation;
+              });
+              if (stopping) return;
+              observed_generation = generation;
+            }
+            process_stripe(thread_id);
+            {
+              std::lock_guard<std::mutex> lock(mutex);
+              --workers_remaining;
+              if (workers_remaining == 0) work_done.notify_one();
+            }
+          }
+        });
+      }
+    }
+
+    ~BuildParallelState() {
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        stopping = true;
+      }
+      work_ready.notify_all();
+      for (std::thread& worker : workers) worker.join();
+    }
+
+    void add(const std::vector<int>& nodes, int point_id, int level) {
+      if (workers.empty() || nodes.size() < 8u) {
+        ReciprocalScratch& scratch = reciprocal_scratch.front();
+        for (int node : nodes) {
+          owner->add_reciprocal(node, point_id, level, scratch);
+        }
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        task_nodes = &nodes;
+        task_point = point_id;
+        task_level = level;
+        workers_remaining = static_cast<int>(workers.size());
+        ++generation;
+      }
+      work_ready.notify_all();
+      process_stripe(0);
+      std::unique_lock<std::mutex> lock(mutex);
+      work_done.wait(lock, [&]() { return workers_remaining == 0; });
+    }
+
+   private:
+    void process_stripe(int thread_id) {
+      ReciprocalScratch& scratch =
+        reciprocal_scratch[static_cast<std::size_t>(thread_id)];
+      for (std::size_t i = static_cast<std::size_t>(thread_id);
+           i < task_nodes->size();
+           i += static_cast<std::size_t>(n_threads)) {
+        owner->add_reciprocal(
+          (*task_nodes)[i],
+          task_point,
+          task_level,
+          scratch
+        );
+      }
+    }
+
+    CompactHNSW* owner;
+    int n_threads;
+    std::vector<ReciprocalScratch> reciprocal_scratch;
+    std::vector<std::thread> workers;
+    std::mutex mutex;
+    std::condition_variable work_ready;
+    std::condition_variable work_done;
+    std::uint64_t generation = 0;
+    int workers_remaining = 0;
+    const std::vector<int>* task_nodes = nullptr;
+    int task_point = -1;
+    int task_level = 0;
+    bool stopping = false;
+  };
+
   std::vector<float> data_;
   int n_;
   int p_;
@@ -174,6 +313,7 @@ class CompactHNSW {
   std::vector<std::size_t> level_offsets_;
   std::vector<std::uint16_t> counts_;
   std::vector<std::int32_t> neighbors_;
+  std::vector<float> neighbor_distances_;
 
   inline const float* point(int id) const { return data_.data() + static_cast<std::size_t>(id) * p_; }
 
@@ -201,6 +341,35 @@ class CompactHNSW {
 
   inline float distance(int a, int b) const { return distance(point(a), point(b)); }
 
+  inline bool distance_below(int a, int b, float threshold) const {
+    const float* lhs = point(a);
+    const float* rhs = point(b);
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f, sum3 = 0.0f;
+    int d = 0;
+    for (; d + 15 < p_; d += 16) {
+      float x0 = lhs[d] - rhs[d]; float x1 = lhs[d + 1] - rhs[d + 1];
+      float x2 = lhs[d + 2] - rhs[d + 2]; float x3 = lhs[d + 3] - rhs[d + 3];
+      float x4 = lhs[d + 4] - rhs[d + 4]; float x5 = lhs[d + 5] - rhs[d + 5];
+      float x6 = lhs[d + 6] - rhs[d + 6]; float x7 = lhs[d + 7] - rhs[d + 7];
+      float x8 = lhs[d + 8] - rhs[d + 8]; float x9 = lhs[d + 9] - rhs[d + 9];
+      float xa = lhs[d + 10] - rhs[d + 10]; float xb = lhs[d + 11] - rhs[d + 11];
+      float xc = lhs[d + 12] - rhs[d + 12]; float xd = lhs[d + 13] - rhs[d + 13];
+      float xe = lhs[d + 14] - rhs[d + 14]; float xf = lhs[d + 15] - rhs[d + 15];
+      sum0 += x0*x0 + x4*x4 + x8*x8 + xc*xc;
+      sum1 += x1*x1 + x5*x5 + x9*x9 + xd*xd;
+      sum2 += x2*x2 + x6*x6 + xa*xa + xe*xe;
+      sum3 += x3*x3 + x7*x7 + xb*xb + xf*xf;
+      if ((sum0 + sum1) + (sum2 + sum3) >= threshold) return false;
+    }
+    float sum = (sum0 + sum1) + (sum2 + sum3);
+    for (; d < p_; ++d) {
+      float delta = lhs[d] - rhs[d];
+      sum += delta * delta;
+      if (sum >= threshold) return false;
+    }
+    return sum < threshold;
+  }
+
   int capacity(int level) const { return level == 0 ? 2 * m_ : m_; }
 
   std::size_t level_index(int node, int level) const { return level_offsets_[node] + static_cast<std::size_t>(level); }
@@ -225,6 +394,10 @@ class CompactHNSW {
       level_offsets_[i + 1] = level_offsets_[i] + static_cast<std::size_t>(levels_[i] + 1);
     }
     neighbors_.assign(node_offsets_.back(), -1);
+    neighbor_distances_.assign(
+      node_offsets_.back(),
+      std::numeric_limits<float>::infinity()
+    );
     counts_.assign(level_offsets_.back(), 0);
   }
 
@@ -289,69 +462,195 @@ class CompactHNSW {
     return output;
   }
 
-  std::vector<int> select_diverse(int query_id, const std::vector<NodeDistance>& candidates, int max_size) const {
-    std::vector<int> selected;
-    std::vector<int> rejected;
-    selected.reserve(max_size); rejected.reserve(max_size);
+  void search_layer_build(const float* query,
+                          int entry,
+                          int ef,
+                          int level,
+                          BuildScratch& scratch) const {
+    std::vector<NodeDistance>& candidates = scratch.candidate_heap;
+    std::vector<NodeDistance>& results = scratch.result_heap;
+    std::vector<NodeDistance>& output = scratch.layer_candidates;
+    candidates.clear();
+    results.clear();
+    output.clear();
+    scratch.visited.reset();
+    float initial_distance = distance(query, point(entry));
+    NodeDistance initial{initial_distance, entry};
+    candidates.push_back(initial);
+    std::push_heap(candidates.begin(), candidates.end(), CloserFirst{});
+    results.push_back(initial);
+    std::push_heap(results.begin(), results.end(), FartherFirst{});
+    scratch.visited.set(entry);
+    while (!candidates.empty()) {
+      NodeDistance current = candidates.front();
+      NodeDistance worst = results.front();
+      if (results.size() >= static_cast<std::size_t>(ef) &&
+          closer(worst, current)) {
+        break;
+      }
+      std::pop_heap(candidates.begin(), candidates.end(), CloserFirst{});
+      candidates.pop_back();
+      auto range = neighbor_range(current.id, level);
+      for (int j = 0; j < range.second; ++j) {
+        int candidate_id = range.first[j];
+        if (!scratch.visited.set(candidate_id)) continue;
+        NodeDistance candidate{
+          distance(query, point(candidate_id)),
+          candidate_id
+        };
+        if (results.size() < static_cast<std::size_t>(ef) ||
+            closer(candidate, results.front())) {
+          candidates.push_back(candidate);
+          std::push_heap(candidates.begin(), candidates.end(), CloserFirst{});
+          results.push_back(candidate);
+          std::push_heap(results.begin(), results.end(), FartherFirst{});
+          if (results.size() > static_cast<std::size_t>(ef)) {
+            std::pop_heap(results.begin(), results.end(), FartherFirst{});
+            results.pop_back();
+          }
+        }
+      }
+    }
+    output.reserve(results.size());
+    while (!results.empty()) {
+      output.push_back(results.front());
+      std::pop_heap(results.begin(), results.end(), FartherFirst{});
+      results.pop_back();
+    }
+    std::sort(output.begin(), output.end(), closer);
+  }
+
+  void select_diverse_into(int query_id,
+                           const std::vector<NodeDistance>& candidates,
+                           int max_size,
+                           std::vector<int>& selected,
+                           std::vector<float>& selected_distances,
+                           std::vector<NodeDistance>& rejected) const {
+    selected.clear();
+    selected_distances.clear();
+    rejected.clear();
     for (const NodeDistance& candidate : candidates) {
       if (candidate.id == query_id) continue;
       bool good = true;
       for (int other : selected) {
-        if (distance(candidate.id, other) < candidate.distance) { good = false; break; }
+        if (distance_below(candidate.id, other, candidate.distance)) {
+          good = false;
+          break;
+        }
       }
       if (good) {
         selected.push_back(candidate.id);
+        selected_distances.push_back(candidate.distance);
         if (static_cast<int>(selected.size()) == max_size) break;
       } else {
-        rejected.push_back(candidate.id);
+        rejected.push_back(candidate);
       }
     }
-    for (int candidate : rejected) {
+    for (const NodeDistance& candidate : rejected) {
       if (static_cast<int>(selected.size()) == max_size) break;
-      selected.push_back(candidate);
+      selected.push_back(candidate.id);
+      selected_distances.push_back(candidate.distance);
     }
-    return selected;
   }
 
-  void replace_neighbors(int node, int level, const std::vector<int>& selected) {
+  void replace_neighbors(int node,
+                         int level,
+                         const std::vector<int>& selected,
+                         const std::vector<float>& selected_distances) {
     auto range = mutable_neighbor_range(node, level);
+    const std::size_t offset = neighbor_offset(node, level);
     int cap = capacity(level);
     int size = std::min(cap, static_cast<int>(selected.size()));
-    for (int i = 0; i < size; ++i) range.first[i] = selected[i];
-    for (int i = size; i < cap; ++i) range.first[i] = -1;
+    for (int i = 0; i < size; ++i) {
+      range.first[i] = selected[i];
+      neighbor_distances_[offset + static_cast<std::size_t>(i)] =
+        selected_distances[static_cast<std::size_t>(i)];
+    }
+    for (int i = size; i < cap; ++i) {
+      range.first[i] = -1;
+      neighbor_distances_[offset + static_cast<std::size_t>(i)] =
+        std::numeric_limits<float>::infinity();
+    }
     *range.second = static_cast<std::uint16_t>(size);
   }
 
-  void add_reciprocal(int node, int other, int level) {
+  void add_reciprocal(int node,
+                      int other,
+                      int level,
+                      ReciprocalScratch& scratch) {
     auto range = mutable_neighbor_range(node, level);
     int count = *range.second;
     for (int i = 0; i < count; ++i) if (range.first[i] == other) return;
     int cap = capacity(level);
     if (count < cap) {
       range.first[count] = other;
+      neighbor_distances_[
+        neighbor_offset(node, level) + static_cast<std::size_t>(count)
+      ] = distance(node, other);
       *range.second = static_cast<std::uint16_t>(count + 1);
       return;
     }
-    std::vector<NodeDistance> candidates;
-    candidates.reserve(static_cast<std::size_t>(count) + 1u);
-    for (int i = 0; i < count; ++i) candidates.push_back({distance(node, range.first[i]), range.first[i]});
+    std::vector<NodeDistance>& candidates = scratch.candidates;
+    candidates.clear();
+    const std::size_t offset = neighbor_offset(node, level);
+    for (int i = 0; i < count; ++i) {
+      candidates.push_back({
+        neighbor_distances_[offset + static_cast<std::size_t>(i)],
+        range.first[i]
+      });
+    }
     candidates.push_back({distance(node, other), other});
     std::sort(candidates.begin(), candidates.end(), closer);
-    replace_neighbors(node, level, select_diverse(node, candidates, cap));
+    select_diverse_into(
+      node,
+      candidates,
+      cap,
+      scratch.selected,
+      scratch.selected_distances,
+      scratch.rejected
+    );
+    replace_neighbors(
+      node,
+      level,
+      scratch.selected,
+      scratch.selected_distances
+    );
   }
 
-  void add_point(int point_id) {
-    VisitTable visited(n_);
+  void add_point(int point_id,
+                 BuildScratch& scratch,
+                 BuildParallelState& parallel) {
     int nearest = entry_point_;
     float nearest_distance = distance(point_id, nearest);
     for (int level = current_max_level_; level > levels_[point_id]; --level)
       nearest = greedy_search(point(point_id), nearest, level, nearest_distance);
     for (int level = std::min(levels_[point_id], current_max_level_); level >= 0; --level) {
-      std::vector<NodeDistance> candidates = search_layer(point(point_id), nearest, ef_construction_, level, visited);
-      std::vector<int> selected = select_diverse(point_id, candidates, capacity(level));
-      replace_neighbors(point_id, level, selected);
-      for (int other : selected) add_reciprocal(other, point_id, level);
-      if (!candidates.empty()) { nearest = candidates.front().id; nearest_distance = candidates.front().distance; }
+      search_layer_build(
+        point(point_id),
+        nearest,
+        ef_construction_,
+        level,
+        scratch
+      );
+      select_diverse_into(
+        point_id,
+        scratch.layer_candidates,
+        capacity(level),
+        scratch.selected,
+        scratch.selected_distances,
+        scratch.rejected
+      );
+      replace_neighbors(
+        point_id,
+        level,
+        scratch.selected,
+        scratch.selected_distances
+      );
+      parallel.add(scratch.selected, point_id, level);
+      if (!scratch.layer_candidates.empty()) {
+        nearest = scratch.layer_candidates.front().id;
+        nearest_distance = scratch.layer_candidates.front().distance;
+      }
     }
     if (levels_[point_id] > current_max_level_) {
       entry_point_ = point_id;
@@ -437,7 +736,7 @@ Rcpp::List native_hnsw_knn_impl(SEXP data_sexp,
   const int ef_construction = large_high_dim ? 40 : 80;
   const int ef_search = large_high_dim ? 40 : 64;
   CompactHNSW index(std::move(input.values), n, p, m, ef_construction, ef_search);
-  index.build();
+  index.build(n_threads);
   const auto built = Clock::now();
   std::vector<int> ids;
   std::vector<float> squared_distances;
@@ -504,7 +803,7 @@ Rcpp::List native_hnsw_query_impl(SEXP data_sexp,
   CompactHNSW index(
     std::move(input.values), n, p, m, ef_construction, ef_search
   );
-  index.build();
+  index.build(n_threads);
   const auto built = Clock::now();
   std::vector<int> ids;
   std::vector<float> squared_distances;

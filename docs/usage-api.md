@@ -201,6 +201,41 @@ large graphs.
 
 ## Landmark Workflow
 
+For reusable landmark models, keep the three stages explicit:
+
+```r
+selection <- select_landmarks(x, landmarks = 0.5, seed = 1)
+
+model <- fit_landmark_model(
+  x,
+  selection,
+  method = "umap",
+  n_neighbors = 30,
+  graph_mode = "fuzzy",
+  backend = "cpu",
+  n_threads = 4,
+  seed = 1
+)
+
+fit <- project_landmark_model(
+  model,
+  x,
+  refinement_epochs = 50,
+  n_threads = 4
+)
+```
+
+The reference fit uses the same `umap()` implementation, graph construction,
+optimizer, and parameter values as an ordinary full UMAP run. For openTSNE,
+set `method = "opentsne"` and pass `perplexity`. The resulting model can also
+project a separate matrix of new observations in the same feature space.
+
+`precompute_query_knn(reference, query, ...)` exposes the query-only search
+used by the projection stage. It searches the fixed reference only and avoids
+constructing unnecessary query-to-query neighbours.
+
+The one-call wrapper remains available:
+
 ```r
 fit <- landmark_tsne(
   x,
@@ -222,18 +257,18 @@ fit <- landmark_umap(
   x,
   landmarks = 0.5,
   n_neighbors = 30,
+  graph_mode = "fuzzy",
   backend = "cpu",
   seed = 1
 )
 plot(fit)
 ```
 
-For landmark runs, `backend = "metal"` uses a fused native Metal projection
-kernel that computes query-to-landmark KNN, interpolation, and projection
-confidence in one pass before the fixed-reference transform. CPU runs use
-exact multi-threaded projection KNN by default and switch to a native
-projection-specific approximation only for large projections where the cheaper
-candidate search is worthwhile.
+CPU projection uses native recall-tuned HNSW. Metal uses native exact search
+for small references and recall-tuned IVF-Flat for larger references, followed
+by native fixed-reference transform kernels. CUDA uses native exact search for
+smaller references and IVF-Flat for larger references; its KNN result remains
+device resident for the projection and refinement stages.
 
 ## Automatic Parameters
 

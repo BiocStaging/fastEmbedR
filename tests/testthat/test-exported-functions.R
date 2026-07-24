@@ -15,7 +15,9 @@ test_that("public API is KNN and openTSNE focused", {
   expect_true(all(c(
     "umap", "umap_knn", "opentsne", "opentsne_knn", "embed_knn",
     "evaluate_embedding", "transform_tsne", "landmark_tsne",
-    "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn", "pca",
+    "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn",
+    "precompute_query_knn", "select_landmarks", "fit_landmark_model",
+    "project_landmark_model", "pca",
     "knn_graph", "graph_cluster"
   ) %in% exports))
 

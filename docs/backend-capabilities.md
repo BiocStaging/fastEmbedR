@@ -15,8 +15,12 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | `opentsne()` | native HNSW, then `opentsne_knn()` | native exact/IVF-Flat, then Metal openTSNE | native FAISS/cuVS device KNN, then CUDA openTSNE | The package does not call Python openTSNE in public functions. |
 | `pca()` / openTSNE PCA init | fastPLS-style RSVD | native float32 MPS block-subspace TSVD | native RAPIDS RAFT TSVD when compiled | GPU requests do not route through Python or silently fall back to CPU. |
 | `transform_tsne()` | native fixed-reference transform | native Metal projection/transform kernels where available | native CUDA projection/transform kernels where built | Used by openTSNE landmarking. |
-| `landmark_umap()` | native landmark embed/project/refine | native Metal projection/refinement kernels where available | native CUDA projection/refinement kernels where built | Landmarking is an explicit approximation, not a replacement for full UMAP. |
-| `landmark_tsne()` | native landmark embed plus transform | native Metal projection/transform kernels where available | native CUDA projection/transform kernels where built | Projection quality is tracked separately in benchmark plots. |
+| `select_landmarks()` | native selection | shared selection | shared selection | Selection is independent of the embedding method and can be reused. |
+| `fit_landmark_model()` | ordinary CPU UMAP/openTSNE reference fit | ordinary Metal UMAP/openTSNE reference fit | ordinary CUDA UMAP/openTSNE reference fit | UMAP graph mode and optimizer parameters are preserved explicitly. |
+| `precompute_query_knn()` | native HNSW reference-query search | native exact/recall-tuned IVF-Flat reference-query search | native exact/IVF-Flat reference-query search | Searches only the fixed reference; CUDA output remains device resident. |
+| `project_landmark_model()` | native projection/transform/refinement | native Metal projection/transform/refinement | native CUDA resident projection/transform/refinement | Projects held-out or genuinely new observations while reference coordinates remain fixed. |
+| `landmark_umap()` | one-call landmark embed/project/refine | one-call Metal path | one-call CUDA path | Convenience wrapper; landmarking remains an explicit approximation. |
+| `landmark_tsne()` | one-call landmark embed plus transform | one-call Metal path | one-call CUDA path | Convenience wrapper; projection quality is tracked separately. |
 | `evaluate_embedding()` | native/R quality metrics | CPU metrics after final layout transfer | CPU metrics after final layout transfer | Metrics are not labelled as GPU work. |
 
 ## Distance Metrics

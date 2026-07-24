@@ -125,6 +125,54 @@ fastembedr_embedding_nn_policy <- function(embedding_backend, n = NULL) {
   )
 }
 
+fastembedr_query_nn_policy <- function(embedding_backend,
+                                       n_reference = NULL,
+                                       n_query = NULL,
+                                       p = NULL) {
+  embedding_backend <- resolve_embedding_backend(embedding_backend)
+  n_reference <- suppressWarnings(as.integer(n_reference %||% NA_integer_))
+  n_query <- suppressWarnings(as.integer(n_query %||% NA_integer_))
+  p <- suppressWarnings(as.integer(p %||% NA_integer_))
+  if (identical(embedding_backend, "cuda")) {
+    return(list(
+      backend = "cuda",
+      method = if (
+        length(n_reference) == 1L && !is.na(n_reference) &&
+        n_reference < 100000L
+      ) "exact" else "ivf",
+      tuning = "auto",
+      target_recall = 0.99
+    ))
+  }
+  if (identical(embedding_backend, "metal")) {
+    estimated_work <- if (
+      length(n_reference) == 1L && !is.na(n_reference) &&
+      length(n_query) == 1L && !is.na(n_query) &&
+      length(p) == 1L && !is.na(p)
+    ) {
+      as.double(n_reference) * as.double(n_query) * as.double(p)
+    } else {
+      NA_real_
+    }
+    use_ivf <- if (is.finite(estimated_work)) {
+      n_reference >= 4096L && estimated_work >= 5e9
+    } else {
+      length(n_reference) == 1L && !is.na(n_reference) &&
+        n_reference >= 20000L
+    }
+    return(list(
+      backend = "metal",
+      method = if (isTRUE(use_ivf)) "ivf" else "exact",
+      tuning = "auto",
+      target_recall = 0.99
+    ))
+  }
+  list(
+    backend = "cpu", method = "hnsw", tuning = "auto",
+    target_recall = 0.99
+  )
+}
+
 fastembedr_nn_policy_engine <- function(policy, keep_gpu = FALSE) {
   if (is.list(policy) && identical(policy$backend, "cuda")) {
     provider <- if (identical(policy$method %||% "auto", "ivf")) {
@@ -253,6 +301,117 @@ precompute_knn <- function(data,
   out
 }
 
+#' Precompute query-to-reference nearest neighbours
+#'
+#' `precompute_query_knn()` searches a fixed reference matrix for every row of
+#' a query matrix. It uses the same package-native backend family and routing
+#' policy as [precompute_knn()], but does not compute unnecessary
+#' reference-to-reference or query-to-query neighbours.
+#'
+#' @param reference Reference observations in rows.
+#' @param query Query observations in rows and the same feature space as
+#'   `reference`.
+#' @inheritParams precompute_knn
+#'
+#' @details
+#' CPU uses the native recall-tuned HNSW reference-query path. Metal routes
+#' between a native query-only exact kernel and recall-tuned IVF-Flat from the
+#' estimated reference-query distance workload. CUDA uses direct FAISS GPU
+#' exact search below 100,000 reference rows and direct RAPIDS cuVS IVF-Flat
+#' above that threshold. CUDA results remain device-resident for direct
+#' consumption by landmark UMAP and openTSNE transformations.
+#'
+#' @return A `fastEmbedR_knn` object with one row per query observation and
+#'   one-based indices into `reference`.
+#' @examples
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' ref <- x[1:100, , drop = FALSE]
+#' qry <- x[101:150, , drop = FALSE]
+#' knn <- precompute_query_knn(ref, qry, k = 10, backend = "cpu")
+#' @export
+precompute_query_knn <- function(reference,
+                                 query,
+                                 k = 30L,
+                                 metric = c(
+                                   "euclidean", "cosine", "correlation",
+                                   "inner_product"
+                                 ),
+                                 backend = c("cpu", "cuda", "metal"),
+                                 n_threads = NULL) {
+  backend <- resolve_embedding_backend(backend)
+  metric <- resolve_embedding_metric(metric, reference)
+  reference_prepared <- prepare_embedding_data(
+    reference,
+    standardize = FALSE,
+    pca_dims = NULL,
+    seed = 4L,
+    backend = backend
+  )
+  query_prepared <- prepare_embedding_data(
+    query,
+    standardize = FALSE,
+    pca_dims = NULL,
+    seed = 4L,
+    backend = backend
+  )
+  reference <- reference_prepared$data
+  query <- query_prepared$data
+  if (ncol(reference) != ncol(query)) {
+    stop("`reference` and `query` must have the same number of columns.", call. = FALSE)
+  }
+  k <- suppressWarnings(as.integer(k))
+  if (length(k) != 1L || is.na(k) || !is.finite(k) ||
+      k < 1L || k > nrow(reference)) {
+    stop("`k` must be one integer between 1 and nrow(reference).", call. = FALSE)
+  }
+  policy <- fastembedr_query_nn_policy(
+    backend,
+    n_reference = nrow(reference),
+    n_query = nrow(query),
+    p = ncol(reference)
+  )
+  keep_gpu <- identical(backend, "cuda")
+  elapsed <- system.time({
+    out <- fastembedr_native_query_knn(
+      reference,
+      query,
+      k = k,
+      metric = metric,
+      n_threads = n_threads,
+      target_recall = policy$target_recall,
+      output = fastembedr_knn_output_type(reference, backend),
+      backend = policy$backend,
+      method = policy$method,
+      keep_gpu = keep_gpu
+    )
+  })
+  out$n <- as.integer(nrow(query))
+  out$n_query <- as.integer(nrow(query))
+  out$n_reference <- as.integer(nrow(reference))
+  out$k <- as.integer(k)
+  out$metric <- metric
+  out$exclude_self <- FALSE
+  out$backend_requested <- backend
+  out$execution_backend <- backend
+  out$engine <- fastembedr_nn_policy_engine(policy, keep_gpu = keep_gpu)
+  out$elapsed_sec <- unname(elapsed[["elapsed"]])
+  out$target_recall <- policy$target_recall
+  out$result_residency <- if (keep_gpu) "cuda" else "host"
+  if (keep_gpu) {
+    class(out) <- unique(c(
+      "fastEmbedR_gpu_knn", "fastEmbedR_knn", class(out), "list"
+    ))
+  } else {
+    class(out) <- unique(c("fastEmbedR_knn", class(out), "list"))
+  }
+  attr(out, "backend") <- backend
+  attr(out, "backend_requested") <- backend
+  attr(out, "metric") <- metric
+  attr(out, "exclude_self") <- FALSE
+  attr(out, "result_residency") <- out$result_residency
+  out
+}
+
 #' @export
 print.fastEmbedR_knn <- function(x, ...) {
   cat("<fastEmbedR_knn>\n")
@@ -362,13 +521,38 @@ fastembedr_native_query_knn <- function(data,
                                         metric = "euclidean",
                                         n_threads = NULL,
                                         target_recall = 0.99,
-                                        output = "double") {
+                                        output = "double",
+                                        backend = "cpu",
+                                        method = "auto",
+                                        keep_gpu = FALSE) {
+  if (identical(backend, "cuda")) {
+    out <- native_cuda_query_knn_cpp(
+      data, query, k = as.integer(k), method = method, metric = metric,
+      target_recall = target_recall, keep_gpu = isTRUE(keep_gpu)
+    )
+    if (isTRUE(keep_gpu)) return(out)
+    return(fastembedr_convert_knn_distances(out, output))
+  }
+  if (identical(backend, "metal")) {
+    out <- native_metal_query_knn_cpp(
+      data, query, k = as.integer(k), method = method, metric = metric,
+      target_recall = target_recall
+    )
+    if (identical(out$method, "native_metal_ivf_query") &&
+        !isTRUE(out$target_met)) {
+      stop(
+        "Native Metal query IVF did not meet the requested recall target; ",
+        "no fallback was used.",
+        call. = FALSE
+      )
+    }
+    attr(out, "backend") <- "metal"
+    attr(out, "exclude_self") <- FALSE
+    return(fastembedr_convert_knn_distances(out, output))
+  }
   out <- native_hnsw_query_cpp(
-    data,
-    query,
-    k = as.integer(k),
-    n_threads = normalize_nn_threads(n_threads),
-    metric = metric,
+    data, query, k = as.integer(k),
+    n_threads = normalize_nn_threads(n_threads), metric = metric,
     target_recall = target_recall
   )
   attr(out, "backend") <- "cpu"

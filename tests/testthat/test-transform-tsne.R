@@ -333,22 +333,16 @@ test_that("landmark_tsne uses native HNSW for CPU projection KNN", {
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
   expect_equal(fit$parameters$projection_nn_backend, "cpu")
-  expect_equal(fit$parameters$projection_strategy, "native_hnsw_landmark_query")
+  expect_equal(
+    fit$parameters$projection_strategy,
+    "native_hnsw_reference_query_knn"
+  )
   expect_true(is.list(attr(fit$landmarks$projection_knn, "approximation")))
 })
 
-test_that("landmark_tsne uses fused Metal projection when requested", {
+test_that("landmark_tsne uses the native Metal reference-query KNN", {
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
-  old_fused <- getOption("fastEmbedR.landmark_projection_fused", NULL)
-  on.exit({
-    if (is.null(old_fused)) {
-      options(fastEmbedR.landmark_projection_fused = NULL)
-    } else {
-      options(fastEmbedR.landmark_projection_fused = old_fused)
-    }
-  }, add = TRUE)
-  options(fastEmbedR.landmark_projection_fused = TRUE)
 
   set.seed(405)
   x <- rbind(
@@ -375,12 +369,18 @@ test_that("landmark_tsne uses fused Metal projection when requested", {
 
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
-  expect_equal(fit$parameters$projection_nn_backend, "metal_fused_projection")
-  expect_equal(fit$parameters$projection_strategy, "query_only_exact_fused_landmark_projection_knn_confidence")
-  expect_equal(attr(fit$landmarks$projection_knn, "metal_kernel"), "landmark_project_interpolate_knn_confidence")
+  expect_equal(fit$parameters$projection_nn_backend, "metal")
+  expect_equal(
+    fit$parameters$projection_strategy,
+    "native_exact_reference_query_knn"
+  )
+  expect_equal(
+    attr(fit$landmarks$projection_knn, "method"),
+    "native_metal_exact_query"
+  )
 })
 
-test_that("landmark_tsne keeps Metal projection and transform native when intermediates are not requested", {
+test_that("landmark_tsne keeps Metal query search and transform native", {
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
 
@@ -410,10 +410,10 @@ test_that("landmark_tsne keeps Metal projection and transform native when interm
 
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
-  expect_equal(fit$parameters$projection_nn_backend, "metal_fused_projection")
+  expect_equal(fit$parameters$projection_nn_backend, "metal")
   expect_equal(
     fit$parameters$projection_strategy,
-    "query_only_exact_fused_landmark_projection_knn_confidence"
+    "native_exact_reference_query_knn"
   )
   expect_equal(fit$parameters$transform_optimizer, "opentsne_style_fixed_reference_transform_metal")
   expect_true(is.null(fit$landmarks$projection_knn))

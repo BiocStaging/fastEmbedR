@@ -227,15 +227,19 @@ umap <- function(data,
 #' Run landmark UMAP from a data matrix
 #'
 #' `landmark_umap()` embeds a landmark subset with [umap()] and projects the
-#' remaining observations by KNN interpolation against the fixed landmark
-#' embedding. It is an explicit landmark approximation: the UMAP objective and
-#' parameters for the landmark subset are unchanged.
+#' remaining observations against the fixed landmark embedding using
+#' query-to-reference KNN, local affine placement, and optional fixed-reference
+#' refinement. It is an explicit landmark approximation: the UMAP objective
+#' and parameters for the landmark subset are unchanged.
 #'
 #' @inheritParams umap
 #' @param landmarks `TRUE` for an automatic subset, a fraction such as `0.5`, a
 #'   landmark count, or explicit row indices.
 #' @param transform_k Number of landmark neighbours used to project
 #'   non-landmark observations. Defaults to `n_neighbors`.
+#' @param graph_mode Graph weighting mode passed unchanged to the reference
+#'   [umap()] fit. `"binary"` uses a symmetric unit-weight graph and
+#'   `"fuzzy"` uses standard UMAP fuzzy graph weights.
 #' @export
 landmark_umap <- function(data,
                           landmarks = 0.5,
@@ -248,8 +252,10 @@ landmark_umap <- function(data,
                           transform_k = NULL,
                           n_threads = NULL,
                           keep_knn = FALSE,
+                          graph_mode = c("binary", "fuzzy"),
                           verbose = FALSE) {
   backend <- resolve_embedding_backend(backend)
+  graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
   preprocess_time <- system.time({
     prepared <- prepare_embedding_data(
@@ -270,13 +276,14 @@ landmark_umap <- function(data,
     stop("`n_neighbors` must be a positive integer smaller than `nrow(data)`.", call. = FALSE)
   }
 
-  landmark_indices <- resolve_landmarks(
-    landmarks,
+  landmark_selection <- select_landmarks(
     x,
-    seed,
+    landmarks,
+    seed = seed,
     n_threads = n_threads
   )
-  if (is.null(landmark_indices)) {
+  landmark_indices <- landmark_selection$indices
+  if (length(landmark_selection$query_indices) == 0L) {
     return(umap(
       x,
       n_neighbors = n_neighbors,
@@ -287,11 +294,12 @@ landmark_umap <- function(data,
       backend = backend,
       n_threads = n_threads,
       keep_knn = keep_knn,
+      graph_mode = graph_mode,
       verbose = verbose
     ))
   }
 
-  non_landmarks <- setdiff(seq_len(n), landmark_indices)
+  non_landmarks <- landmark_selection$query_indices
   partition <- split_landmark_data(
     x,
     landmark_indices,
@@ -320,6 +328,7 @@ landmark_umap <- function(data,
       nn = reference_knn,
       n_threads = n_threads,
       keep_knn = keep_knn,
+      graph_mode = graph_mode,
       verbose = verbose
     )
   })
@@ -564,8 +573,7 @@ landmark_umap <- function(data,
     embedding_knn_accuracy = NA_real_,
     stringsAsFactors = FALSE
   )
-  selection_method <- attr(landmark_indices, "selection_method")
-  if (is.null(selection_method)) selection_method <- "indices"
+  selection_method <- landmark_selection$method
   projection_approximation <- attr(projection_knn, "approximation", exact = TRUE)
   projection_strategy <- if (is.null(projection_approximation$strategy)) {
     if (isTRUE(attr(projection_knn, "exact"))) "exact" else NA_character_
@@ -589,6 +597,7 @@ landmark_umap <- function(data,
       n_landmarks = n_landmarks,
       landmark_fraction = n_landmarks / n,
       landmark_selection = selection_method,
+      graph_mode = graph_mode,
       transform_k = transform_k,
       landmark_refinement = if (refinement_epochs > 0L) "fixed_landmark_umap_rows" else "none",
       landmark_refinement_epochs = as.integer(refinement_epochs),

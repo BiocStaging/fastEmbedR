@@ -349,6 +349,10 @@ native_metal_knn_cpp <- function(data, k, method = "auto", metric = "euclidean",
     .Call(`_fastEmbedR_native_metal_knn_cpp`, data, k, method, metric, target_recall)
 }
 
+native_metal_query_knn_cpp <- function(data, query, k, method = "auto", metric = "euclidean", target_recall = 0.99) {
+    .Call(`_fastEmbedR_native_metal_query_knn_cpp`, data, query, k, method, metric, target_recall)
+}
+
 native_cuda_knn_available_cpp <- function() {
     .Call(`_fastEmbedR_native_cuda_knn_available_cpp`)
 }
@@ -359,6 +363,10 @@ native_cuda_faiss_gpu_available_cpp <- function() {
 
 native_cuda_knn_cpp <- function(data, k, method = "auto", metric = "euclidean", target_recall = 0.99, keep_gpu = TRUE) {
     .Call(`_fastEmbedR_native_cuda_knn_cpp`, data, k, method, metric, target_recall, keep_gpu)
+}
+
+native_cuda_query_knn_cpp <- function(data, query, k, method = "auto", metric = "euclidean", target_recall = 0.99, keep_gpu = TRUE) {
+    .Call(`_fastEmbedR_native_cuda_query_knn_cpp`, data, query, k, method, metric, target_recall, keep_gpu)
 }
 
 native_cuda_knn_to_host_cpp <- function(knn) {

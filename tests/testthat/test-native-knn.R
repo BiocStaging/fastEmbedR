@@ -29,6 +29,16 @@ test_that("native CPU HNSW reaches its recall tier", {
   expect_identical(observed$method, "native_hnsw")
 })
 
+test_that("native CPU HNSW construction is invariant to thread count", {
+  set.seed(44)
+  x <- matrix(rnorm(800 * 12), nrow = 800)
+  serial <- native_hnsw_knn_cpp(x, 12L, 1L, "euclidean", 0.99)
+  parallel <- native_hnsw_knn_cpp(x, 12L, 4L, "euclidean", 0.99)
+
+  expect_identical(parallel$indices, serial$indices)
+  expect_identical(parallel$distances, serial$distances)
+})
+
 test_that("precompute_knn exposes the native CPU policy without self neighbors", {
   set.seed(24)
   x <- matrix(rnorm(240 * 10), nrow = 240)
@@ -163,6 +173,45 @@ test_that("native Metal exact and IVF searches are recall checked", {
   expect_true(isTRUE(ivf$target_met))
   expect_gte(knn_recall_test(ivf, ivf_truth), 0.99)
   expect_identical(attr(ivf, "backend"), "metal")
+})
+
+test_that("native Metal query IVF is recall-gated against exact query KNN", {
+  skip_if_not(isTRUE(native_metal_knn_available_cpp()), "Metal is unavailable")
+  set.seed(940)
+  reference <- matrix(rnorm(5000 * 24), nrow = 5000)
+  query <- matrix(rnorm(400 * 24), nrow = 400)
+  exact <- native_metal_query_knn_cpp(
+    reference, query, 15L, "exact", "euclidean", 1
+  )
+  approximate <- native_metal_query_knn_cpp(
+    reference, query, 15L, "ivf", "euclidean", 0.99
+  )
+  recall <- mean(vapply(seq_len(nrow(query)), function(row) {
+    length(intersect(
+      exact$indices[row, ],
+      approximate$indices[row, ]
+    )) / 15
+  }, numeric(1)))
+
+  expect_identical(approximate$method, "native_metal_ivf_query")
+  expect_true(isTRUE(approximate$target_met))
+  expect_gte(recall, 0.99)
+  expect_true(all(
+    approximate$indices >= 1L &
+      approximate$indices <= nrow(reference)
+  ))
+})
+
+test_that("Metal query routing accounts for the full distance workload", {
+  small <- fastembedr_query_nn_policy(
+    "metal", n_reference = 12000L, n_query = 4000L, p = 64L
+  )
+  large <- fastembedr_query_nn_policy(
+    "metal", n_reference = 35000L, n_query = 35000L, p = 784L
+  )
+  expect_identical(small$method, "exact")
+  expect_identical(large$method, "ivf")
+  expect_equal(large$target_recall, 0.99)
 })
 
 test_that("one-call routing uses native CPU and Metal KNN", {

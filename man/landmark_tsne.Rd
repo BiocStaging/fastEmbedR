@@ -37,8 +37,8 @@ landmark count, or explicit row indices.}
 accepted in the cleaned package API.}
 
 \item{n_neighbors}{Number of non-self neighbours used to embed the landmark
-reference set. If `NULL`, uses the standard t-SNE support width
-`3 * perplexity`.}
+reference set. If `NULL`, it follows the same neighbour policy as
+[opentsne()]: `ceiling(perplexity)` when perplexity is supplied.}
 
 \item{perplexity}{t-SNE perplexity for the landmark reference embedding. If
 `NULL`, the optimizer chooses a safe value from the reference KNN width and
@@ -87,10 +87,10 @@ A `fastEmbedR_embedding` object.
 `landmark_tsne()` embeds a subset of observations with [opentsne()], then
 places the remaining observations with `transform_tsne()`. This mirrors the
 practical landmark workflow exposed by openTSNE while keeping the
-implementation native to this package. On Apple Silicon, `backend = "metal"`
-uses a fused native Metal projection kernel for query-to-landmark KNN,
-interpolation, and projection confidence before the fixed-reference
-transform.
+implementation native to this package. Projection KNN searches only the
+fixed landmark reference: CPU uses native HNSW, Metal uses native exact or
+recall-tuned IVF-Flat, and CUDA keeps native exact or IVF-Flat results
+resident on the device.
 }
 \examples{
 fit <- landmark_tsne(

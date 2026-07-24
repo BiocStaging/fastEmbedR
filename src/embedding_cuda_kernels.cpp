@@ -1463,6 +1463,48 @@ __global__ void finalize_cuvs_knn_kernel(const int64_t* input_indices,
   }
 }
 
+__global__ void finalize_cuvs_query_knn_kernel(
+    const int64_t* input_indices,
+    const float* input_distances,
+    int* output_indices,
+    float* output_distances,
+    int batch_n,
+    int k,
+    int distance_mode,
+    int output_row_offset,
+    int output_n,
+    int reference_n,
+    int* invalid_rows) {
+  const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (row >= batch_n) return;
+  const int output_row = output_row_offset + row;
+  const std::size_t input_base = static_cast<std::size_t>(row) * k;
+  const float best_inner_product = input_distances[input_base];
+  int written = 0;
+  for (int column = 0; column < k; ++column) {
+    const std::size_t input_offset = input_base + column;
+    const int64_t candidate64 = input_indices[input_offset];
+    if (candidate64 < 0 || candidate64 >= static_cast<int64_t>(reference_n)) {
+      continue;
+    }
+    const float raw = input_distances[input_offset];
+    float distance = raw;
+    if (distance_mode == 0) {
+      distance = sqrtf(fmaxf(raw, 0.0f));
+    } else if (distance_mode == 1) {
+      distance = 0.5f * fmaxf(raw, 0.0f);
+    } else if (distance_mode == 2) {
+      distance = fmaxf(best_inner_product - raw, 0.0f);
+    }
+    const std::size_t output_offset =
+      static_cast<std::size_t>(written) * output_n + output_row;
+    output_indices[output_offset] = static_cast<int>(candidate64) + 1;
+    output_distances[output_offset] = distance;
+    ++written;
+  }
+  if (written < k) atomicAdd(invalid_rows, 1);
+}
+
 __global__ void standardize_stats_kernel(const double* values,
                                          double* stats,
                                          int n,
@@ -3786,6 +3828,72 @@ extern "C" int fastembedr_cuda_finalize_cuvs_knn(
   if (invalid > 0) {
     set_embedding_error(
       "cuVS returned fewer non-self neighbors than requested for " +
+      std::to_string(invalid) + " rows"
+    );
+    return 1;
+  }
+  return 0;
+}
+
+extern "C" int fastembedr_cuda_finalize_cuvs_query_knn(
+    const int64_t* input_indices,
+    const float* input_distances,
+    int* output_indices,
+    float* output_distances,
+    int batch_n,
+    int k,
+    int distance_mode,
+    int output_row_offset,
+    int output_n,
+    int reference_n) {
+  embedding_last_error.clear();
+  if (input_indices == nullptr || input_distances == nullptr ||
+      output_indices == nullptr || output_distances == nullptr) {
+    set_embedding_error("null CUDA query KNN postprocessing pointer");
+    return 1;
+  }
+  if (batch_n < 1 || k < 1 || output_n < 1 || reference_n < 1 ||
+      output_row_offset < 0 || output_row_offset + batch_n > output_n) {
+    set_embedding_error("invalid CUDA query KNN postprocessing dimensions");
+    return 1;
+  }
+  int* invalid_rows = nullptr;
+  if (check_cuda(
+        cudaMalloc(reinterpret_cast<void**>(&invalid_rows), sizeof(int)),
+        "cudaMalloc(query KNN invalid rows)")) {
+    return 1;
+  }
+  if (check_cuda(
+        cudaMemset(invalid_rows, 0, sizeof(int)),
+        "cudaMemset(query KNN invalid rows)")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  const int threads = 256;
+  const int blocks = (batch_n + threads - 1) / threads;
+  finalize_cuvs_query_knn_kernel<<<blocks, threads>>>(
+    input_indices, input_distances, output_indices, output_distances,
+    batch_n, k, distance_mode, output_row_offset, output_n, reference_n,
+    invalid_rows
+  );
+  if (check_cuda(
+        cudaGetLastError(), "finalize_cuvs_query_knn_kernel launch")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  int invalid = 0;
+  if (check_cuda(
+        cudaMemcpy(
+          &invalid, invalid_rows, sizeof(int), cudaMemcpyDeviceToHost
+        ),
+        "cudaMemcpy(query KNN invalid rows D2H)")) {
+    cudaFree(invalid_rows);
+    return 1;
+  }
+  cudaFree(invalid_rows);
+  if (invalid > 0) {
+    set_embedding_error(
+      "cuVS returned fewer query-to-reference neighbors than requested for " +
       std::to_string(invalid) + " rows"
     );
     return 1;

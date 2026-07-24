@@ -124,12 +124,22 @@ transform_tsne <- function(reference_layout,
       k <- min(nrow(reference_data), max(25L, ceiling(3 * perplexity)))
     }
     k <- transform_embedding_k(k, nrow(reference_data))
+    query_policy <- fastembedr_query_nn_policy(
+      optimizer_backend,
+      n_reference = nrow(reference_data),
+      n_query = nrow(new_data),
+      p = ncol(reference_data)
+    )
     raw_knn <- fastembedr_native_query_knn(
       reference_data,
       new_data,
       k = k,
       metric = "euclidean",
-      n_threads = n_threads
+      n_threads = n_threads,
+      target_recall = query_policy$target_recall,
+      backend = query_policy$backend,
+      method = query_policy$method,
+      keep_gpu = FALSE
     )
     projection <- transform_projection_knn(
       raw_knn,
@@ -444,90 +454,33 @@ landmark_projection_knn <- function(x_landmarks,
                                     query_rows = NULL) {
   backend <- as.character(backend)[1L]
   if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
-    backend <- "auto"
+    backend <- "cpu"
   }
   n_threads <- normalize_nn_threads(n_threads)
-
-  if (backend %in% c("metal", "gpu") &&
-      isTRUE(embedding_metal_available_cpp()) &&
-      !is.null(landmark_layout) &&
-      !is.null(all_data) &&
-      !is.null(landmark_indices) &&
-      !is.null(query_rows)) {
-    fused <- landmark_project_interpolate_knn_confidence_metal_cpp(
-      x_landmarks,
-      all_data,
-      landmark_layout,
-      as.integer(landmark_indices),
-      as.integer(k)
-    )
-    keep <- as.integer(query_rows)
-    out <- list(
-      indices = fused$indices[keep, , drop = FALSE],
-      distances = fused$distances[keep, , drop = FALSE]
-    )
-    result <- finish_nn_result(out, "metal_fused_projection", k, FALSE, exact = TRUE)
-    attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
-    attr(result, "confidence") <- fused$confidence[keep]
-    attr(result, "metal_kernel") <- "landmark_project_interpolate_knn_confidence"
-    attr(result, "approximation") <- list(
-      strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
-      backend = "metal",
-      kernel = "landmark_project_interpolate_knn_confidence"
-    )
-    return(result)
-  }
-
-  if (backend %in% c("cuda", "gpu") &&
-      isTRUE(embedding_cuda_available_cpp()) &&
-      !is.null(landmark_layout) &&
-      !is.null(all_data) &&
-      !is.null(landmark_indices) &&
-      !is.null(query_rows)) {
-    fused <- landmark_project_interpolate_knn_confidence_cuda_cpp(
-      x_landmarks,
-      all_data,
-      landmark_layout,
-      as.integer(landmark_indices),
-      as.integer(k)
-    )
-    keep <- as.integer(query_rows)
-    out <- list(
-      indices = fused$indices[keep, , drop = FALSE],
-      distances = fused$distances[keep, , drop = FALSE]
-    )
-    result <- finish_nn_result(out, "cuda_fused_projection", k, FALSE, exact = TRUE)
-    attr(result, "projected_layout") <- fused$layout[keep, , drop = FALSE]
-    attr(result, "confidence") <- fused$confidence[keep]
-    attr(result, "cuda_kernel") <- "landmark_project_interpolate_knn_confidence"
-    attr(result, "approximation") <- list(
-      strategy = "query_only_exact_fused_landmark_projection_knn_confidence",
-      backend = "cuda",
-      kernel = "landmark_project_interpolate_knn_confidence"
-    )
-    return(result)
-  }
-
-  if (backend %in% c("metal", "cuda", "gpu")) {
-    stop(
-      "Native GPU landmark KNN requires the fused fastEmbedR projection path; ",
-      "no CPU or external-package fallback was used.",
-      call. = FALSE
-    )
-  }
-
+  policy <- fastembedr_query_nn_policy(
+    backend,
+    n_reference = nrow(x_landmarks),
+    n_query = nrow(x_query),
+    p = ncol(x_landmarks)
+  )
   result <- fastembedr_native_query_knn(
     x_landmarks,
     x_query,
     k = k,
     metric = "euclidean",
-    output = fastembedr_knn_output_type(x_landmarks, "cpu"),
-    n_threads = n_threads
+    output = fastembedr_knn_output_type(x_landmarks, policy$backend),
+    n_threads = n_threads,
+    target_recall = policy$target_recall,
+    backend = policy$backend,
+    method = policy$method,
+    keep_gpu = identical(policy$backend, "cuda")
   )
   attr(result, "approximation") <- list(
-    strategy = "native_hnsw_landmark_query",
-    backend = "cpu",
-    target_recall = 0.99,
+    strategy = paste0(
+      "native_", policy$method, "_reference_query_knn"
+    ),
+    backend = policy$backend,
+    target_recall = policy$target_recall,
     seed = as.integer(seed)
   )
   result
@@ -769,10 +722,10 @@ resident_projection_result <- function(backend, k) {
 #' `landmark_tsne()` embeds a subset of observations with [opentsne()], then
 #' places the remaining observations with `transform_tsne()`. This mirrors the
 #' practical landmark workflow exposed by openTSNE while keeping the
-#' implementation native to this package. On Apple Silicon, `backend = "metal"`
-#' uses a fused native Metal projection kernel for query-to-landmark KNN,
-#' interpolation, and projection confidence before the fixed-reference
-#' transform.
+#' implementation native to this package. Projection KNN searches only the
+#' fixed landmark reference: CPU uses native HNSW, Metal uses native exact or
+#' recall-tuned IVF-Flat, and CUDA keeps native exact or IVF-Flat results
+#' resident on the device.
 #'
 #' @param data Numeric matrix/data frame with observations in rows.
 #' @param landmarks `TRUE` for an automatic subset, a fraction such as `0.5`, a
@@ -785,8 +738,8 @@ resident_projection_result <- function(backend, k) {
 #' @param transform_iter Number of normal transform iterations. Use `0` for
 #'   projection-only landmarking with no transform refinement.
 #' @param n_neighbors Number of non-self neighbours used to embed the landmark
-#'   reference set. If `NULL`, uses the standard t-SNE support width
-#'   `3 * perplexity`.
+#'   reference set. If `NULL`, it follows the same neighbour policy as
+#'   [opentsne()]: `ceiling(perplexity)` when perplexity is supplied.
 #' @param perplexity t-SNE perplexity for the landmark reference embedding. If
 #'   `NULL`, the optimizer chooses a safe value from the reference KNN width and
 #'   sample size.
@@ -844,7 +797,10 @@ landmark_tsne <- function(data,
   x <- prepared$data
   n <- nrow(x)
   if (is.null(n_neighbors)) {
-    n_neighbors <- auto_tsne_k(n, perplexity)
+    n_neighbors <- opentsne_neighbor_policy(
+      n,
+      perplexity = perplexity
+    )$n_neighbors
   } else {
     n_neighbors <- as.integer(n_neighbors)
     if (length(n_neighbors) != 1L || is.na(n_neighbors) || n_neighbors < 1L || n_neighbors >= n) {
@@ -852,13 +808,14 @@ landmark_tsne <- function(data,
     }
   }
 
-  landmark_indices <- resolve_landmarks(
-    landmarks,
+  landmark_selection <- select_landmarks(
     x,
-    seed,
+    landmarks,
+    seed = seed,
     n_threads = n_threads
   )
-  if (is.null(landmark_indices)) {
+  landmark_indices <- landmark_selection$indices
+  if (length(landmark_selection$query_indices) == 0L) {
     return(opentsne(
       x,
       perplexity = perplexity,
@@ -874,7 +831,7 @@ landmark_tsne <- function(data,
     ))
   }
 
-  non_landmarks <- setdiff(seq_len(n), landmark_indices)
+  non_landmarks <- landmark_selection$query_indices
   partition <- split_landmark_data(
     x,
     landmark_indices,
@@ -1204,8 +1161,7 @@ landmark_tsne <- function(data,
   } else {
     as.character(projection_approximation$strategy)
   }
-  selection_method <- attr(landmark_indices, "selection_method")
-  if (is.null(selection_method)) selection_method <- "indices"
+  selection_method <- landmark_selection$method
   reference_metrics <- reference_fit$metrics
   reference_total_elapsed <- if ("elapsed" %in% names(reference_metrics)) {
     reference_metrics$elapsed[[1L]]
