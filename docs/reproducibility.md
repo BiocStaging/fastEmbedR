@@ -71,9 +71,15 @@ The manifest records:
 - benchmark command lines;
 - random seed, k, perplexity, timeout, and thread count;
 - R version, package versions, and `sessionInfo()`;
+- resolved `R CMD config` values for `CC`, `CFLAGS`, `CXX17`,
+  `CXX17FLAGS`, `CPPFLAGS`, `LDFLAGS`, and `SHLIB_CXX17LD`;
+- C/C++ compiler, Xcode, and Metal compiler versions where available;
+- the generated package `src/Makevars` and compiler-related environment
+  variables;
 - hardware information from `Sys.info()`, `lscpu`, `free -h`, and
   `nvidia-smi` where available;
-- CUDA information from `nvcc --version`, `CUDA_HOME`, `LD_LIBRARY_PATH`, and
+- CUDA information from `nvcc --version`, `CUDA_HOME`, `CUDAHOSTCXX`,
+  `FASTEMBEDR_CUDA_ARCH`, `FASTEMBEDR_CUDA_FLAGS`, `LD_LIBRARY_PATH`, and
   fastEmbedR native-backend probes;
 - directly linked FAISS GPU/cuVS availability recorded by fastEmbedR;
 - paths to the benchmark driver and wrapper scripts.
@@ -138,6 +144,21 @@ FAISS, RAPIDS cuVS, CUDA, cuFFT, and GPU driver versions are system-level
 dependencies owned by the CUDA installation. They are therefore
 not vendored into `fastEmbedR`; the exact versions actually used in a run are
 captured in `reproducibility_manifest.txt` and `reproducibility_manifest.json`.
+
+## Compiler Comparability
+
+The package inherits optimization flags from R and adds only `-pthread` to the
+portable C++ core. Benchmark reports must therefore include the resolved
+compiler configuration, not only the package version. In particular, results
+from a Conda R/GCC toolchain and a system R/GCC toolchain are not treated as a
+controlled algorithm comparison even when they run on the same physical CPU.
+
+The package does not require or recommend global `-march=native`,
+`-ffast-math`, or `-O3`. CUDA deployment architectures are recorded
+separately because package kernels and linked FAISS/cuVS/RAFT libraries must
+all support the target GPU. See
+[Installation And Native Compiler Configuration](installation-backends.md)
+for the complete build contract.
 
 ## Seeds
 

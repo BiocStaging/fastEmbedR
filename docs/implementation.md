@@ -39,6 +39,37 @@ The public package surface is deliberately small:
 - GPU requests fail clearly if native GPU code is unavailable. CPU fallback is
   never reported as Metal or CUDA work.
 
+## Compilation And Numerical Contract
+
+The portable numerical core requests C++17 and adds only `-pthread`; it
+inherits the compiler command, optimization level, ABI, and linker flags from
+the active R installation. This is part of the algorithmic contract, not only
+an installation detail. HNSW construction, sparse graph creation, and
+stochastic embedding contain floating-point comparisons whose tie decisions
+can change under unsafe reassociation. fastEmbedR therefore does not impose
+global `-ffast-math`, `-march=native`, or `-O3` flags.
+
+On macOS, `configure` adds the Apple Foundation, Metal, MPS, and MPSGraph
+frameworks and compiles the Objective-C++ bridge with the Xcode SDK. Metal
+shader source is compiled by the runtime for the active GPU. The native Metal
+KNN shader enables Apple's float32 fast arithmetic locally; this is not
+propagated to the CPU core or to UMAP/openTSNE host code.
+
+CUDA translation units are compiled by NVCC as C++17 with extended lambdas,
+relaxed `constexpr`, and position-independent host code. The deployment
+architectures are explicit through `FASTEMBEDR_CUDA_ARCH`. `CUDAHOSTCXX`
+selects an R-ABI-compatible host compiler when CUDA and R come from different
+toolchain prefixes. FAISS GPU, cuVS, RAFT, and their CUDA dependencies must be
+built for the same devices; adding an architecture to fastEmbedR cannot add
+missing kernels to a linked library.
+
+The complete commands, architecture examples, diagnostics, and failure modes
+are documented in
+[Installation And Native Compiler Configuration](installation-backends.md).
+The benchmark reproducibility bundle records the resolved `R CMD config`
+values, generated `src/Makevars`, compiler versions, Xcode/Metal or
+CUDA/NVCC versions, and relevant environment flags.
+
 ## Native Implementation Validation
 
 Because fastEmbedR implements the embedding path natively rather than calling
@@ -84,6 +115,17 @@ int32. A large/high-dimensional target-0.99 policy uses `M = 10`,
 against the original FAISS HNSW output. Other shapes use a more conservative
 graph. The package records the selected values and does not claim bitwise
 identity with FAISS.
+
+Construction uses one persistent worker team, reusable visit tables and
+bounded heaps, early-exit squared-distance comparisons, and parallel
+reciprocal-row updates. Temporary construction distances are released before
+query. These changes preserve the selected graph and query output: exact KNN
+indices and distances matched the pre-optimization implementation on
+MNIST70k, Fashion-MNIST70k, USPS, and MetRef. On the validated four-thread
+Linux environment, MNIST70k construction decreased from 23.730 to 17.345
+seconds and complete KNN time from 27.653 to 21.288 seconds. A separate
+`-O3 -march=native` build was slower and was rejected, which is why compiler
+tuning is not presented as an algorithmic improvement.
 
 The Metal implementation has two routes. Exact search assigns one SIMD group
 to each candidate distance and merges per-group top-k lists on device. IVF-Flat

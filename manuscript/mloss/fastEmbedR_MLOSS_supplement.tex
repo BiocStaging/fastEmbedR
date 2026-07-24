@@ -1,0 +1,275 @@
+\documentclass[twoside,11pt]{article}
+
+\usepackage{jmlr2e}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{lastpage}
+\usepackage{microtype}
+\usepackage{url}
+\hypersetup{hidelinks}
+
+\newcommand{\pkg}{\texttt{fastEmbedR}}
+\newcommand{\R}{\textsf{R}}
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\thesubsection}{S\arabic{section}.\arabic{subsection}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+
+\jmlrheading{XX}{2026}{1--\pageref{LastPage}}{MM/YY}{MM/YY}{XX-0000}{Moussa Kassim, Martin Ocharo, Alessia Vignoli, Leonardo Tenori, and Stefano Cacciatore}
+\ShortHeadings{fastEmbedR Supplementary Material}{Kassim, Ocharo, Vignoli, Tenori, and Cacciatore}
+\firstpageno{1}
+
+\begin{document}
+
+\title{fastEmbedR: Supplementary Material}
+
+\author{\name Moussa Kassim$^{1,2}$ \email Moussa.Kassim@icgeb.org\\
+\name Martin Ocharo$^{1,2}$ \email Martin.Ocharo@icgeb.org\\
+\name Alessia Vignoli$^{3,4}$ \email vignoli@cerm.unifi.it\\
+\name Leonardo Tenori$^{3,4}$ \email tenori@cerm.unifi.it\\
+\name Stefano Cacciatore$^{1,2}$ \email stefano.cacciatore@icgeb.org\\
+\addr $^1$Bioinformatics Unit, International Center for Genetic Engineering and Biotechnology, Cape Town 7925, South Africa\\
+$^2$Department of Integrative Biomedical Sciences, Institute of Infectious Disease \& Molecular Medicine (IDM), University of Cape Town, Cape Town 7925, South Africa\\
+$^3$Department of Chemistry ``Ugo Schiff'', University of Florence, Sesto Fiorentino, Italy\\
+$^4$Magnetic Resonance Center (CERM), University of Florence, Sesto Fiorentino, Italy}
+
+\editor{To be assigned}
+\maketitle
+
+\section{Software Contribution and Dependency Boundary}
+
+Table~\ref{tab:ownership} separates package-owned code from optional external primitives. This distinction is important: \pkg{} is not a thin wrapper around an existing embedding executable. The R API, input validation, graph/affinity mathematics, optimizer orchestration, transformations, returned objects, and backend reporting are implemented in the package. Optional libraries are linked only where they provide a platform primitive that would be inappropriate to reimplement, such as cuFFT or the cuVS CUDA search API.
+
+\begin{table}[ht]
+\centering
+\caption{Ownership of the principal computational stages.}
+\label{tab:ownership}
+\small
+\begin{tabular}{p{0.18\textwidth}p{0.48\textwidth}p{0.25\textwidth}}
+\toprule
+Stage & Implemented in fastEmbedR & Optional primitive or design reference\\
+\midrule
+R interface & One-call and KNN-input APIs; validation; metadata; plotting and timing objects & Rcpp interface only\\
+Neighbor search & CPU HNSW; Metal exact/IVF orchestration; CUDA buffer ownership and routing & FAISS design/code under MIT; installed FAISS GPU or cuVS C API for CUDA; Faiss-mlx as Apache-2.0 design reference\\
+PCA initialization & Centering/scaling, RSVD orchestration, Metal block-subspace TSVD, t-SNE rescaling & fastPLS-style RSVD; MPS matrix products; RAFT TSVD on CUDA\\
+UMAP graph & Smooth-KNN bandwidth, fuzzy union or binary symmetrization, CSR construction, edge schedule & UMAP paper and uwot used as behavioral references\\
+UMAP optimization & CPU, Metal, and CUDA samplers, RNG, learning-rate decay, attractive/repulsive updates & No Python or cuML call\\
+t-SNE affinities & Per-row perplexity search, sparse symmetrization and normalization & Rtsne/openTSNE behavior used for validation\\
+t-SNE optimization & CPU grid FFT, Metal Stockham/Cooley--Tukey kernels, CUDA sparse/grid kernels and state management & cuFFT on CUDA; AppleSiliconFFT as MIT design reference\\
+New samples & Landmark selection, KNN interpolation, local affine correction, fixed-reference refinement & openTSNE reference-embedding formulation\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The package source includes exact copyright notices and upstream licenses for code that was distilled from permissive projects. It does not vendor Python openTSNE, RAPIDS cuML, uwot, Rtsne, or t-SNE-CUDA. The optional CUDA build links to system installations rather than redistributing those binaries.
+
+\clearpage
+
+\section{Compiler and Native Build Contract}
+
+Table~\ref{tab:compiler} distinguishes package-owned compilation requirements from optimization flags inherited from the active R installation. The portable core does not replace \texttt{CXX17FLAGS}; consequently, all methods compared on one machine were installed in the same R/toolchain environment. This prevents a change in compiler, standard library, BLAS, or CPU target from being reported as an embedding-algorithm speedup.
+
+\begin{table}[ht]
+\centering
+\caption{Native compiler contract.}
+\label{tab:compiler}
+\small
+\begin{tabular}{p{0.16\textwidth}p{0.39\textwidth}p{0.36\textwidth}}
+\toprule
+Layer & Required package configuration & Optimization and portability policy\\
+\midrule
+CPU C++ & C++17 and \texttt{-pthread}; compiler and linker selected by \texttt{R CMD config} & Inherit R's release flags; no package-global OpenMP, \texttt{-march=native}, \texttt{-ffast-math}, or \texttt{-O3}\\
+Apple Metal & Objective-C++ bridge inheriting R's C++ release flags; Foundation, Metal, MPS, and MPSGraph frameworks; Xcode SDK & Runtime Metal compilation targets the installed Apple GPU; fast arithmetic is local to the float32 KNN shader, not a global host flag\\
+NVIDIA CUDA & NVCC C++17, extended lambdas, relaxed \texttt{constexpr}, and position-independent host code & \texttt{FASTEMBEDR\_CUDA\_ARCH} defines package fat-binary targets; \texttt{CUDAHOSTCXX} selects an R-ABI-compatible compiler\\
+CUDA libraries & CUDA runtime, cuFFT, cuBLAS/cuSOLVER, FAISS GPU, cuVS; RAFT/RMM/CCCL for TSVD & Every linked library must independently contain code for each deployment GPU\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For example, \texttt{FASTEMBEDR\_CUDA\_ARCH="75 89"} compiles fastEmbedR kernels for both a T4 and an L40S. It does not add \texttt{sm\_89} kernels to a cuVS or FAISS binary built only for \texttt{sm\_75}; such a mismatch produces \texttt{cudaErrorNoKernelImageForDevice}. Similarly, compatible CUDA, CCCL, RAFT, RMM, and \texttt{libnvJitLink} releases must be resolved from one runtime prefix. Explicit CUDA build switches are strict and configuration stops when requested headers or libraries are absent.
+
+The rationale for conservative host flags was checked empirically. The same HNSW source performed differently under the validated Conda/R GCC toolchain and a generic system R/GCC installation on the same remote machine. An additional \texttt{-O3 -march=native} build was slower on MNIST70k and was rejected. Retained HNSW construction improvements instead reuse visit tables, bounded heaps, and worker storage, parallelize reciprocal-row updates, and release construction-only distance caches before query. They preserved exact returned indices and distances on MNIST70k, Fashion-MNIST70k, USPS, and MetRef while reducing four-thread MNIST70k construction from 23.730 to 17.345 seconds and complete KNN time from 27.653 to 21.288 seconds.
+
+Each frozen benchmark manifest records \texttt{CC}, \texttt{CFLAGS}, \texttt{CXX17}, \texttt{CXX17FLAGS}, \texttt{CPPFLAGS}, \texttt{LDFLAGS}, generated \texttt{src/Makevars}, compiler versions, Xcode/Metal or CUDA/NVCC versions, \texttt{CUDAHOSTCXX}, CUDA architecture flags, and the relevant linked-library versions. Complete source-install commands and validation probes are maintained in the repository build guide.
+
+\section{Public R API}
+
+The primary data-matrix calls are:
+\begin{verbatim}
+fit_t <- opentsne(x, perplexity = 15, backend = "cpu")
+fit_u <- umap(x, n_neighbors = 30, graph_mode = "fuzzy",
+              backend = "cpu")
+\end{verbatim}
+Changing \texttt{backend} to \texttt{"metal"} or \texttt{"cuda"} requests that backend explicitly. If the compiled backend or required system library is absent, execution stops; the call is never silently performed on CPU and reported as GPU.
+
+Precomputed-neighbor workflows expose the embedding boundary directly:
+\begin{verbatim}
+prepared_t <- prepare_opentsne_knn(indices, distances,
+                                   perplexity = 15)
+prepared_u <- prepare_umap_knn(indices, distances)
+y_t <- opentsne_knn(prepared_t, Y_init = init, backend = "cpu")
+y_u <- umap_knn(prepared_u, graph_mode = "fuzzy", backend = "cpu")
+\end{verbatim}
+These calls do not recompute a KNN graph. They are useful when comparing seeds, graph modes, or CPU/GPU optimizers under the same neighborhood input. The one-call objects store total, preprocessing, KNN, initialization, and embedding timing; cross-package claims in the main paper nevertheless use total elapsed time because competing packages do not expose the same boundaries.
+
+The PCA API is intentionally small:
+\begin{verbatim}
+p <- pca(x, ncomp = 2, center = TRUE, scale = FALSE,
+         backend = "metal", opentsne_init = TRUE)
+init <- p$opentsne_init
+\end{verbatim}
+No alternative SVD selector is exposed. The returned object includes scores, loadings, singular values when available, centering/scaling vectors, backend metadata, and the seed.
+
+\section{UMAP Mathematics and Engineering}
+
+For point $i$, let $d_{ij}$ denote the distance to neighbor $j$. The fuzzy path estimates $\rho_i$ from the local-connectivity rule and obtains $\sigma_i$ by binary search so that the effective neighbor mass matches the requested neighborhood scale. Directed memberships are
+\[
+ w_{j\mid i}=\exp\left\{-\frac{\max(0,d_{ij}-\rho_i)}{\sigma_i}\right\}.
+\]
+For reciprocal edges, the symmetric fuzzy union is
+\[
+ w_{ij}=w_{j\mid i}+w_{i\mid j}-w_{j\mid i}w_{i\mid j}.
+\]
+The binary mode instead assigns unit weight to every edge in the symmetric KNN union. Binary mode therefore changes graph weighting, not the neighbor identities or optimizer family, and is always recorded in the returned configuration.
+
+The host CPU path constructs CSR \texttt{row\_ptr}, \texttt{col\_idx}, \texttt{weight}, and \texttt{epochs\_per\_sample} arrays without a dense graph. Spectral initialization uses sparse normalized-adjacency products with a connectivity-aware iteration rule. The low-dimensional optimizer samples positive edges by their schedule, generates negative vertices with a package-local RNG, applies the UMAP attraction/repulsion terms, and linearly decays the learning rate. Large default runs use 200 epochs and five negative samples; these values are selected internally rather than exposed as a broad parameter grid.
+
+The CPU implementation parallelizes independent rows and uses contiguous float32 coordinate buffers. Metal uploads the CSR schedule once and batches unchanged epochs in command buffers. CUDA uses int32/float32 device arrays, on-device graph preparation for GPU-resident KNN, and atomic low-dimensional updates. Atomic update order can vary across runs or hardware; fixed seeds control initialization and random streams but do not promise bitwise equality across GPU executions.
+
+\section{openTSNE-Style t-SNE Mathematics and Engineering}
+
+For each row, \pkg{} searches the Gaussian precision $\beta_i$ so that the entropy of
+\[
+ p_{j\mid i}=\frac{\exp(-\beta_i d_{ij}^{2})}{\sum_{k}\exp(-\beta_i d_{ik}^{2})}
+\]
+matches the requested perplexity. The sparse joint affinity is the symmetrized and globally normalized matrix $P$. In the embedding, $q_{ij}\propto(1+\|y_i-y_j\|^2)^{-1}$ and the optimization minimizes $\mathrm{KL}(P\Vert Q)$ \citep{vandermaaten2008}.
+
+The package separates sparse positive forces from negative forces. Small diagnostic problems may use exact repulsion. Large runs use an interpolation grid: coordinates are splatted bilinearly, kernel fields are convolved by a padded two-dimensional FFT, and the fields are interpolated back to points. The optimizer then applies early exaggeration, normal optimization, adaptive gains, momentum, clipping, and centering. Automatic learning rate follows the phase-specific $n/\mathrm{exaggeration}$ rule used by modern openTSNE/opt-SNE workflows \citep{policar2024,belkina2019}.
+
+CPU execution retains FFT plans, grids, and thread scratch. Metal stores coordinates, gains, updates, mass fields, spectra, and force fields in unified GPU memory. The validated $512$-point Stockham row/column transforms use radix-4 stages and threadgroup memory; generic sizes use Cooley--Tukey kernels. CUDA retains cuFFT plans and workspace and uses CUDA Graph execution for repeated iteration groups. Only the final layout and requested diagnostics cross back to R.
+
+\section{Float32 Data Path and Memory Accounting}
+
+The C++ numerical kernels operate on float32. For ordinary R matrices, a controlled conversion is required at the native boundary; for \texttt{float::float32} input, the package reads the float payload directly. KNN distances, graph or affinity weights, layouts, gradients, gains, and update buffers remain float32, while indices and CSR offsets use int32. If the input is float32, \pkg{} returns a float32 embedding; if the input is a standard R matrix, only the final layout is converted back to double.
+
+Peak RSS does not fall by exactly 50\% because precision reduction affects only numeric payloads. R object headers, labels, int32 indices, graph structure, FFT padding, FFT spectra, search indexes, allocator fragmentation, and library workspaces remain. GPU memory accounting similarly includes both persistent buffers and peak temporary search or convolution workspace.
+
+\section{Landmark Embedding and New Samples}
+
+\texttt{landmark\_tsne()} and \texttt{landmark\_umap()} implement an explicit approximation rather than silently reducing the data. A subset is selected by a deterministic projection/diversity policy or supplied by the user. The subset is embedded by the same reference function and settings as a full run. Remaining observations query the fixed landmarks, receive inverse-distance/interpolation coordinates, and may receive a regularized local affine correction estimated from high-dimensional and embedded landmark neighborhoods.
+
+For t-SNE, query-to-reference probabilities are computed once and each query is optimized while the reference embedding is fixed, following \citet{policar2021}. For UMAP, non-landmark rows are initialized from landmark neighbors and optionally refined with short row-restricted UMAP updates while resetting landmark coordinates to their fixed values. CPU projection is parallel by query point. Metal and CUDA provide resident interpolation/refinement paths where supported. Returned objects record landmark indices, fraction, projection K, backend, reference timing, projection timing, and refinement timing so the approximation remains visible.
+
+\section{Benchmark Protocol}
+
+\subsection{MNIST70k main example}
+
+The main paper reports all 70,000 flattened MNIST images ($p=784$), without a PCA-reduced input matrix. Parameters were $k=30$, perplexity 30, seeds 4, 17, and 42, and either one or four requested CPU threads. CUDA used one NVIDIA device. \pkg{} used its public one-call functions on float32 input. \texttt{Rtsne::Rtsne()} and \texttt{uwot::umap()} used standard R matrices and their internal KNN calculations; the latter was evaluated in default and \texttt{fast\_sgd=TRUE} modes. Method-specific documented iteration/epoch schedules were retained, because reducing epochs to equalize runtime would change the workload exposed by the public implementation.
+
+The archived HPC runs used Debian GNU/Linux 13, R 4.5.3, OpenBLAS 0.3.33, \pkg{} 0.99.0, \texttt{uwot} 0.2.4, \texttt{Rtsne} 0.17, and \texttt{float} 0.3.3. CUDA runs used an NVIDIA L40S (compute capability 8.9) with 46,068 MiB device memory and driver 595.58.03. The runtime image selected a Conda GCC 15 toolchain and R's portable \texttt{-O2} release policy for C++ code. CUDA dependencies and package kernels included \texttt{sm\_89}. The CPU model was not written to the supplied manifest; this omission is retained as a reproducibility limitation and must be corrected in the frozen submission archive.
+
+\subsection{Quality metrics}
+
+Quality is evaluated independently of timing. Trustworthiness measures intrusions into low-dimensional neighborhoods \citep{venna2001}; KNN preservation measures the intersection of high- and low-dimensional neighbor sets; silhouette is reported only when labels are available \citep{rousseeuw1987}; and embedding-space KNN accuracy measures post hoc local label agreement. Labels are never used by unsupervised fitting. For large data, metric calculations use fixed, seed-controlled stratified samples to avoid all-pairs distance matrices.
+
+\subsection{Extended benchmark inventory}
+
+Table~\ref{tab:datasets} lists the supplied HPC archive. All datasets were evaluated where a method completed within the available resources. Claims comparing two methods use only dataset-level pairs for which both rows succeeded. Failed, unavailable, and timed-out rows remain in the generated CSV files.
+
+\begin{longtable}{p{0.26\textwidth}rrp{0.42\textwidth}}
+\caption{Datasets in the supplied HPC benchmark archive.}\label{tab:datasets}\\
+\toprule
+Dataset & $n$ & $p$ & Role and provenance\\
+\midrule
+\endfirsthead
+\toprule
+Dataset & $n$ & $p$ & Role and provenance\\
+\midrule
+\endhead
+COIL20 & 1,440 & 16,384 & Flattened processed object images; object identity labels\\
+USPS & 11,000 & 256 & Handwritten digits represented as $16\times16$ pixels\\
+MNIST & 70,000 & 784 & Combined train/test $28\times28$ digit images \citep{lecun1998}\\
+Fashion-MNIST & 70,000 & 784 & Combined train/test clothing images \citep{xiao2017}\\
+MetRef & 873 & 375 & Metabolomics reference samples after zero-column removal, normalization, and scaling\\
+mass41 & 965,282 & 14 & Annotated mass-cytometry benchmark from the opt-SNE release\\
+flow18 & 1,000,021 & 11 & Annotated flow-cytometry benchmark from the opt-SNE release\\
+ImageNet features & 1,281,167 & 1,024 & Precomputed DINOv2 image features with 1,000 labels \citep{oquab2024}\\
+FlowRepository FR-FCM-ZYRM & 5,220,347 & 32 & asinh-transformed mass-cytometry marker channels\\
+Tabula Muris & 100,102 & 50 & Normalized single-cell RNA-seq represented by 50 PCs \citep{tabulamuris2018}\\
+Macosko retina & 44,808 & 50 & Mouse retinal cells represented by 50 expression PCs \citep{macosko2015}\\
+\bottomrule
+\end{longtable}
+
+\section{HPC Runtime and Quality Results}
+
+The generated table below reports representative complete-function comparisons. Each entry is the median of three seeds. Runtime includes the public function's own KNN search, initialization, graph or affinity construction, and optimization. The full machine-readable tables additionally contain interquartile ranges, peak RAM, peak GPU-memory deltas, silhouette, Preserve@15/30/50, t-SNE KL values, stage timings, and status/error fields.
+
+\input{generated/key_dataset_runtime_quality.tex}
+
+Across the nine datasets with successful paired rows, four-thread CPU openTSNE was a median 1.81-fold faster than full Rtsne and used 0.81 times its peak RSS; CUDA openTSNE was 54.2-fold faster than Rtsne. Median trustworthiness differences were $+0.039$ and $+0.041$. Four-thread fuzzy UMAP was 1.31-fold faster than uwot fast SGD and used 0.63 times its peak RSS; CUDA fuzzy UMAP was 63.5-fold faster. Its median trustworthiness differences were $-0.0012$ on CPU and CUDA. One-to-four-thread median speedups were 1.62 for openTSNE, 1.31 for fuzzy UMAP, and 1.39 for binary UMAP over nine paired datasets.
+
+The Python benchmark branch evaluated Python openTSNE, umap-learn, and RAPIDS cuML t-SNE/UMAP both through \texttt{reticulate} and, where available, as a direct Python subprocess. Timing modes remain separate: native Python fit time is not presented as equivalent to an R end-to-end call that includes process startup, input loading, conversion, and transfer. The complete three-seed Python summary is archived as \path{generated/python_summary_median.csv}.
+
+\section{Reference-Implementation Validation}
+
+The HPC validation uses a fixed 2,000-point MNIST subset to compare KNN recall, sparse affinity support/weights, and fuzzy UMAP graph weights. It also evaluates three-seed Procrustes and neighborhood stability. The purpose is behavior validation, not speed measurement or bitwise identity.
+
+\begin{table}[ht]
+\centering
+\caption{MNIST fixed-input reference agreement from the HPC archive.}
+\label{tab:validation}
+\small
+\begin{tabular}{lrr}
+\toprule
+Comparison & Value & Reference\\
+\midrule
+t-SNE affinity edge Jaccard & 1.000000 & Python openTSNE\\
+t-SNE affinity weight Pearson & 1.000000 & Python openTSNE\\
+t-SNE affinity weight Spearman & 0.852039 & Python openTSNE\\
+Fuzzy UMAP graph edge Jaccard & 1.000000 & uwot similarity graph\\
+Fuzzy UMAP weight Pearson & 0.999990 & uwot similarity graph\\
+Fuzzy UMAP weight Spearman & 0.999977 & uwot similarity graph\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Parallel stochastic implementations are expected to differ by rotation, reflection, scale, and update order. Validation therefore combines objective values, graph-weight agreement, Procrustes-aligned coordinates, and neighborhood measures rather than demanding identical coordinates. For full MNIST openTSNE, pairwise CPU and CUDA Procrustes correlations were at least 0.9993 and neighbor stability@15 ranged from 0.929 to 0.953. UMAP was less coordinate-stable, as expected for asynchronous stochastic graph optimization, while its neighborhood metrics remained stable.
+
+\section{Precomputed KNN and PCA Boundaries}
+
+Embedding-from-KNN profiling caches the KNN input so that affinity/graph construction and optimization are measured without repeating neighbor search. These timings are diagnostic and are not mixed with the main end-to-end comparison.
+
+\begin{table}[ht]
+\centering
+\caption{MNIST70k median public-function and precomputed-KNN timings.}
+\label{tab:backend}
+\small
+\begin{tabular}{llrr}
+\toprule
+Method & Backend & Full (s) & From KNN (s)\\
+\midrule
+openTSNE & CPU, 4 threads & 69.556 & 33.457\\
+openTSNE & CUDA & 1.938 & 0.618\\
+Fuzzy UMAP & CPU, 4 threads & 50.042 & 16.578\\
+Fuzzy UMAP & CUDA & 0.991 & 2.651\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The CUDA fuzzy UMAP KNN-input path was slower than its one-call path in this archive, illustrating why stage timings should not be substituted for full-function comparisons: buffer residency, setup, and route selection differ across public boundaries. The PCA comparison also showed that CPU \pkg{} RSVD closely matched \texttt{irlba} (MNIST Procrustes correlations 0.996--0.999) but was slower in this run (2.47 versus 1.29 seconds). CUDA PCA required 2.83 seconds. These results motivate further optimization but do not affect the embedding-quality claims.
+
+\section{Landmark Validation}
+
+The landmark benchmark used a 50\% reference subset and reported reference embedding, projection-KNN, refinement, and transform timings separately. Across 11 four-thread CPU datasets, median full/landmark speedup was 1.08 for openTSNE and 1.82 for binary UMAP; median trustworthiness changes were $-0.0038$ and $-0.0008$. On MNIST, landmark openTSNE was slower (67.95 versus 63.15 seconds), whereas landmark binary UMAP was 1.10-fold faster (95.26 versus 105.03 seconds). CUDA landmark rows failed in the supplied run and are retained as failed statuses; no CUDA landmark claim is made from this archive.
+
+\clearpage
+\section{Reproducibility and Submission Freeze}
+
+The repository is \url{https://github.com/tkcaccia/fastEmbedR}. Each publication run should archive: the source commit and release tag; R \texttt{sessionInfo()}; resolved \texttt{R CMD config} compiler/linker commands and flags; generated \texttt{src/Makevars}; CPU model and thread environment; GPU model, driver, CUDA architecture list, CUDA host compiler, CUDA, FAISS, cuVS, RAFT, RMM, CCCL, cuFFT, Metal, and MPS versions where relevant; seed and complete method parameters; status and error text; input object dimensions and precision; and exact command lines. Benchmark rows must record the requested and actual backend independently.
+
+The supplied benchmark manifests record package version 0.99.0 but leave the git-commit field empty. The source tree used to revise this manuscript was at repository HEAD \texttt{12a4a701b5296eb69418c707c603e64d810d1fc8} with additional approved working-tree changes. The final submission must therefore freeze a clean release commit, rerun or bind the archive to that commit, and add its Zenodo DOI. The LaTeX source uses the unmodified JMLR style file at upstream commit \texttt{f413f638b407af76074813f8f88a82a7a5a81e9d}.
+
+\clearpage
+\bibliography{fastEmbedR_MLOSS}
+
+\end{document}

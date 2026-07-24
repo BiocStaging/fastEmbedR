@@ -13,7 +13,7 @@ From: mambaorg/micromamba:2.3.3
     Project fastEmbedR
     KODAMACommit cd69139832590b29035707bfac586ed5921ffc1d
     KODAMAPatch opentsne-bilinear-self-mass-and-small-data-exact-crossover
-    CUDAArchitectures 80-86-89-90-120
+    CUDAArchitectures 75-80-86-89-90-120
     cuVSPatch nndescent-dynamic-shared-memory
     Description R + FAISS/cuVS/cuGraph + RAPIDS cuML + Python UMAP/openTSNE container for fastEmbedR benchmarks
 
@@ -38,6 +38,7 @@ From: mambaorg/micromamba:2.3.3
     export KODAMA_HOME=/opt/kodama
     export FASTEMBEDR_USE_CUDA=1
     export FASTEMBEDR_USE_CUML=1
+    export FASTEMBEDR_CUDA_ARCH="75 80 86 89 90 120"
     export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
     export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
     export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}
@@ -146,6 +147,7 @@ From: mambaorg/micromamba:2.3.3
     export RMM_HOME=/opt/conda
     export FASTEMBEDR_USE_CUDA=1
     export FASTEMBEDR_USE_CUML=1
+    export FASTEMBEDR_CUDA_ARCH="75 80 86 89 90 120"
     export FASTEMBEDR_CUDA_FLAGS="-I/opt/conda/targets/x86_64-linux/include ${FASTEMBEDR_CUDA_FLAGS:-}"
     export LD_LIBRARY_PATH=/opt/rapids/lib:/opt/faiss/lib:/usr/local/cuda/lib64:/opt/conda/lib:/opt/conda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
     export CPATH=/opt/faiss/include:/opt/rapids/include:/opt/conda/include:/opt/conda/targets/x86_64-linux/include:${CPATH:-}

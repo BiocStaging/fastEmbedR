@@ -6,6 +6,15 @@ src/*.so
 src/*.dll
 src/*.dylib
 
+# LaTeX build artifacts
+manuscript/**/*.aux
+manuscript/**/*.bbl
+manuscript/**/*.blg
+manuscript/**/*.fdb_latexmk
+manuscript/**/*.fls
+manuscript/**/*.log
+manuscript/**/*.out
+
 # Local R/session files
 .Rhistory
 .RData

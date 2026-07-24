@@ -1,92 +1,278 @@
-# Installation And Backends
+# Installation And Native Compiler Configuration
 
-This page describes `fastEmbedR` embedding backends. The package contains its
-own CPU HNSW and Metal exact/IVF search code. CUDA builds link directly to the
-RAPIDS cuVS C API; they do not call another R package or Python for one-call KNN.
+[Home](../README.md) |
+[Installation](installation.md) |
+[Bioconductor](bioconductor.md) |
+[Implementation](implementation.md) |
+[Examples](examples.md) |
+[Benchmarks](benchmarks.md) |
+[API](usage-api.md) |
+[Reproducibility](reproducibility.md) |
+[References](references.md)
 
-## Standard Installation
+This page is the build contract for the native CPU, Apple Metal, and NVIDIA
+CUDA backends. The public backend names are `"cpu"`, `"metal"`, and `"cuda"`.
+An explicitly requested GPU backend fails if its native code or linked runtime
+is unavailable; fastEmbedR never performs a CPU calculation and labels it as
+Metal or CUDA.
+
+## Compiler Policy
+
+fastEmbedR deliberately keeps package flags small:
+
+| Layer | Standard and package-owned flags | Source of optimization flags |
+| --- | --- | --- |
+| Portable C++ core | `C++17`; package adds `-pthread` | The active R installation's `CXX17` and `CXX17FLAGS` |
+| Apple Metal | Objective-C++ plus `Foundation`, `Metal`, `MetalPerformanceShaders`, and `MetalPerformanceShadersGraph`; `PKG_OBJCXXFLAGS` inherits R's C++ release flags | Apple Clang/Xcode and the runtime Metal compiler |
+| NVIDIA CUDA | `-std=c++17 -x cu --extended-lambda --expt-relaxed-constexpr -Xcompiler -fPIC` | NVCC plus optional user-supplied `FASTEMBEDR_CUDA_FLAGS` |
+
+The CPU implementation uses a persistent `std::thread` worker team. It does
+not require OpenMP, and the package does not add `-fopenmp`.
+
+The package does **not** globally force `-march=native`, `-ffast-math`, or
+`-O3`. R's platform defaults, normally a portable `-O2` release build, are
+inherited. This policy has three reasons:
+
+1. `-march=native` creates a binary that may fail on another CPU, including a
+   compute node different from the build host.
+2. relaxed floating-point transformations can change KNN tie decisions and
+   stochastic embedding trajectories.
+3. an experimental `-O3 -march=native` build did not improve the validated
+   native HNSW benchmark, so it was not retained.
+
+The native Metal KNN shader is the one narrow exception: it enables Apple's
+runtime fast arithmetic for float32 candidate search. UMAP and openTSNE
+embedding kernels do not obtain a global host-compiler fast-math flag.
+
+Inspect the flags resolved by the active R installation before comparing
+machines:
+
+```sh
+R CMD config CXX17
+R CMD config CXX17FLAGS
+R CMD config CPPFLAGS
+R CMD config LDFLAGS
+```
+
+All packages in a runtime comparison should be built and run in the same R
+environment. Compiler and BLAS differences can otherwise be mistaken for an
+algorithmic speed difference.
+
+## Standard CPU Installation
+
+Requirements:
+
+- R and its development headers;
+- a compiler accepted by `R CMD config CXX17`;
+- R package `Rcpp`;
+- POSIX threads on Unix-like systems.
+
+From a source checkout:
+
+```sh
+R CMD INSTALL --preclean /path/to/fastEmbedR
+```
+
+Or install the development source from R:
 
 ```r
 install.packages("remotes")
 remotes::install_github("tkcaccia/fastEmbedR")
 ```
 
-## Backend Rule
+The configuration summary printed during installation must report
+`C++17 (R CXX17/CXX17FLAGS)`. CPU HNSW, UMAP, openTSNE, PCA, transforms, and
+clustering are package-native.
 
-The public embedding backends are:
+## Apple Metal Installation
 
-- `backend = "cpu"`;
-- `backend = "metal"` on Apple Silicon when native Metal symbols are compiled;
-- `backend = "cuda"` when native CUDA symbols are compiled.
-
-Explicit unavailable GPU requests fail clearly. They are never reported as GPU
-after running on CPU.
-
-## Metal
-
-On Apple Silicon, `umap_knn(..., backend = "metal")` uses the native
-Objective-C++/Metal UMAP optimizer from the supplied KNN graph. It does not call
-Python, `reticulate`, Torch, or MLX.
-
-Native Metal openTSNE uses the package Metal FFT-grid path when compiled. The
-validated default uses PCA initialization for matrix-input workflows and the
-current Metal FFT-grid implementation for the negative-gradient approximation.
-
-## CUDA
-
-Native CUDA openTSNE is implemented with CUDA kernels and cuFFT when the CUDA
-backend is compiled. Native CUDA UMAP uses the package CUDA optimizer when
-available.
-
-Compile the CUDA embedding backend with:
+The Metal backend is built automatically on macOS. The tested configuration is
+Apple Silicon with a current Xcode installation. Verify the toolchain and SDK:
 
 ```sh
-CUDA_HOME=/usr/local/cuda \
-FASTEMBEDR_USE_CUDA=1 \
-R CMD INSTALL /path/to/fastEmbedR
+xcode-select -p
+xcrun --find clang++
+xcrun --find metal
+xcrun metal --version
+xcrun --sdk macosx --show-sdk-path
 ```
 
-To compile the native cuVS KNN and RAFT TSVD initializer without requiring the
-full cuML library, point the build at compatible cuVS, RAFT, RMM, and CCCL
-prefixes:
+Then install with the normal source command:
 
 ```sh
-CUDA_HOME=/usr/local/cuda \
-FAISS_HOME=/path/to/faiss-gpu \
-RAFT_HOME=/path/to/rapids \
-RMM_HOME=/path/to/rapids \
-RAPIDS_HOME=/path/to/rapids \
-CUVS_HOME=/path/to/rapids \
-CCCL_HOME=/path/to/compatible-cccl \
+SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+R CMD INSTALL --preclean /path/to/fastEmbedR
+```
+
+`configure` defines `HAVE_METAL=1` and links the four Apple frameworks listed
+in the compiler-policy table. Metal Shading Language source is compiled at
+runtime with `newLibraryWithSource`, so the installed macOS SDK and the runtime
+OS must support the selected Metal language version. The public Metal path
+does not call Python, Torch, MLX, or `reticulate`.
+
+Using an explicit `SDKROOT` also avoids stale Command Line Tools SDK paths
+after an Xcode upgrade. If `xcrun --show-sdk-version` mentions a missing SDK
+but `xcrun --sdk macosx --show-sdk-version` succeeds, use the explicit command
+above rather than adding manual framework paths.
+
+Verify the compiled symbols:
+
+```r
+library(fastEmbedR)
+info <- fastEmbedR:::backend_info()
+print(info)
+stopifnot(info$knn_available[info$backend == "metal"])
+stopifnot(info$embedding_available[info$backend == "metal"])
+```
+
+## NVIDIA CUDA Installation
+
+### Required components
+
+A complete native CUDA build needs compatible installations of:
+
+- a CUDA toolkit containing NVCC, CUDA runtime, cuFFT, cuBLAS, and cuSOLVER;
+- FAISS built with GPU support for exact search;
+- RAPIDS cuVS and its C API for recall-tuned IVF-Flat search;
+- RAPIDS RAFT, RMM, and compatible CCCL headers for CUDA PCA/TSVD.
+
+The optional native cuML compilation branch is not required for the standard
+fastEmbedR CUDA UMAP/openTSNE implementation.
+
+The CUDA host compiler must be supported by the selected CUDA toolkit and ABI
+compatible with the compiler used to build R. Set `CUDAHOSTCXX` explicitly in
+mixed Conda/system-toolchain environments.
+
+### GPU architecture flags
+
+`FASTEMBEDR_CUDA_ARCH` accepts a whitespace-, comma-, or semicolon-separated
+list. Numeric (`89`), dotted (`8.9`), `sm_89`, and `compute_89` forms are
+normalized by `configure`.
+
+Examples:
+
+```sh
+# NVIDIA T4
+export FASTEMBEDR_CUDA_ARCH="75"
+
+# NVIDIA L40S
+export FASTEMBEDR_CUDA_ARCH="89"
+
+# One relocatable build for both machines
+export FASTEMBEDR_CUDA_ARCH="75 89"
+```
+
+Query the installed device when `nvidia-smi` supports compute capability:
+
+```sh
+nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader
+```
+
+The architecture setting above controls only CUDA translation units compiled
+by fastEmbedR. FAISS GPU, cuVS, RAFT, and every other linked CUDA library must
+also contain kernels or PTX compatible with every deployment GPU. A package
+binary containing `sm_89` cannot repair a cuVS library built only for `sm_75`.
+The characteristic runtime error is:
+
+```text
+cudaErrorNoKernelImageForDevice: no kernel image is available for execution
+```
+
+### Strict complete build
+
+```sh
+export CUDA_HOME=/usr/local/cuda
+export FAISS_HOME=/path/to/faiss-gpu
+export CUVS_HOME=/path/to/rapids
+export RAPIDS_HOME=/path/to/rapids
+export RAFT_HOME=/path/to/rapids
+export RMM_HOME=/path/to/rapids
+export CCCL_HOME=/path/to/compatible-cccl
+export CUDAHOSTCXX=/path/to/cuda-compatible-c++
+export FASTEMBEDR_CUDA_ARCH="75 89"
+
 FASTEMBEDR_USE_CUDA=1 \
 FASTEMBEDR_USE_FAISS_GPU=1 \
 FASTEMBEDR_USE_CUVS=1 \
 FASTEMBEDR_USE_RAFT=1 \
-R CMD INSTALL /path/to/fastEmbedR
+R CMD INSTALL --preclean /path/to/fastEmbedR
 ```
 
-The RAFT and CCCL releases must be mutually compatible. For example, RAPIDS
-26.06 requires CCCL 3.3 rather than the older CCCL headers bundled with some
-CUDA toolkit installations. Set `FASTEMBEDR_CUDA_ARCH` to the target compute
-capability when building for a specific GPU (for example, `75` for a Tesla
-T4).
+The strict `=1` switches make configuration stop when a requested dependency
+is missing. `auto` is convenient for development, but it is unsuitable for a
+release image whose CUDA capabilities must be known.
 
-The FAISS build must provide `faiss/gpu/GpuDistance.h` and `libfaiss` with GPU
-support. The cuVS build must provide `cuvs/core/c_api.h`, `libcuvs_c`, and `libcuvs`.
-At run time those libraries must remain discoverable through the recorded
-rpath or `LD_LIBRARY_PATH`. `FASTEMBEDR_USE_CUVS=1` is strict: configuration
-fails if the headers or libraries are missing. `FASTEMBEDR_USE_FAISS_GPU=1` is
-also strict and prevents an exact CUDA request from being replaced by a slower
-provider.
+Use `FASTEMBEDR_CUDA_FLAGS` only for a documented toolchain requirement, such
+as an additional include directory. It is appended verbatim to the NVCC
+command. It should not be used to hide an incompatible CUDA, CCCL, RAFT, or
+host-compiler combination.
 
-## Diagnostics
+### Headers, libraries, and runtime resolution
+
+The build checks for:
+
+- `faiss/gpu/GpuDistance.h` and `libfaiss`;
+- `cuvs/core/c_api.h`, `libcuvs_c`, and `libcuvs`;
+- `raft/linalg/tsvd.cuh` when RAFT TSVD is requested.
+
+RAPIDS and CCCL releases must be compatible. Runtime library lookup must prefer
+the same CUDA/RAPIDS prefix used at compilation:
+
+```sh
+export LD_LIBRARY_PATH=/path/to/rapids/lib:/path/to/faiss/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
+```
+
+fastEmbedR records an rpath for discovered FAISS/cuVS libraries. Nevertheless,
+`LD_LIBRARY_PATH` is still important when cuVS transitively loads a particular
+`libnvJitLink`. An error such as an undefined versioned
+`__nvJitLink...` symbol normally means that headers/libraries from different
+CUDA releases have been mixed.
+
+### CUDA validation
 
 ```r
 library(fastEmbedR)
 
-fastEmbedR:::backend_info()
+info <- fastEmbedR:::backend_info()
+print(info)
+stopifnot(info$knn_available[info$backend == "cuda"])
+stopifnot(info$embedding_available[info$backend == "cuda"])
+
+set.seed(1)
+x <- matrix(runif(5000 * 32), nrow = 5000, ncol = 32)
+knn <- precompute_knn(x, k = 15, backend = "cuda")
+stopifnot(identical(attr(knn, "backend"), "cuda"))
+
+u <- umap(x, n_neighbors = 15, backend = "cuda", graph_mode = "fuzzy")
+t <- opentsne(x, perplexity = 15, backend = "cuda")
+stopifnot(nrow(u$layout) == 5000L, nrow(t$layout) == 5000L)
 ```
 
-The diagnostic reports native KNN and embedding availability separately. If
-an optional backend is unavailable, `fastEmbedR` reports the failure instead
-of silently falling back to CPU.
+Also run the smoke script supplied with the repository:
+
+```sh
+bash tools/run_cuda_smoke_test.sh
+```
+
+## Release And Check Procedure
+
+Build from a clean source tree, then check the source tarball rather than an
+in-place directory:
+
+```sh
+R CMD build .
+R CMD check --as-cran fastEmbedR_0.99.0.tar.gz
+```
+
+For a manuscript or release benchmark, archive:
+
+- output of all `R CMD config` commands shown above;
+- compiler and linker versions;
+- generated `src/Makevars`;
+- `FASTEMBEDR_CUDA_ARCH`, `FASTEMBEDR_CUDA_FLAGS`, and `CUDAHOSTCXX`;
+- Xcode/Metal version or CUDA/NVCC/driver/GPU versions;
+- FAISS, cuVS, RAFT, RMM, CCCL, cuFFT, and cuBLAS versions;
+- `sessionInfo()`, Git commit, seed, and thread environment.
+
+Run `tools/write_manuscript_reproducibility.R` to capture these fields in the
+benchmark output directory.

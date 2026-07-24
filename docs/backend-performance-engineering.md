@@ -68,6 +68,29 @@ ownership boundaries are:
 | UMAP optimization | Native C++ stochastic optimizer | Native Metal atomic in-place optimizer | Native CUDA atomic optimizer |
 | Returned data | Final R layout | Final layout copied after optimization | Final layout copied after optimization |
 
+## Compiler-Controlled Performance
+
+All retained CPU results use the compiler and release flags selected by the
+active R installation. fastEmbedR adds `-pthread` but does not replace
+`CXX17FLAGS`. This distinction mattered in HNSW diagnosis: the same source
+inside the validated Conda/R environment was substantially faster than a
+generic system R/GCC build on the same remote machine. That difference was a
+toolchain comparison, not an algorithmic speedup, and is not mixed into the
+tables below.
+
+An experimental host build with `-O3 -march=native` was slower for the
+MNIST70k HNSW workload and was discarded. Global `-ffast-math` was not tested
+as an accepted route because relaxed comparisons can change graph ties and
+embedding trajectories. Publication comparisons therefore compile competing
+R methods in the same environment and archive `R CMD config CXX17`,
+`CXX17FLAGS`, compiler versions, and the generated package `src/Makevars`.
+
+CUDA packages must also distinguish source flags from dependency
+architectures. `FASTEMBEDR_CUDA_ARCH="75 89"` creates package kernels for a T4
+and L40S, but linked FAISS/cuVS/RAFT libraries must independently contain
+compatible kernels. A CUDA build made only for the build-host GPU is not a
+valid multi-machine benchmark artifact.
+
 The Metal openTSNE optimizer is GPU-resident after sparse graph construction:
 layout, gains, updates, grid masses, FFT spectra, interpolated fields, and
 reduction buffers persist on the GPU for the complete optimization. The graph

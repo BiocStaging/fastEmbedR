@@ -678,8 +678,6 @@ void prepare_umap_graph_adjacency(const IntegerMatrix& indices,
   write = 0;
   for (std::size_t pos = 0; pos < directed.size();) {
     const std::uint64_t key = directed[pos].key;
-    const int a = key_head(key);
-    const int b = key_tail(key);
     float forward = 0.0f;
     float reverse = 0.0f;
     while (pos < directed.size() && directed[pos].key == key) {
@@ -4182,16 +4180,6 @@ std::vector<float> numeric_matrix_to_float(const NumericMatrix& x) {
   return out;
 }
 
-std::vector<float> numeric_matrix_to_row_major_float(const NumericMatrix& x) {
-  std::vector<float> out(static_cast<std::size_t>(x.nrow()) * x.ncol());
-  for (int c = 0; c < x.ncol(); ++c) {
-    for (int r = 0; r < x.nrow(); ++r) {
-      out[static_cast<std::size_t>(r) * x.ncol() + c] = static_cast<float>(x(r, c));
-    }
-  }
-  return out;
-}
-
 NumericMatrix float_to_numeric_matrix(const std::vector<float>& values,
                                       const int nrow,
                                       const int ncol) {
@@ -4809,18 +4797,6 @@ NumericMatrix run_rsvd_multiply_metal(NumericMatrix left,
     [params_buffer release];
     return float_to_numeric_matrix(out_values, out_rows, out_cols);
   }
-}
-
-int knn_index_offset(const IntegerMatrix& indices, const int n) {
-  int min_idx = std::numeric_limits<int>::max();
-  int max_idx = std::numeric_limits<int>::min();
-  for (int j = 0; j < indices.ncol(); ++j) {
-    for (int i = 0; i < indices.nrow(); ++i) {
-      min_idx = std::min(min_idx, indices(i, j));
-      max_idx = std::max(max_idx, indices(i, j));
-    }
-  }
-  return (min_idx >= 1 && max_idx <= n) ? 1 : 0;
 }
 
 void validate_projection_inputs(const NumericMatrix& reference_layout,

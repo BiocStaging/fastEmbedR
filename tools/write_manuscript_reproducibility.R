@@ -38,8 +38,55 @@ pkg_version <- function(pkg) {
 }
 
 backend_capture <- function() {
-  if (!requireNamespace("faissR", quietly = TRUE)) return("faissR not installed")
-  paste(capture.output(print(try(faissR::backend_info(), silent = TRUE))), collapse = "\n")
+  if (!requireNamespace("fastEmbedR", quietly = TRUE)) {
+    return("fastEmbedR not installed")
+  }
+  paste(
+    capture.output(print(try(fastEmbedR:::backend_info(), silent = TRUE))),
+    collapse = "\n"
+  )
+}
+
+r_config <- function(key) {
+  run_cmd(file.path(R.home("bin"), "R"), c("CMD", "config", key))
+}
+
+read_text_file <- function(path) {
+  if (!file.exists(path)) return(NA_character_)
+  paste(readLines(path, warn = FALSE), collapse = "\n")
+}
+
+compiler_probe <- function() {
+  list(
+    r_cc = r_config("CC"),
+    r_cflags = r_config("CFLAGS"),
+    r_cxx17 = r_config("CXX17"),
+    r_cxx17flags = r_config("CXX17FLAGS"),
+    r_cppflags = r_config("CPPFLAGS"),
+    r_ldflags = r_config("LDFLAGS"),
+    r_shlib_cxx17ld = r_config("SHLIB_CXX17LD"),
+    cc_version = run_cmd("cc", "--version"),
+    cxx_version = run_cmd("c++", "--version"),
+    clang_version = run_cmd("clang++", "--version"),
+    gcc_version = run_cmd("g++", "--version"),
+    xcode_version = run_cmd("xcodebuild", "-version"),
+    macos_sdk_path = run_cmd("xcrun", c("--sdk", "macosx", "--show-sdk-path")),
+    macos_sdk_version = run_cmd("xcrun", c("--sdk", "macosx", "--show-sdk-version")),
+    metal_compiler = run_cmd("xcrun", c("--find", "metal")),
+    metal_version = run_cmd("xcrun", c("metal", "--version")),
+    generated_makevars = read_text_file(file.path("src", "Makevars")),
+    environment = as.list(Sys.getenv(
+      c(
+        "CC", "CXX", "CXX17", "CFLAGS", "CXXFLAGS", "CXX17FLAGS",
+        "CPPFLAGS", "LDFLAGS", "MAKEFLAGS", "SDKROOT", "DEVELOPER_DIR",
+        "CUDA_HOME", "NVCC",
+        "CUDAHOSTCXX", "FASTEMBEDR_USE_CUDA", "FASTEMBEDR_USE_FAISS_GPU",
+        "FASTEMBEDR_USE_CUVS", "FASTEMBEDR_USE_RAFT",
+        "FASTEMBEDR_CUDA_ARCH", "FASTEMBEDR_CUDA_FLAGS"
+      ),
+      unset = NA_character_
+    ))
+  )
 }
 
 cuda_probe <- function() {
@@ -52,15 +99,27 @@ cuda_probe <- function() {
     nvcc_version = run_cmd("nvcc", "--version"),
     cuda_home = Sys.getenv("CUDA_HOME", unset = NA_character_),
     ld_library_path = Sys.getenv("LD_LIBRARY_PATH", unset = NA_character_),
-    faissR_cuda_available = if (requireNamespace("faissR", quietly = TRUE)) {
-      paste(capture.output(print(try(faissR::cuda_available(), silent = TRUE))), collapse = "\n")
+    fastEmbedR_cuda_knn_available = if (requireNamespace("fastEmbedR", quietly = TRUE)) {
+      paste(
+        capture.output(print(try(
+          fastEmbedR:::native_cuda_knn_available_cpp(),
+          silent = TRUE
+        ))),
+        collapse = "\n"
+      )
     } else {
-      "faissR not installed"
+      "fastEmbedR not installed"
     },
-    faissR_cuvs_available = if (requireNamespace("faissR", quietly = TRUE)) {
-      paste(capture.output(print(try(faissR::cuvs_available(), silent = TRUE))), collapse = "\n")
+    fastEmbedR_cuda_embedding_available = if (requireNamespace("fastEmbedR", quietly = TRUE)) {
+      paste(
+        capture.output(print(try(
+          fastEmbedR:::embedding_cuda_available_cpp(),
+          silent = TRUE
+        ))),
+        collapse = "\n"
+      )
     } else {
-      "faissR not installed"
+      "fastEmbedR not installed"
     }
   )
 }
@@ -160,6 +219,7 @@ manifest <- list(
     library_paths = .libPaths(),
     session_info = paste(capture.output(utils::sessionInfo()), collapse = "\n")
   ),
+  compiler = compiler_probe(),
   packages = list(
     fastEmbedR = pkg_version("fastEmbedR"),
     faissR = pkg_version("faissR"),
@@ -171,7 +231,7 @@ manifest <- list(
     jsonlite = pkg_version("jsonlite")
   ),
   backends = list(
-    faissR_backend_info = backend_capture(),
+    fastEmbedR_backend_info = backend_capture(),
     cuda = cuda_probe()
   ),
   environment_files = list(

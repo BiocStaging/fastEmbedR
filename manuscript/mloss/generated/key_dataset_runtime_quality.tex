@@ -1,0 +1,57 @@
+{\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.13\textwidth}p{0.24\textwidth}lrrrr}
+\caption{Median total runtime and quality over three seeds for representative benchmark datasets.}\label{tab:hpcquality}\\
+\toprule
+Dataset & Method & Backend & Seconds & Trust. & Preserve@30 & Label acc.\\
+\midrule
+\endfirsthead
+\toprule
+Dataset & Method & Backend & Seconds & Trust. & Preserve@30 & Label acc.\\
+\midrule
+\endhead
+MNIST & fastEmbedR fuzzy UMAP & CUDA & 0.99 & 0.927 & 0.490 & 0.964\\
+MNIST & fastEmbedR fuzzy UMAP & CPU & 50.04 & 0.925 & 0.490 & 0.959\\
+MNIST & uwot fast SGD & CPU & 65.34 & 0.929 & 0.491 & 0.962\\
+MNIST & fastEmbedR openTSNE & CUDA & 1.94 & 0.924 & 0.474 & 0.962\\
+MNIST & fastEmbedR openTSNE & CPU & 69.56 & 0.924 & 0.477 & 0.952\\
+MNIST & FIt-SNE & CPU & 116.49 & 0.917 & 0.461 & 0.951\\
+MNIST & Rtsne & CPU & 125.83 & 0.907 & 0.469 & 0.957\\
+Fashion-MNIST & fastEmbedR fuzzy UMAP & CUDA & 0.97 & 0.964 & 0.575 & 0.735\\
+Fashion-MNIST & fastEmbedR fuzzy UMAP & CPU & 47.72 & 0.966 & 0.581 & 0.728\\
+Fashion-MNIST & uwot fast SGD & CPU & 61.68 & 0.944 & 0.545 & 0.717\\
+Fashion-MNIST & fastEmbedR openTSNE & CUDA & 1.87 & 0.966 & 0.556 & 0.742\\
+Fashion-MNIST & fastEmbedR openTSNE & CPU & 69.96 & 0.963 & 0.553 & 0.737\\
+Fashion-MNIST & Rtsne & CPU & 101.26 & 0.924 & 0.516 & 0.714\\
+Fashion-MNIST & FIt-SNE & CPU & 105.28 & 0.931 & 0.517 & 0.734\\
+Tabula Muris & fastEmbedR fuzzy UMAP & CUDA & 0.89 & 0.964 & 0.603 & 0.814\\
+Tabula Muris & fastEmbedR fuzzy UMAP & CPU & 33.01 & 0.970 & 0.612 & 0.819\\
+Tabula Muris & uwot fast SGD & CPU & 59.05 & 0.982 & 0.640 & 0.827\\
+Tabula Muris & fastEmbedR openTSNE & CUDA & 3.09 & 0.983 & 0.632 & 0.841\\
+Tabula Muris & fastEmbedR openTSNE & CPU & 48.91 & 0.977 & 0.618 & 0.840\\
+Tabula Muris & FIt-SNE & CPU & 59.03 & 0.977 & 0.609 & 0.839\\
+Tabula Muris & Rtsne & CPU & 105.21 & 0.933 & 0.563 & 0.814\\
+Retina & fastEmbedR fuzzy UMAP & CUDA & 0.66 & 0.912 & 0.399 & 0.965\\
+Retina & fastEmbedR fuzzy UMAP & CPU & 17.93 & 0.919 & 0.407 & 0.964\\
+Retina & uwot fast SGD & CPU & 20.83 & 0.919 & 0.407 & 0.964\\
+Retina & fastEmbedR openTSNE & CUDA & 0.92 & 0.925 & 0.424 & 0.966\\
+Retina & fastEmbedR openTSNE & CPU & 19.01 & 0.925 & 0.419 & 0.968\\
+Retina & FIt-SNE & CPU & 36.72 & 0.924 & 0.411 & 0.968\\
+Retina & Rtsne & CPU & 52.27 & 0.920 & 0.413 & 0.968\\
+flow18 & fastEmbedR fuzzy UMAP & CUDA & 1.77 & 0.965 & 0.427 & 0.952\\
+flow18 & fastEmbedR fuzzy UMAP & CPU & 398.82 & 0.965 & 0.430 & 0.954\\
+flow18 & uwot fast SGD & CPU & 789.13 & 0.966 & 0.429 & 0.956\\
+flow18 & fastEmbedR openTSNE & CUDA & 5.47 & 0.977 & 0.441 & 0.956\\
+flow18 & fastEmbedR openTSNE & CPU & 356.27 & 0.975 & 0.439 & 0.955\\
+flow18 & FIt-SNE & CPU & 464.38 & 0.974 & 0.436 & 0.953\\
+flow18 & Rtsne & CPU & 1925.53 & 0.777 & 0.226 & 0.745\\
+mass41 & fastEmbedR fuzzy UMAP & CUDA & 2.15 & 0.970 & 0.409 & 0.900\\
+mass41 & uwot fast SGD & CPU & 407.71 & 0.971 & 0.411 & 0.896\\
+mass41 & fastEmbedR fuzzy UMAP & CPU & 411.15 & 0.971 & 0.410 & 0.907\\
+mass41 & fastEmbedR openTSNE & CUDA & 5.77 & 0.975 & 0.416 & 0.887\\
+mass41 & fastEmbedR openTSNE & CPU & 339.48 & 0.973 & 0.409 & 0.879\\
+mass41 & FIt-SNE & CPU & 403.20 & 0.970 & 0.398 & 0.889\\
+mass41 & Rtsne & CPU & 2307.30 & 0.868 & 0.299 & 0.762\\
+\bottomrule
+\end{longtable}
+}

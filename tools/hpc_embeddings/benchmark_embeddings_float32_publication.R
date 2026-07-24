@@ -1193,6 +1193,15 @@ write_text_manifest <- function(x, path) {
 write_reproducibility_bundle <- function() {
   session_txt <- paste(capture.output(utils::sessionInfo()), collapse = "\n")
   writeLines(session_txt, file.path(out_dir, "sessionInfo.txt"))
+  r_config_capture <- function(key) {
+    run_cmd_capture(file.path(R.home("bin"), "R"), c("CMD", "config", key))
+  }
+  source_makevars <- file.path("src", "Makevars")
+  generated_makevars <- if (file.exists(source_makevars)) {
+    paste(readLines(source_makevars, warn = FALSE), collapse = "\n")
+  } else {
+    "src/Makevars is not present in the benchmark working directory"
+  }
 
   command_lines <- c(
     current_invocation = paste(commandArgs(FALSE), collapse = " "),
@@ -1267,10 +1276,59 @@ write_reproducibility_bundle <- function() {
       ),
       nvidia_smi = run_cmd_capture("nvidia-smi")
     ),
+    compiler = list(
+      r_cc = r_config_capture("CC"),
+      r_cflags = r_config_capture("CFLAGS"),
+      r_cxx17 = r_config_capture("CXX17"),
+      r_cxx17flags = r_config_capture("CXX17FLAGS"),
+      r_cppflags = r_config_capture("CPPFLAGS"),
+      r_ldflags = r_config_capture("LDFLAGS"),
+      r_shlib_cxx17ld = r_config_capture("SHLIB_CXX17LD"),
+      cc_version = run_cmd_capture("cc", "--version"),
+      cxx_version = run_cmd_capture("c++", "--version"),
+      xcode_version = run_cmd_capture("xcodebuild", "-version"),
+      macos_sdk_path = run_cmd_capture(
+        "xcrun", c("--sdk", "macosx", "--show-sdk-path")
+      ),
+      metal_version = run_cmd_capture("xcrun", c("metal", "--version")),
+      generated_makevars = generated_makevars,
+      environment = as.list(Sys.getenv(
+        c(
+          "CC", "CXX", "CXX17", "CFLAGS", "CXXFLAGS", "CXX17FLAGS",
+          "CPPFLAGS", "LDFLAGS", "MAKEFLAGS", "SDKROOT",
+          "DEVELOPER_DIR", "CUDAHOSTCXX", "FASTEMBEDR_CUDA_ARCH",
+          "FASTEMBEDR_CUDA_FLAGS"
+        ),
+        unset = NA_character_
+      ))
+    ),
     cuda_stack = list(
       nvcc_version = run_cmd_capture("nvcc", "--version"),
       cuda_home = Sys.getenv("CUDA_HOME", unset = NA_character_),
+      cuda_host_cxx = Sys.getenv("CUDAHOSTCXX", unset = NA_character_),
+      cuda_architectures = Sys.getenv(
+        "FASTEMBEDR_CUDA_ARCH", unset = NA_character_
+      ),
+      cuda_extra_flags = Sys.getenv(
+        "FASTEMBEDR_CUDA_FLAGS", unset = NA_character_
+      ),
       ld_library_path = Sys.getenv("LD_LIBRARY_PATH", unset = NA_character_),
+      fastEmbedR_cuda_knn_available = if (requireNamespace("fastEmbedR", quietly = TRUE)) {
+        paste(capture.output(print(try(
+          fastEmbedR:::native_cuda_knn_available_cpp(),
+          silent = TRUE
+        ))), collapse = "\n")
+      } else {
+        "fastEmbedR not installed"
+      },
+      fastEmbedR_cuda_embedding_available = if (requireNamespace("fastEmbedR", quietly = TRUE)) {
+        paste(capture.output(print(try(
+          fastEmbedR:::embedding_cuda_available_cpp(),
+          silent = TRUE
+        ))), collapse = "\n")
+      } else {
+        "fastEmbedR not installed"
+      },
       faissR_cuda_available = if (requireNamespace("faissR", quietly = TRUE)) {
         paste(capture.output(print(try(faissR::cuda_available(), silent = TRUE))), collapse = "\n")
       } else {

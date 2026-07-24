@@ -38,15 +38,21 @@ required by the core `fastEmbedR` embedding functions.
 `fastEmbedR` needs:
 
 - R;
-- a C++17 compiler;
+- the C++17 compiler configured for that R installation;
 - `Rcpp`;
-- macOS Metal framework for native Metal embedding kernels on Apple Silicon;
+- Xcode/Apple Metal frameworks for native Metal kernels on Apple Silicon;
 - CUDA toolkit plus RAPIDS cuVS/RAFT for optional native CUDA workflows.
 
 `fastEmbedR` links directly to FAISS GPU and the RAPIDS cuVS C API for optional CUDA
 one-call KNN. Follow the [backend build guide](installation-backends.md) for
-native CUDA. CPU, Metal, and correctly compiled CUDA `opentsne()`/`umap()` do
-not call another R package for neighbour search.
+the exact compiler, GPU-architecture, host-compiler, header, library, and
+runtime requirements. CPU, Metal, and correctly compiled CUDA
+`opentsne()`/`umap()` do not call another R package for neighbour search.
+
+The portable C++ core inherits `CXX17` and `CXX17FLAGS` from R and adds only
+`-pthread`. The package does not globally force `-march=native`,
+`-ffast-math`, or `-O3`. This keeps release binaries portable and avoids
+changing floating-point-sensitive KNN and embedding trajectories.
 
 ## CUDA Embedding Build
 
@@ -57,14 +63,24 @@ CUDA builds also compile the native UMAP/openTSNE kernels.
 CUDA_HOME=/usr/local/cuda \
 FAISS_HOME=/path/to/faiss-gpu \
 CUVS_HOME=/path/to/rapids \
+RAFT_HOME=/path/to/rapids \
+RMM_HOME=/path/to/rapids \
+CCCL_HOME=/path/to/compatible-cccl \
+CUDAHOSTCXX=/path/to/cuda-compatible-c++ \
+FASTEMBEDR_CUDA_ARCH="75 89" \
 FASTEMBEDR_USE_CUDA=1 \
 FASTEMBEDR_USE_FAISS_GPU=1 \
 FASTEMBEDR_USE_CUVS=1 \
+FASTEMBEDR_USE_RAFT=1 \
 R CMD INSTALL /path/to/fastEmbedR
 ```
 
 If CUDA is requested explicitly and unavailable, the embedding function fails
 clearly. It does not run on CPU while reporting CUDA.
+
+`FASTEMBEDR_CUDA_ARCH` must cover every deployment GPU, and linked FAISS/cuVS
+libraries must be compiled for the same devices. For example, `75` covers a T4
+and `89` covers an L40S.
 
 ## Apple Metal
 

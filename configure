@@ -7,6 +7,7 @@ use_cuvs=${FASTEMBEDR_USE_CUVS:-auto}
 use_faiss_gpu=${FASTEMBEDR_USE_FAISS_GPU:-auto}
 cuda_home=${CUDA_HOME:-}
 nvcc=${NVCC:-}
+cuda_host_cxx=${CUDAHOSTCXX:-}
 if [ -z "$nvcc" ]; then
   if [ -n "$cuda_home" ] && [ -x "$cuda_home/bin/nvcc" ]; then
     nvcc="$cuda_home/bin/nvcc"
@@ -49,10 +50,17 @@ os_name=$(uname -s 2>/dev/null || echo unknown)
 metal_objects="embedding_metal_bridge.o embedding_metal_stub.o native_knn_metal_stub.o"
 cppflags=""
 libs="-pthread"
+objcxxflags=""
+metal_enabled=0
+cuda_enabled=0
+enable_faiss_gpu=0
+enable_cuvs=0
 
 if [ "$os_name" = "Darwin" ]; then
+  metal_enabled=1
   metal_objects="embedding_metal_bridge.o embedding_metal_impl.o native_knn_metal_impl.o"
   cppflags="-DHAVE_METAL=1"
+  objcxxflags='$(CXXFLAGS) -pthread'
   libs="-pthread -framework Foundation -framework Metal -framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph"
 fi
 
@@ -60,6 +68,7 @@ cuda_objects="embedding_cuda_stub.o"
 native_cuda_knn_object="native_knn_cuda_stub.o"
 cuda_rule=""
 if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
+  cuda_enabled=1
   cuda_include_flags="-I$cuda_home/include"
   cuda_lib_flags="-L$cuda_home/lib64 -L$cuda_home/lib"
   if [ -d "$cuda_home/targets/x86_64-linux/include" ]; then
@@ -72,15 +81,35 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
     cuda_lib_flags="$cuda_lib_flags -L$cuda_home/targets/x86_64-linux/lib"
   fi
   cuda_arch_flags=""
-  for arch in ${FASTEMBEDR_CUDA_ARCH:-}; do
+  cuda_arch_list=$(printf '%s' "${FASTEMBEDR_CUDA_ARCH:-}" | tr ',;' '  ')
+  for arch in $cuda_arch_list; do
+    case "$arch" in
+      sm_*) arch=${arch#sm_} ;;
+      compute_*) arch=${arch#compute_} ;;
+      *.*) arch=$(printf '%s' "$arch" | tr -d '.') ;;
+    esac
+    case "$arch" in
+      ''|*[!0-9]*)
+        echo "Invalid FASTEMBEDR_CUDA_ARCH entry: $arch" >&2
+        echo "Use numeric compute capabilities, for example '75 89'." >&2
+        exit 1
+        ;;
+    esac
     cuda_arch_flags="$cuda_arch_flags -gencode=arch=compute_$arch,code=sm_$arch"
   done
+  cuda_host_flags=""
+  if [ -n "$cuda_host_cxx" ]; then
+    if [ ! -x "$cuda_host_cxx" ] && ! command -v "$cuda_host_cxx" >/dev/null 2>&1; then
+      echo "CUDAHOSTCXX does not name an executable compiler: $cuda_host_cxx" >&2
+      exit 1
+    fi
+    cuda_host_flags="-ccbin=$cuda_host_cxx"
+  fi
   cuda_extra_flags=${FASTEMBEDR_CUDA_FLAGS:-}
   cuda_objects="embedding_cuda_impl.o embedding_cuda_kernels.o"
   cppflags="$cppflags -DFASTEMBEDR_HAS_CUDA $cuda_include_flags"
   libs="$libs $cuda_lib_flags -lcudart -lcufft -lcublas -lcusolver"
   faiss_home=${FAISS_HOME:-${RAPIDS_HOME:-${CUVS_HOME:-}}}
-  enable_faiss_gpu=0
   if [ "$use_faiss_gpu" = "1" ] || { [ "$use_faiss_gpu" = "auto" ] && [ -n "$faiss_home" ]; }; then
     faiss_include=""
     faiss_libdir=""
@@ -113,7 +142,6 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
     fi
   fi
   cuvs_home=${CUVS_HOME:-${RAPIDS_HOME:-}}
-  enable_cuvs=0
   if [ "$use_cuvs" = "1" ] || { [ "$use_cuvs" = "auto" ] && [ -n "$cuvs_home" ]; }; then
     if [ -z "$cuvs_home" ]; then
       echo "FASTEMBEDR_USE_CUVS=1 was requested, but CUVS_HOME or RAPIDS_HOME is not set." >&2
@@ -266,7 +294,7 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   cuda_rule="
 .DEFAULT_GOAL := all
 
-CUDA_NVCCFLAGS = -std=c++17 -x cu --extended-lambda --expt-relaxed-constexpr -Xcompiler -fPIC $cuda_include_flags$cuda_arch_flags $cuda_extra_flags
+CUDA_NVCCFLAGS = -std=c++17 -x cu --extended-lambda --expt-relaxed-constexpr -Xcompiler -fPIC $cuda_host_flags $cuda_include_flags$cuda_arch_flags $cuda_extra_flags
 
 embedding_cuda_kernels.o: embedding_cuda_kernels.cpp
 	\$(NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
@@ -276,6 +304,9 @@ fi
 {
   echo "CXX_STD = CXX17"
   echo "PKG_CXXFLAGS = -pthread"
+  if [ -n "$objcxxflags" ]; then
+    echo "PKG_OBJCXXFLAGS = $objcxxflags"
+  fi
   if [ -n "$cppflags" ]; then
     echo "PKG_CPPFLAGS = $cppflags"
   fi
@@ -286,3 +317,21 @@ fi
   fi
   echo "OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o graph_clustering.o walktrap.o native_knn_bridge.o native_knn_hnsw.o $native_cuda_knn_object $metal_objects embedding_cuda_bridge.o $cuda_objects"
 } > src/Makevars
+
+echo "fastEmbedR configuration:"
+echo "  operating system:       $os_name"
+echo "  C++ standard:           C++17 (R CXX17/CXX17FLAGS)"
+echo "  package C++ flags:      -pthread"
+echo "  Metal compiled:         $metal_enabled"
+if [ "$metal_enabled" = "1" ]; then
+  echo "  Objective-C++ flags:    R CXXFLAGS plus -pthread"
+fi
+echo "  CUDA compiled:          $cuda_enabled"
+if [ "$cuda_enabled" = "1" ]; then
+  echo "  nvcc:                   $nvcc"
+  echo "  CUDA host compiler:     ${cuda_host_cxx:-nvcc default}"
+  echo "  CUDA architectures:     ${FASTEMBEDR_CUDA_ARCH:-nvcc default}"
+  echo "  CUDA extra flags:       ${FASTEMBEDR_CUDA_FLAGS:-none}"
+  echo "  FAISS GPU linked:       $enable_faiss_gpu"
+  echo "  cuVS linked:            $enable_cuvs"
+fi
