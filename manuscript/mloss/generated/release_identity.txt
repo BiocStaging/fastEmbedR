@@ -1,4 +1,4 @@
-fastEmbedR source commit: 58e39d53d38f73cf2a792b80d56491e7e60fc6dd
+fastEmbedR validated numerical package commit: 58e39d53d38f73cf2a792b80d56491e7e60fc6dd
 Validated CUDA image:
   /mnt/sata_ssd/fastEmbedR/singularity/fastembedr_cuda_20260727_release_58e39d5.sif
 CUDA image SHA-256: 8a91df71be0dd4ab5a01caaccef159fa281a596d38127e62b22cd5cda846c6b9

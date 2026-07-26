@@ -621,14 +621,15 @@ presented as conveniences rather than new clustering objectives.
 
 The repository is \url{https://github.com/tkcaccia/fastEmbedR}. Each publication run archives: the source commit and release tag; R \texttt{sessionInfo()}; resolved \texttt{R CMD config} compiler/linker commands and flags; generated \texttt{src/Makevars}; CPU model and thread environment; GPU model, driver, CUDA architecture list, CUDA host compiler, CUDA, FAISS, cuVS, RAFT, RMM, CCCL, cuFFT, Metal, and MPS versions where relevant; seed and complete method parameters; status and error text; input object dimensions and precision; and exact command lines. Benchmark rows record the requested and actual backend independently. Fixed-seed GPU reruns are assessed with numerical and neighborhood metrics rather than bytewise layout hashes because atomic update order is not deterministic.
 
-The submission source is frozen at fastEmbedR commit
+The validated numerical package tree is frozen at fastEmbedR commit
 \texttt{58e39d53d38}. The validated multi-architecture CUDA image and embedded
 shared library have SHA-256 prefixes \texttt{8a91df71be0d} and
 \texttt{7975ae24f952}, respectively. Image labels also pin faissR, fastPLS,
 KODAMA C++, and KODAMA R. Full, unabridged commits and hashes are archived in
 \path{generated/release_identity.txt}. Runtime smoke tests covered CPU/CUDA
 float32 KNN, PCA, openTSNE, UMAP, KODAMA, Python reference methods, and
-FIt-SNE.
+FIt-SNE. Later repository commits add manuscript and generated publication
+artifacts without changing the validated numerical package tree.
 
 The historical benchmark manifests used for the numerical tables record package version 0.99.0 but left the git-commit field empty. We therefore do not claim that those completed runs were rerun under the newly frozen image. The release changes after the archived numerical core were documentation, benchmark-provenance, timeout, and launcher-allocation corrections; current scripts record the missing identity fields for replication. A versioned archival DOI and any replication archive generated with the frozen image will be linked from the final release. The LaTeX source uses the unmodified JMLR style file at upstream commit \texttt{f413f638b407af76074813f8f88a82a7a5a81e9d}.
 
