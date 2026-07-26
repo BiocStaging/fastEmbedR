@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Matched full/50%-landmark validation on the local Mac. CPU is skipped above
+# Matched full/20%-landmark validation on the local Mac. CPU is skipped above
 # LOCAL_CPU_MAX_N except for named exceptions; Metal is evaluated on all data.
 
 set -euo pipefail
@@ -15,7 +15,7 @@ DATASETS="${DATASETS:-COIL20,USPS,FashionMNIST,FlowRepository_FR-FCM-ZYRM_files,
 METHODS="${METHODS:-fastEmbedR_opentsne_cpu_full,fastEmbedR_opentsne_cpu_landmark,fastEmbedR_umap_cpu_binary_full,fastEmbedR_umap_cpu_binary_landmark,fastEmbedR_opentsne_metal_full,fastEmbedR_opentsne_metal_landmark,fastEmbedR_umap_metal_binary_full,fastEmbedR_umap_metal_binary_landmark}"
 THREADS_GRID="${THREADS_GRID:-1,4}"
 SEEDS="${SEEDS:-4,17,42}"
-LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.5}"
+LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.2}"
 LOCAL_CPU_MAX_N="${LOCAL_CPU_MAX_N:-100000}"
 LOCAL_CPU_EXCEPTIONS="${LOCAL_CPU_EXCEPTIONS:-TabulaMuris}"
 

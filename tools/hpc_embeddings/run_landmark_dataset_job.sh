@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Run matched full and 50% landmark fastEmbedR embeddings for one dataset.
+# Run matched full and 20% landmark fastEmbedR embeddings for one dataset.
 # Dataset-specific Slurm launchers set BENCHMARK_DATASET,
 # BENCHMARK_BACKEND_GROUP, and BENCHMARK_THREADS before invoking this file.
 
@@ -24,7 +24,7 @@ case "${BENCHMARK_BACKEND_GROUP}" in
 esac
 
 BASE_DIR="${BASE_DIR:-/scratch/firenze/NN}"
-LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.5}"
+LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.2}"
 K="${K:-30}"
 PERPLEXITY="${PERPLEXITY:-30}"
 if [[ "${K}" != "${PERPLEXITY}" ]]; then
@@ -32,11 +32,6 @@ if [[ "${K}" != "${PERPLEXITY}" ]]; then
   exit 2
 fi
 REFERENCE_VALIDATIONS="FALSE"
-run_stamp="${RUN_STAMP:-$(date +%Y%m%d_%H%M%S)}"
-job_suffix="${SLURM_JOB_ID:-manual}"
-safe_dataset="$(printf '%s' "${BENCHMARK_DATASET}" | tr -c 'A-Za-z0-9_.-' '_')"
-profile="${BENCHMARK_BACKEND_GROUP}${BENCHMARK_THREADS}"
-OUT_DIR="${OUT_DIR:-${BASE_DIR}/benchmark_landmark_${safe_dataset}_${profile}_${run_stamp}_${job_suffix}}"
 
 script_path="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then
@@ -58,5 +53,6 @@ done
 }
 
 export BASE_DIR LANDMARK_FRACTION K PERPLEXITY REFERENCE_VALIDATIONS
-export BENCHMARK_METHODS OUT_DIR
+export BENCHMARK_SUITE="landmark"
+export BENCHMARK_METHODS
 exec bash "${runner}"

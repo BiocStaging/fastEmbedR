@@ -4,6 +4,7 @@
 #SBATCH --partition=ada
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --mem=32G
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_land_TabulaMuris_cpu1"
 #SBATCH --chdir=/scratch/firenze/NN
@@ -15,7 +16,7 @@ set -euo pipefail
 export BENCHMARK_DATASET="TabulaMuris"
 export BENCHMARK_BACKEND_GROUP="cpu"
 export BENCHMARK_THREADS="1"
-export LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.5}"
+export LANDMARK_FRACTION="${LANDMARK_FRACTION:-0.2}"
 export BASE_DIR="${BASE_DIR:-/scratch/firenze/NN}"
 
 launcher_path="${BASH_SOURCE[0]:-$0}"
