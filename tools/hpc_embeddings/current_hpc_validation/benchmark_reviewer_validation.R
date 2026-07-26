@@ -88,7 +88,7 @@ if (!length(seeds)) seeds <- c(4L, 17L, 42L)
 seed <- as_int(args$seed, seeds[[1L]])
 k <- as_int(args$k, 30L)
 perplexity <- as_num(args$perplexity, 30)
-timeout <- as_int(args$timeout, 10800L)
+timeout <- as_int(args$timeout, 43200L)
 quality_sample_n <- as_int(args$quality_sample_n, 3000L)
 quality_max_distance_ops <- as_num(args$quality_max_distance_ops, 2e8)
 validation_sample_n <- as_int(args$validation_sample_n, 2000L)
@@ -2153,9 +2153,41 @@ write_reproducibility <- function() {
       as.character(utils::packageVersion(package))
     } else NA_character_
   }, character(1))
+  fastembedr_dll <- tryCatch(
+    system.file("libs", paste0("fastEmbedR", .Platform$dynlib.ext),
+                package = "fastEmbedR"),
+    error = function(e) ""
+  )
+  fastembedr_dll_md5 <- if (nzchar(fastembedr_dll) && file.exists(fastembedr_dll)) {
+    unname(tools::md5sum(fastembedr_dll))
+  } else {
+    NA_character_
+  }
   lines <- c(
     paste0("generated_at=", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")),
     paste0("git_commit=", git_commit),
+    paste0("container_image_path=", Sys.getenv(
+      "FASTEMBEDR_IMAGE_PATH", unset = NA_character_
+    )),
+    paste0("container_image_resolved=", Sys.getenv(
+      "FASTEMBEDR_IMAGE_RESOLVED", unset = NA_character_
+    )),
+    paste0("container_image_identity=", Sys.getenv(
+      "FASTEMBEDR_IMAGE_IDENTITY", unset = NA_character_
+    )),
+    paste0("fastEmbedR_dll=", fastembedr_dll),
+    paste0("fastEmbedR_dll_md5=", fastembedr_dll_md5),
+    paste0("slurm_job_id=", Sys.getenv("SLURM_JOB_ID", unset = NA_character_)),
+    paste0("slurm_job_nodelist=", Sys.getenv(
+      "SLURM_JOB_NODELIST", unset = NA_character_
+    )),
+    paste0("slurm_ntasks=", Sys.getenv("SLURM_NTASKS", unset = NA_character_)),
+    paste0("slurm_cpus_per_task=", Sys.getenv(
+      "SLURM_CPUS_PER_TASK", unset = NA_character_
+    )),
+    paste0("slurm_cpus_on_node=", Sys.getenv(
+      "SLURM_CPUS_ON_NODE", unset = NA_character_
+    )),
     paste0("results_dir=", out_dir),
     paste0("layout_dir=", layout_dir),
     paste0("backend_group=", backend_group),

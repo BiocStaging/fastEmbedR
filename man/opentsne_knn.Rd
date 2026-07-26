@@ -113,6 +113,9 @@ A numeric embedding matrix with settings stored in
 openTSNE-style optimizer. It accepts either a list containing KNN `indices`
 and `distances` or separate KNN index and distance matrices. No neighbour
 search, scaling, or PCA is done inside this function.
+Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
+the Python package. fastEmbedR defines its own R API, defaults, objects, and
+native optimizer kernels; it does not call or port Python \code{openTSNE}.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

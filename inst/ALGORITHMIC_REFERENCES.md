@@ -145,10 +145,11 @@ Implemented locations:
 
 - Repository: <https://github.com/pavlin-policar/openTSNE>
 - License: BSD-3-Clause
-- Current use in `fastEmbedR`: design reference and API reference for native
+- Current use in `fastEmbedR`: mathematical and workflow reference for native
   C++ t-SNE-from-KNN, openTSNE-style two-phase optimization, and transform
   paths. No Python, Cython, or scikit-learn runtime dependency is used by
-  fastEmbedR.
+  fastEmbedR. The term does not claim compatibility with Python openTSNE's API,
+  classes, serialized objects, parameter defaults, or coordinate trajectories.
 
 Ideas/code behaviour used:
 

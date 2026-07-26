@@ -63,7 +63,7 @@ threads_grid <- threads_grid[is.finite(threads_grid) & threads_grid > 0L]
 seeds <- unique(as.integer(csv_arg(args$seeds, "4,17,42")))
 seeds <- seeds[is.finite(seeds)]
 k <- int_arg(args$k, 30L)
-timeout <- int_arg(args$timeout, 10800L)
+timeout <- int_arg(args$timeout, 43200L)
 igraph_max_n <- int_arg(args$igraph_max_n, 50000L)
 walktrap_max_n <- min(int_arg(args$walktrap_max_n, 4000L), 4000L)
 force <- bool_arg(args$force, FALSE)

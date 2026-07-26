@@ -281,7 +281,14 @@ UMAP exposes two graph modes:
 | Mode | Meaning | Intended use |
 | --- | --- | --- |
 | `"fuzzy"` | Standard UMAP fuzzy graph weights. | Scientific comparison with the original UMAP model and `uwot`. |
-| `"binary"` | Binary neighbour graph with the same optimizer. | Explicit approximation that may increase visible separation; always recorded in results. |
+| `"binary"` | Unit weights on the symmetric KNN union, with the same low-dimensional optimizer. | Adjacency-only sensitivity analysis when neighbour identity is trusted more than distance calibration. It is not standard UMAP or a guaranteed acceleration. |
+
+Binary graph preparation omits smooth-KNN bandwidth estimation, but all unit
+edges receive the maximum sampling frequency. Fuzzy UMAP samples weak edges
+less often. Binary mode can consequently perform more optimizer updates and be
+slower on CPU. It may improve or reduce separation and label-aware quality
+depending on the dataset, so benchmark and scientific claims report it
+separately from fuzzy UMAP.
 
 ### Metal UMAP
 
@@ -304,6 +311,15 @@ an explicit diagnostic operation. No CPU or companion-package fallback is
 used for a CUDA request.
 
 ## openTSNE-Style t-SNE From KNN
+
+In this documentation, **openTSNE-style** identifies mathematical and workflow
+lineage, not software compatibility. The shared published components are the
+t-SNE KL objective, perplexity-matched sparse affinities, early-exaggeration
+and normal phases, adaptive gains and momentum, FIt-SNE interpolation/FFT
+repulsion, and fixed-reference transformation. fastEmbedR does not call or
+port Python `openTSNE`, and its API, affinity classes, serialized objects,
+neighbor-width defaults, optimizer trajectory, and coordinates are not
+compatibility targets.
 
 `opentsne_knn()` implements the t-SNE optimization structure used by modern
 openTSNE/FIt-SNE workflows [3-4]:

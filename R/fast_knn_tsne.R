@@ -1207,6 +1207,9 @@ prepare_opentsne_knn <- function(indices,
 #' openTSNE-style optimizer. It accepts either a list containing KNN `indices`
 #' and `distances` or separate KNN index and distance matrices. No neighbour
 #' search, scaling, or PCA is done inside this function.
+#' Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
+#' the Python package. fastEmbedR defines its own R API, defaults, objects, and
+#' native optimizer kernels; it does not call or port Python `openTSNE`.
 #'
 #' @param indices A list containing KNN `indices` and `distances`, or an integer
 #'   KNN index matrix.
@@ -1389,6 +1392,9 @@ opentsne_knn <- function(indices,
 #' Explicit `backend = "metal"` and `backend = "cuda"` requests use the
 #' matching package-native GPU optimizer when compiled and fail clearly if the
 #' requested backend is unavailable.
+#' "openTSNE-style" describes the published sparse-affinity,
+#' interpolation-based t-SNE workflow, not Python API, object, default, or
+#' coordinate compatibility. No Python `openTSNE` code is called.
 #'
 #' @param data Numeric matrix/data frame with observations in rows, or a list
 #'   containing KNN `indices` and `distances`.

@@ -60,7 +60,7 @@ export APPTAINERENV_LD_LIBRARY_PATH="/opt/rapids/lib:/opt/faiss/lib:/usr/local/c
   --seeds=4,17,42 \
   --k=30 \
   --perplexity=30 \
-  --timeout=10800 \
+  --timeout=43200 \
   --quality-max-distance-ops=200000000 \
   --force=FALSE
 
@@ -76,7 +76,7 @@ export APPTAINERENV_LD_LIBRARY_PATH="/opt/rapids/lib:/opt/faiss/lib:/usr/local/c
   --threads-grid=4 \
   --seeds=4,17,42 \
   --k=30 \
-  --timeout=10800 \
+  --timeout=43200 \
   --igraph-max-n=50000 \
   --walktrap-max-n=4000 \
   --force=FALSE

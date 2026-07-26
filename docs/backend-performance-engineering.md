@@ -114,8 +114,11 @@ All three backends implement the same high-level optimizer [1,3-5]:
 6. Early-exaggeration and normal phases update adaptive gains, momentum, and
    coordinates, clip steps, and recenter the layout.
 
-The implementation is openTSNE-style rather than a call to Python openTSNE.
-The public CPU, Metal, and CUDA functions do not use Python or `reticulate`.
+The term **openTSNE-style** refers only to algorithmic lineage: the sparse
+affinity, two-phase optimization, interpolation/FFT repulsion, and
+fixed-reference workflow. It is not a claim of Python API, object, default, or
+coordinate compatibility. The public CPU, Metal, and CUDA functions do not
+call Python openTSNE or use `reticulate`.
 
 ### CPU openTSNE
 

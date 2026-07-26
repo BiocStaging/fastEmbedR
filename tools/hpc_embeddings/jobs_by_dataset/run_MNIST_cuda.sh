@@ -4,8 +4,10 @@
 #SBATCH --partition=l40s
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --mem=64G
+#SBATCH --requeue
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_MNIST_cuda"
 #SBATCH --chdir=/scratch/firenze/NN

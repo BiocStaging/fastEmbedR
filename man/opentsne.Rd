@@ -122,6 +122,9 @@ openTSNE-style two-phase optimizer. The default optimizer is CPU-native.
 Explicit `backend = "metal"` and `backend = "cuda"` requests use the
 matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
+"openTSNE-style" describes the published sparse-affinity,
+interpolation-based t-SNE workflow, not Python API, object, default, or
+coordinate compatibility. No Python \code{openTSNE} code is called.
 }
 \examples{
 fit <- opentsne(

@@ -50,7 +50,7 @@ base_dir <- normalizePath(args$base_dir %||% "/scratch/firenze/NN", mustWork = F
 data_root <- normalizePath(args$data_root %||% file.path(base_dir, "Data"), mustWork = FALSE)
 out_dir <- normalizePath(args$out_dir %||% file.path(base_dir, "benchmark_embeddings_float32_publication"), mustWork = FALSE)
 threads <- int_arg("threads", 12L)
-timeout <- int_arg("timeout", 10800L)
+timeout <- int_arg("timeout", 43200L)
 seed <- int_arg("seed", 4L)
 k <- int_arg("k", 30L)
 perplexity <- num_arg("perplexity", 15)
@@ -591,67 +591,67 @@ method_parameter_row <- function(method) {
   if (method == "fastEmbedR_opentsne_cpu") {
     base$n_neighbors_k <- paste0("ceiling(perplexity) = ", ceiling(perplexity))
     base$perplexity <- as.character(perplexity)
-    base$iterations_or_epochs <- "auto opt-SNE policy; default 250 early-exaggeration + 500 normal iterations unless auto stop applies"
-    base$early_exaggeration <- "auto; default 12"
-    base$learning_rate <- "auto; n / early_exaggeration"
-    base$initialization <- "PCA initialization from fastPLS rSVD when no Y_init is supplied"
-    base$knn_source <- "internal faissR CPU HNSW policy, target_recall = 0.99"
+    base$iterations_or_epochs <- "fixed 250 early-exaggeration + 500 normal iterations"
+    base$early_exaggeration <- "12 for the first 250 iterations"
+    base$learning_rate <- "n / 12"
+    base$initialization <- "native randomized PCA, 2 components, rescaled for t-SNE"
+    base$knn_source <- "package-native CPU HNSW, target_recall = 0.99"
     base$knn_exact_or_approximate <- "approximate"
-    base$notes <- "total runtime includes faissR KNN, PCA initialization, affinity construction, and embedding"
+    base$notes <- "total runtime includes native KNN, PCA initialization, affinity construction, and embedding"
   } else if (method == "fastEmbedR_opentsne_cuda") {
     base$n_neighbors_k <- paste0("ceiling(perplexity) = ", ceiling(perplexity))
     base$perplexity <- as.character(perplexity)
-    base$iterations_or_epochs <- "auto opt-SNE policy; default 250 early-exaggeration + 500 normal iterations unless auto stop applies"
-    base$early_exaggeration <- "auto; default 12"
-    base$learning_rate <- "auto; n / early_exaggeration"
-    base$initialization <- "native CUDA RAFT/cuML TSVD PCA initialization"
-    base$knn_source <- "internal faissR CUDA auto policy, target_recall = 0.99"
-    base$knn_exact_or_approximate <- "approximate"
-    base$notes <- "CUDA run is counted only when native CUDA backend and RAFT/cuML TSVD initialization are available; no host fallback is used"
+    base$iterations_or_epochs <- "fixed 250 early-exaggeration + 500 normal iterations"
+    base$early_exaggeration <- "12 for the first 250 iterations"
+    base$learning_rate <- "n / 12"
+    base$initialization <- "native CUDA RAFT TSVD PCA, 2 components, rescaled for t-SNE"
+    base$knn_source <- "package-native CUDA auto exact/IVF-Flat route, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "exact or approximate according to the recorded route"
+    base$notes <- "native CUDA only; KNN buffers remain on device and no host fallback is used"
   } else if (method %in% c("fastEmbedR_umap_cpu_fuzzy", "fastEmbedR_umap_cpu_binary")) {
     base$n_neighbors_k <- as.character(k)
-    base$iterations_or_epochs <- "fastEmbedR auto UMAP policy; resolved per dataset and stored in the returned parameters"
+    base$iterations_or_epochs <- "500 if n < 10000; otherwise 200, or 300 for the predeclared high-variability profile"
     base$early_exaggeration <- "not used"
-    base$learning_rate <- "fastEmbedR auto UMAP policy; default starts at 1"
+    base$learning_rate <- "1; 1.25 only for the predeclared wide-shell profile"
     base$initialization <- "spectral initialization from the KNN graph"
-    base$knn_source <- "internal faissR CPU HNSW policy, target_recall = 0.99"
+    base$knn_source <- "package-native CPU HNSW, target_recall = 0.99"
     base$knn_exact_or_approximate <- "approximate"
     base$notes <- if (grepl("_binary$", method)) {
-      "binary symmetric graph_mode"
+      "binary symmetric graph_mode; min_dist = 0.01, negative_sample_rate = 5, repulsion = 1"
     } else {
-      "standard fuzzy UMAP graph_mode"
+      "fuzzy simplicial graph_mode; min_dist = 0.01, negative_sample_rate = 5, repulsion = 1"
     }
   } else if (method %in% c("fastEmbedR_umap_cuda_fuzzy", "fastEmbedR_umap_cuda_binary")) {
     base$n_neighbors_k <- as.character(k)
-    base$iterations_or_epochs <- "fastEmbedR auto UMAP policy; resolved per dataset and stored in the returned parameters"
+    base$iterations_or_epochs <- "500 if n < 10000; otherwise 200, or 300 for the predeclared high-variability profile"
     base$early_exaggeration <- "not used"
-    base$learning_rate <- "fastEmbedR auto UMAP policy; default starts at 1"
+    base$learning_rate <- "1; 1.25 only for the predeclared wide-shell profile"
     base$initialization <- "spectral initialization from the KNN graph"
-    base$knn_source <- "internal faissR CUDA auto policy, target_recall = 0.99"
-    base$knn_exact_or_approximate <- "approximate"
+    base$knn_source <- "package-native CUDA auto exact/IVF-Flat route, target_recall = 0.99"
+    base$knn_exact_or_approximate <- "exact or approximate according to the recorded route"
     base$notes <- if (grepl("_binary$", method)) {
-      "binary symmetric graph_mode; CUDA run is counted only when native CUDA backend is available"
+      "binary symmetric graph_mode; min_dist = 0.01, negative_sample_rate = 5, repulsion = 1; native CUDA only"
     } else {
-      "standard fuzzy UMAP graph_mode; CUDA run is counted only when native CUDA backend is available"
+      "fuzzy simplicial graph_mode; min_dist = 0.01, negative_sample_rate = 5, repulsion = 1; native CUDA only"
     }
   } else if (method == "Rtsne_full") {
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "Rtsne default max_iter = 1000"
     base$early_exaggeration <- "Rtsne default exaggeration_factor = 12, stop_lying_iter = 250"
     base$learning_rate <- "Rtsne default eta = 200"
-    base$initialization <- "Rtsne PCA preprocessing enabled with pca = TRUE"
-    base$knn_source <- "internal Rtsne nearest-neighbour/affinity construction"
-    base$knn_exact_or_approximate <- "package internal"
+    base$initialization <- "PCA preprocessing to 50 dimensions; random 2-D layout"
+    base$knn_source <- "internal Rtsne VP-tree nearest-neighbour/affinity construction"
+    base$knn_exact_or_approximate <- "exact tree search"
     base$notes <- "total runtime includes Rtsne internal preprocessing, KNN/affinity construction, and embedding"
   } else if (method == "KlugerLab_FItSNE") {
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "max_iter = 750"
-    base$early_exaggeration <- "FIt-SNE wrapper default"
-    base$learning_rate <- "FIt-SNE wrapper default"
-    base$initialization <- "FIt-SNE wrapper default unless external wrapper supplies otherwise"
-    base$knn_source <- "internal FIt-SNE nearest-neighbour/affinity construction"
-    base$knn_exact_or_approximate <- "package/executable internal"
-    base$notes <- "theta = 0.5; nthreads set to benchmark thread count"
+    base$early_exaggeration <- "12 for the first 250 iterations"
+    base$learning_rate <- "automatic"
+    base$initialization <- "PCA"
+    base$knn_source <- "internal Annoy, n_trees = 50, search_k = -1"
+    base$knn_exact_or_approximate <- "approximate"
+    base$notes <- "theta = 0.5; nthreads set to benchmark thread count; KNN is internal and timed"
   } else if (method == "python_opentsne_fft") {
     base$perplexity <- as.character(perplexity)
     base$iterations_or_epochs <- "Python openTSNE n_iter = 500 plus early_exaggeration_iter = 250"
@@ -681,21 +681,21 @@ method_parameter_row <- function(method) {
     base$notes <- "total runtime includes umap package internal KNN and embedding"
   } else if (method == "uwot_default") {
     base$n_neighbors_k <- as.character(k)
-    base$iterations_or_epochs <- "uwot defaults"
+    base$iterations_or_epochs <- "500 if n <= 10000; otherwise 200"
     base$early_exaggeration <- "not used"
-    base$learning_rate <- "uwot default"
-    base$initialization <- "uwot default"
-    base$knn_source <- "internal uwot KNN with package default nn_method"
-    base$knn_exact_or_approximate <- "package internal"
+    base$learning_rate <- "1"
+    base$initialization <- "spectral"
+    base$knn_source <- "internal uwot automatic KNN policy"
+    base$knn_exact_or_approximate <- "automatic exact/approximate"
     base$notes <- "fast_sgd = FALSE; n_sgd_threads = 1"
   } else if (method == "uwot_fast_sgd") {
     base$n_neighbors_k <- as.character(k)
-    base$iterations_or_epochs <- "uwot defaults"
+    base$iterations_or_epochs <- "500 if n <= 10000; otherwise 200"
     base$early_exaggeration <- "not used"
-    base$learning_rate <- "uwot default"
-    base$initialization <- "uwot default"
-    base$knn_source <- "internal uwot KNN with package default nn_method"
-    base$knn_exact_or_approximate <- "package internal"
+    base$learning_rate <- "1"
+    base$initialization <- "spectral"
+    base$knn_source <- "internal uwot automatic KNN policy"
+    base$knn_exact_or_approximate <- "automatic exact/approximate"
     base$notes <- "fast_sgd = TRUE; n_sgd_threads set to benchmark thread count"
   } else if (method == "python_umap_learn") {
     base$n_neighbors_k <- as.character(k)

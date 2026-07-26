@@ -3,7 +3,9 @@
 #SBATCH --account=immunology
 #SBATCH --partition=ada
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_COIL20_cpu4"
 #SBATCH --chdir=/scratch/firenze/NN

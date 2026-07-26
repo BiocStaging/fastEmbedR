@@ -4,6 +4,8 @@
 #SBATCH --partition=ada
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=256G
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_imagenet_cpu1"
 #SBATCH --chdir=/scratch/firenze/NN

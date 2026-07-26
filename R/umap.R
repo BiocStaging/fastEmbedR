@@ -28,7 +28,9 @@
 #' @param n_threads Number of CPU worker threads for KNN and CPU UMAP.
 #' @param keep_knn Keep KNN matrices in the returned object.
 #' @param graph_mode Graph weighting mode. `"binary"` uses a symmetric
-#'   unit-weight graph. `"fuzzy"` uses standard UMAP fuzzy graph weights.
+#'   unit-weight graph as an adjacency-only approximation; it is not standard
+#'   UMAP or necessarily faster. `"fuzzy"` uses standard UMAP fuzzy graph
+#'   weights and should be used for reference-implementation comparisons.
 #' @param verbose Print progress.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples

@@ -19,19 +19,27 @@ datasets <- c(
 profiles <- list(
   cpu1 = list(
     backend = "cpu", threads = 1L, account = "immunology", partition = "ada",
-    ntasks = 1L, gpu = character(), memory = character()
+    ntasks = 1L, cpus_per_task = 1L, gpu = character(), requeue = character()
   ),
   cpu4 = list(
     backend = "cpu", threads = 4L, account = "immunology", partition = "ada",
-    ntasks = 4L, gpu = character(), memory = character()
+    ntasks = 1L, cpus_per_task = 4L, gpu = character(), requeue = character()
   ),
   cuda = list(
     backend = "cuda", threads = 1L, account = "l40sfree", partition = "l40s",
-    ntasks = 1L, gpu = "#SBATCH --gres=gpu:l40s:1", memory = "#SBATCH --mem=64G"
+    ntasks = 1L, cpus_per_task = 1L, gpu = "#SBATCH --gres=gpu:l40s:1",
+    requeue = "#SBATCH --requeue"
   )
 )
 
 safe_name <- function(x) gsub("[^A-Za-z0-9_.-]+", "_", x)
+memory_gb <- function(dataset, backend) {
+  if (identical(dataset, "imagenet")) return(if (backend == "cuda") 128L else 256L)
+  if (identical(dataset, "FlowRepository_FR-FCM-ZYRM_files")) {
+    return(if (backend == "cuda") 96L else 128L)
+  }
+  if (backend == "cuda") 64L else 32L
+}
 job_name <- function(dataset, profile) {
   paste0("feR_", substr(safe_name(dataset), 1L, 28L), "_", profile)
 }
@@ -39,7 +47,10 @@ job_name <- function(dataset, profile) {
 write_launcher <- function(dataset, profile_name, profile) {
   safe <- safe_name(dataset)
   path <- file.path(output_dir, sprintf("run_%s_%s.sh", safe, profile_name))
-  optional <- c(profile$gpu, profile$memory)
+  requested_memory <- memory_gb(dataset, profile$backend)
+  optional <- c(
+    profile$gpu, sprintf("#SBATCH --mem=%dG", requested_memory), profile$requeue
+  )
   optional <- optional[nzchar(optional)]
   lines <- c(
     "#!/usr/bin/env bash",
@@ -48,6 +59,7 @@ write_launcher <- function(dataset, profile_name, profile) {
     sprintf("#SBATCH --partition=%s", profile$partition),
     "#SBATCH --nodes=1",
     sprintf("#SBATCH --ntasks=%d", profile$ntasks),
+    sprintf("#SBATCH --cpus-per-task=%d", profile$cpus_per_task),
     optional,
     "#SBATCH --time=48:00:00",
     sprintf("#SBATCH --job-name=\"%s\"", job_name(dataset, profile_name)),
@@ -89,6 +101,8 @@ write_launcher <- function(dataset, profile_name, profile) {
   data.frame(
     dataset = dataset, profile = profile_name, backend = profile$backend,
     threads = profile$threads, ntasks = profile$ntasks,
+    cpus_per_task = profile$cpus_per_task,
+    memory_gb = requested_memory,
     file = basename(path), stringsAsFactors = FALSE
   )
 }

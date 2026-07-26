@@ -46,7 +46,9 @@ from the supplied matrix.}
 \item{keep_knn}{If \code{TRUE}, retain KNN matrices in the returned object.}
 
 \item{graph_mode}{Graph weighting mode. \code{"binary"} uses a symmetric
-unit-weight graph. \code{"fuzzy"} uses standard UMAP fuzzy graph weights.}
+unit-weight graph as an adjacency-only approximation; it is not standard UMAP
+or necessarily faster. \code{"fuzzy"} uses standard UMAP fuzzy graph weights
+and should be used for reference-implementation comparisons.}
 
 \item{verbose}{Print progress.}
 }

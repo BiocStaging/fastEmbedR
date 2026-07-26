@@ -24,6 +24,13 @@ nearest-neighbour graphs. It focuses on:
 - compact KNN graph construction and native Louvain, Leiden, and Walktrap
   community detection.
 
+Here, **openTSNE-style** describes algorithmic lineage: sparse perplexity
+affinities, two-phase t-SNE optimization, FIt-SNE interpolation/FFT repulsion,
+and fixed-reference transformation. It does not mean that fastEmbedR wraps,
+ports, or is API-compatible with the Python `openTSNE` package. fastEmbedR
+defines its own R API, defaults, objects, float32 storage, and native
+CPU/Metal/CUDA kernels.
+
 The intended workflow is:
 
 1. call `opentsne()` or `umap()` and let fastEmbedR select its native KNN path,

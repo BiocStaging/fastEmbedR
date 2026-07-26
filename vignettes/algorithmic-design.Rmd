@@ -127,9 +127,13 @@ y_fuzzy <- umap_knn(knn, graph_mode = "fuzzy")
 ```
 
 `graph_mode = "fuzzy"` uses the standard UMAP fuzzy graph. `graph_mode =
-"binary"` uses binary neighbour edges and can increase visible separation on
-some datasets. It is not hidden as an internal trick: benchmark output records
-which graph mode was used.
+"binary"` assigns unit weight to the symmetric KNN union. Binary mode is an
+adjacency-only sensitivity analysis for cases where neighbour identity is
+trusted more than distance calibration; it is not standard UMAP or a
+guaranteed acceleration. Because every binary edge receives the maximum
+sampling frequency, binary optimization can be slower than fuzzy UMAP on CPU.
+Its quality effect is dataset-dependent, so benchmark output records the mode
+and reports fuzzy and binary results separately.
 
 ### Metal UMAP
 
@@ -171,6 +175,13 @@ y_cuda <- umap(
 ```
 
 ## openTSNE-Style t-SNE
+
+Here, **openTSNE-style** refers to algorithmic lineage, not compatibility with
+the Python package. fastEmbedR implements the published sparse t-SNE
+affinities, early-exaggeration and normal phases, adaptive optimization,
+FIt-SNE interpolation/FFT repulsion, and fixed-reference transformation. It
+does not call or port Python `openTSNE`; its R API, defaults, objects, native
+kernels, and resulting coordinate trajectories are package-specific.
 
 `opentsne_knn()` implements an openTSNE-style t-SNE optimizer from precomputed
 KNN matrices.

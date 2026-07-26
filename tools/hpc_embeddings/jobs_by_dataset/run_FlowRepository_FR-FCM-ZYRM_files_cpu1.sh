@@ -4,6 +4,8 @@
 #SBATCH --partition=ada
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=128G
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_FlowRepository_FR-FCM-ZYRM_f_cpu1"
 #SBATCH --chdir=/scratch/firenze/NN

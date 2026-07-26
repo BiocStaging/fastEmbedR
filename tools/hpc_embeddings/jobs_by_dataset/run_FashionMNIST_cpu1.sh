@@ -4,6 +4,8 @@
 #SBATCH --partition=ada
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32G
 #SBATCH --time=48:00:00
 #SBATCH --job-name="feR_FashionMNIST_cpu1"
 #SBATCH --chdir=/scratch/firenze/NN

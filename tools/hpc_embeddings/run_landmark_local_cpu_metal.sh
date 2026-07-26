@@ -37,4 +37,4 @@ exec Rscript "${SCRIPT_DIR}/benchmark_reviewer_validation.R" \
   --reference-validations=FALSE \
   --local-cpu-max-n="${LOCAL_CPU_MAX_N}" \
   --local-cpu-exceptions="${LOCAL_CPU_EXCEPTIONS}" \
-  --timeout=10800
+  --timeout=43200

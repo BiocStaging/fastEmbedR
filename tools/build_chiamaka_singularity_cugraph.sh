@@ -18,6 +18,7 @@ REMOTE_LOG="${REMOTE_LOG:-${REMOTE_DIR}/build_fastembedr_cuda_cugraph_${STAMP}.l
 LOCAL_COPY_DIR="${LOCAL_COPY_DIR:-${LOCAL_ROOT}/singularity}"
 COPY_LOCAL="${COPY_LOCAL:-false}"
 BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fastembedr-singularity-build.XXXXXX")"
+RENDERED_DEF="${BUILD_ROOT}/fastembedr_cuda_multiarch_cugraph.def"
 trap 'rm -rf "${BUILD_ROOT}"' EXIT
 
 if [[ -z "${PKG_TARBALL}" ]]; then
@@ -37,16 +38,21 @@ if [[ ! -s "${KODAMA_PATCH}" ]]; then
   exit 1
 fi
 
+FASTEMBEDR_COMMIT="$(git -C "${LOCAL_ROOT}" rev-parse HEAD)"
+sed "s/__FASTEMBEDR_COMMIT__/${FASTEMBEDR_COMMIT}/g" \
+  "${DEF_FILE}" >"${RENDERED_DEF}"
+
 echo "Remote:       ${REMOTE}"
 echo "Remote dir:   ${REMOTE_DIR}"
 echo "Definition:   ${DEF_FILE}"
+echo "Commit:       ${FASTEMBEDR_COMMIT}"
 echo "Package:      ${PKG_TARBALL}"
 echo "Output image: ${REMOTE_SIF}"
 echo "Build log:    ${REMOTE_LOG}"
 
 ${SSH_CMD} "${REMOTE}" "mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/patched_libs'"
 ${SCP_CMD} "${PKG_TARBALL}" "${REMOTE}:${REMOTE_DIR}/fastEmbedR_source.tar.gz"
-${SCP_CMD} "${DEF_FILE}" "${REMOTE}:${REMOTE_DEF}"
+${SCP_CMD} "${RENDERED_DEF}" "${REMOTE}:${REMOTE_DEF}"
 ${SCP_CMD} "${KODAMA_PATCH}" "${REMOTE}:${REMOTE_KODAMA_PATCH}"
 
 ${SSH_CMD} "${REMOTE}" "cd '${REMOTE_DIR}' && \
@@ -55,7 +61,14 @@ ${SSH_CMD} "${REMOTE}" "cd '${REMOTE_DIR}' && \
 
 ${SSH_CMD} "${REMOTE}" "${REMOTE_EXEC} '${REMOTE_SIF}' Rscript - <<'EOF_R'
 library(float)
+library(faissR)
 library(fastEmbedR)
+
+cat('faissR backend_info()\\n')
+print(faissR::backend_info())
+stopifnot(isTRUE(faissR::faiss_available()))
+stopifnot(isTRUE(faissR::cuda_available()))
+stopifnot(isTRUE(faissR::cuvs_available()))
 
 cat('backend_info()\\n')
 print(fastEmbedR:::backend_info())
@@ -73,6 +86,26 @@ layout_dim <- function(x) {
 set.seed(1)
 x64 <- matrix(runif(5000 * 32), nrow = 5000)
 x32 <- float::fl(x64)
+
+cat('faissR CPU HNSW float32 smoke\\n')
+faiss_cpu <- faissR::nn(
+  x32, k = 15, exclude_self = TRUE, backend = 'cpu', method = 'hnsw',
+  metric = 'euclidean', tuning = 'auto', target_recall = 0.99,
+  n_threads = 4
+)
+stopifnot(nrow(faiss_cpu\$indices) == 5000L, ncol(faiss_cpu\$indices) == 15L)
+
+cat('faissR CUDA GPU-resident float32 smoke\\n')
+faiss_gpu <- faissR::nn_gpu(
+  x32, k = 15, exclude_self = TRUE, method = 'auto',
+  metric = 'euclidean', tuning = 'auto', target_recall = 0.99
+)
+stopifnot(inherits(faiss_gpu, 'faissR_gpu_knn'))
+faiss_gpu_host <- faissR::gpu_knn_to_host(faiss_gpu)
+stopifnot(
+  nrow(faiss_gpu_host\$indices) == 5000L,
+  ncol(faiss_gpu_host\$indices) == 15L
+)
 
 cat('CPU float32 KNN smoke\\n')
 knn_cpu <- fastEmbedR::precompute_knn(

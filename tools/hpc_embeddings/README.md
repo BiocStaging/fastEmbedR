@@ -136,12 +136,30 @@ without cache collisions. All jobs default to `k = 30`, perplexity `30`, seeds
 `4,17,42`, and a 3-hour per-method timeout. A failed, OOM-killed, or timed-out
 method is recorded and the remaining methods continue.
 
+Slurm RAM is requested explicitly rather than relying on the cluster default.
+Standard and landmark CPU jobs request 32 GB normally, 128 GB for
+FlowRepository, and 256 GB for ImageNet. KODAMA CPU jobs request 64 GB
+normally, 192 GB for FlowRepository, and 256 GB for ImageNet. CUDA jobs request
+64-128 GB of host RAM. These are job cgroup limits, not estimates of expected
+peak consumption.
+
+Before a CUDA benchmark starts, the runner checks volatile uncorrectable ECC
+counters and performs a small CuPy allocation/kernel test. An unhealthy node is
+reported as an infrastructure failure and, where Slurm permits it, excluded
+from one requeued attempt. The benchmark does not label that failure as an
+embedding error or repeat it for every method and seed.
+
 The KODAMA defaults are `M = 100`, `Tcycle = 20`, at most 50 PLS components,
-at most 10,000 landmarks, 100 retained graph neighbours, `k = 30`, 200 UMAP
-epochs, and 500 openTSNE optimization iterations. They can be changed with the
+up to all available samples as landmarks, 100 retained graph neighbours,
+`k = 30`, 200 UMAP epochs, and 500 openTSNE optimization iterations. They can
+be changed with the
 `KODAMA_M`, `KODAMA_TCYCLE`, `KODAMA_NCOMP`, `KODAMA_LANDMARKS`,
 `KODAMA_GRAPH_NEIGHBORS`, `KODAMA_N_EPOCHS`, and `KODAMA_N_ITER` environment
 variables.
+
+KODAMA cache paths include an identity tag derived from the actual Singularity
+image. Rebuilding the KODAMA core or R wrapper therefore invalidates stale
+classifier fits even when the R package version has not changed.
 
 To add only the four KODAMA rows to an existing dataset/backend analysis, pass
 the relevant method IDs through `BENCHMARK_METHODS`. For example:
@@ -162,7 +180,7 @@ Rscript /scratch/firenze/NN/generate_reviewer_dataset_jobs.R \
 ## Landmark Validation
 
 Landmarking is validated only for fastEmbedR openTSNE and UMAP. Each row using
-50% landmarks is paired with a full-data run using the same dataset, backend,
+20% landmarks is paired with a full-data run using the same dataset, backend,
 thread count, seed, and neighbourhood size. UMAP landmarking is compared with
 the package's binary-graph full UMAP because `landmark_umap()` uses that graph
 definition internally. Nearest-neighbour search, reference embedding,
@@ -174,8 +192,10 @@ memory, speedup, trustworthiness, KNN preservation, label KNN accuracy,
 Procrustes agreement, embedding-neighbour overlap, and separate reference,
 projection-KNN, refinement, and transform times. The projected non-landmark
 points are evaluated separately so a good landmark fit cannot conceal a poor
-projection. Scientific plots contain points only. Small datasets may be slower
-with landmarking; conclusions should be based on the complete dataset panel.
+projection. Scientific landmark plots draw landmark samples first in light
+gray, then draw projected samples in their class colors on top. Small datasets
+may be slower with landmarking; conclusions should be based on the complete
+dataset panel.
 
 Submit all 33 CPU/CUDA landmark jobs with:
 
@@ -192,7 +212,7 @@ PROFILE=cuda bash /scratch/firenze/NN/submit_landmark_dataset_jobs.sh
 ```
 
 Set `LANDMARK_FRACTION` before submission to test a different fraction. The
-default and publication reference is `0.5`. Use `DRY_RUN=true` to inspect all
+default and publication reference is `0.2`. Use `DRY_RUN=true` to inspect all
 commands without submitting. Native CPU/Metal validation on the Mac is:
 
 ```bash
@@ -244,7 +264,11 @@ fuzzy/binary graph-weight agreement.
 - `knn_affinity_umap_graph_agreement.csv`: within-run backend diagnostics.
 - `parameter_table.csv`: complete benchmark settings and timing boundaries.
 - `reproducibility_manifest.txt` and `sessionInfo.txt`.
-- `layouts/`, `plots/`, `worker_results/`, and `logs/`.
+- dataset/backend directories under `fastEmbedR-rlayout/`, plus `plots/`,
+  `worker_results/`, and `logs/`.
+
+The failure audit motivating the resource and health checks is recorded in
+`BENCHMARK_FAILURE_AUDIT_20260725.md`.
 
 ## CUDA Image
 

@@ -56,7 +56,7 @@ export APPTAINERENV_RCPP_PARALLEL_NUM_THREADS=4
   --seeds=4,17,42 \
   --k=30 \
   --perplexity=30 \
-  --timeout=10800 \
+  --timeout=43200 \
   --quality-max-distance-ops=200000000 \
   --force=FALSE
 
