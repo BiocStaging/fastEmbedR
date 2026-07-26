@@ -15,6 +15,8 @@ REMOTE_KODAMA_PATCH="${REMOTE_DIR}/kodama_opentsne_small_data.patch"
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 REMOTE_SIF="${REMOTE_SIF:-${REMOTE_DIR}/fastembedr_cuda_${STAMP}.sif}"
 REMOTE_LOG="${REMOTE_LOG:-${REMOTE_DIR}/build_fastembedr_cuda_cugraph_${STAMP}.log}"
+REMOTE_TMP="${REMOTE_TMP:-${REMOTE_DIR}/tmp}"
+REMOTE_CACHE="${REMOTE_CACHE:-${REMOTE_DIR}/cache}"
 LOCAL_COPY_DIR="${LOCAL_COPY_DIR:-${LOCAL_ROOT}/singularity}"
 COPY_LOCAL="${COPY_LOCAL:-false}"
 BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fastembedr-singularity-build.XXXXXX")"
@@ -50,12 +52,15 @@ echo "Package:      ${PKG_TARBALL}"
 echo "Output image: ${REMOTE_SIF}"
 echo "Build log:    ${REMOTE_LOG}"
 
-${SSH_CMD} "${REMOTE}" "mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/patched_libs'"
+${SSH_CMD} "${REMOTE}" \
+  "mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/patched_libs' '${REMOTE_TMP}' '${REMOTE_CACHE}'"
 ${SCP_CMD} "${PKG_TARBALL}" "${REMOTE}:${REMOTE_DIR}/fastEmbedR_source.tar.gz"
 ${SCP_CMD} "${RENDERED_DEF}" "${REMOTE}:${REMOTE_DEF}"
 ${SCP_CMD} "${KODAMA_PATCH}" "${REMOTE}:${REMOTE_KODAMA_PATCH}"
 
 ${SSH_CMD} "${REMOTE}" "cd '${REMOTE_DIR}' && \
+  export APPTAINER_TMPDIR='${REMOTE_TMP}' APPTAINER_CACHEDIR='${REMOTE_CACHE}' \
+    SINGULARITY_TMPDIR='${REMOTE_TMP}' SINGULARITY_CACHEDIR='${REMOTE_CACHE}' && \
   (apptainer build --fakeroot --notest --force '${REMOTE_SIF}' '${REMOTE_DEF}' || singularity build --fakeroot --notest --force '${REMOTE_SIF}' '${REMOTE_DEF}') \
   2>&1 | tee '${REMOTE_LOG}'"
 
