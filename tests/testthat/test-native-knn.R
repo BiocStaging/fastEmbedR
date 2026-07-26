@@ -175,6 +175,24 @@ test_that("native Metal exact and IVF searches are recall checked", {
   expect_identical(attr(ivf, "backend"), "metal")
 })
 
+test_that("native Metal exact search supports high-dimensional rows", {
+  skip_if_not(isTRUE(native_metal_knn_available_cpp()), "Metal is unavailable")
+  set.seed(41)
+  high_dimensional <- matrix(rnorm(40 * 1536), nrow = 40)
+  truth <- exact_knn_reference(high_dimensional, 6L)
+  observed <- native_metal_knn_cpp(
+    high_dimensional, 6L, "exact", "euclidean", 1
+  )
+  expect_equal(knn_recall_test(observed, truth), 1, tolerance = 1e-8)
+
+  query <- high_dimensional[1:5, , drop = FALSE]
+  query_result <- native_metal_query_knn_cpp(
+    high_dimensional, query, 6L, "exact", "euclidean", 1
+  )
+  expect_identical(dim(query_result$indices), c(5L, 6L))
+  expect_true(all(is.finite(query_result$distances)))
+})
+
 test_that("native Metal query IVF is recall-gated against exact query KNN", {
   skip_if_not(isTRUE(native_metal_knn_available_cpp()), "Metal is unavailable")
   set.seed(940)

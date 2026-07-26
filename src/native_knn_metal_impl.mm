@@ -35,6 +35,7 @@
 namespace {
 
 constexpr int kMaxP = 1024;
+constexpr int kMaxGlobalP = 16384;
 constexpr int kMaxLists = 1024;
 constexpr int kMaxK = 64;
 constexpr int kMaxProbe = 256;
@@ -284,6 +285,73 @@ kernel void exact_topk_simd(
   }
 }
 
+// High-dimensional exact search avoids a fixed threadgroup query cache. This
+// preserves the same L2 calculation for inputs that would exceed Metal's
+// threadgroup-memory budget, at the cost of rereading the query from device
+// memory for each candidate.
+kernel void exact_topk_simd_global_query(
+    device const float* data [[buffer(0)]],
+    device int* out_ids [[buffer(1)]],
+    device float* out_dist [[buffer(2)]],
+    constant SearchParams& params [[buffer(3)]],
+    uint qlocal [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float local_dist[NSG * MAX_K];
+  threadgroup int local_id[NSG * MAX_K];
+  uint q = params.query_offset + qlocal;
+  if (q >= params.n) return;
+  for (uint i = tid; i < NSG * params.k; i += NSG * SIMD_WIDTH) {
+    local_dist[i] = INFINITY;
+    local_id[i] = -1;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint base = sg * params.k;
+  const device float* query = data + q * params.p;
+  for (uint candidate = sg; candidate < params.n; candidate += NSG) {
+    if (candidate == q) continue;
+    float partial = 0.0f;
+    const device float* point = data + candidate * params.p;
+    for (uint d = lane; d < params.p; d += SIMD_WIDTH) {
+      float delta = query[d] - point[d];
+      partial = fma(delta, delta, partial);
+    }
+    float distance = simd_sum(partial);
+    if (lane == 0) {
+      insert_sorted(
+        local_dist, local_id, base, params.k, distance, int(candidate)
+      );
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    uint heads[NSG];
+    for (uint g = 0; g < NSG; ++g) heads[g] = 0;
+    for (uint rank = 0; rank < params.k; ++rank) {
+      float best_d = INFINITY;
+      int best_i = -1;
+      uint best_g = 0;
+      for (uint g = 0; g < NSG; ++g) {
+        uint h = heads[g];
+        if (h < params.k) {
+          uint pos = g * params.k + h;
+          if (better_pair(local_dist[pos], local_id[pos], best_d, best_i)) {
+            best_d = local_dist[pos];
+            best_i = local_id[pos];
+            best_g = g;
+          }
+        }
+      }
+      out_dist[qlocal * params.k + rank] = best_d;
+      out_ids[qlocal * params.k + rank] = best_i;
+      ++heads[best_g];
+    }
+  }
+}
+
 kernel void exact_query_topk_simd(
     device const float* reference [[buffer(0)]],
     device const float* query [[buffer(1)]],
@@ -308,6 +376,68 @@ kernel void exact_query_topk_simd(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   uint base = sg * params.k;
+  for (uint candidate = sg; candidate < params.n_reference; candidate += NSG) {
+    float partial = 0.0f;
+    const device float* point = reference + candidate * params.p;
+    for (uint d = lane; d < params.p; d += SIMD_WIDTH) {
+      float delta = query_row[d] - point[d];
+      partial = fma(delta, delta, partial);
+    }
+    float distance = simd_sum(partial);
+    if (lane == 0) {
+      insert_sorted(
+        local_dist, local_id, base, params.k, distance, int(candidate)
+      );
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    uint heads[NSG];
+    for (uint g = 0; g < NSG; ++g) heads[g] = 0;
+    for (uint rank = 0; rank < params.k; ++rank) {
+      float best_d = INFINITY;
+      int best_i = -1;
+      uint best_g = 0;
+      for (uint g = 0; g < NSG; ++g) {
+        uint h = heads[g];
+        if (h < params.k) {
+          uint pos = g * params.k + h;
+          if (better_pair(local_dist[pos], local_id[pos], best_d, best_i)) {
+            best_d = local_dist[pos];
+            best_i = local_id[pos];
+            best_g = g;
+          }
+        }
+      }
+      out_dist[q * params.k + rank] = best_d;
+      out_ids[q * params.k + rank] = best_i;
+      ++heads[best_g];
+    }
+  }
+}
+
+kernel void exact_query_topk_simd_global_query(
+    device const float* reference [[buffer(0)]],
+    device const float* query [[buffer(1)]],
+    device int* out_ids [[buffer(2)]],
+    device float* out_dist [[buffer(3)]],
+    constant QuerySearchParams& params [[buffer(4)]],
+    uint q [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float local_dist[NSG * MAX_K];
+  threadgroup int local_id[NSG * MAX_K];
+  if (q >= params.n_query) return;
+  for (uint i = tid; i < NSG * params.k; i += NSG * SIMD_WIDTH) {
+    local_dist[i] = INFINITY;
+    local_id[i] = -1;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint base = sg * params.k;
+  const device float* query_row = query + q * params.p;
   for (uint candidate = sg; candidate < params.n_reference; candidate += NSG) {
     float partial = 0.0f;
     const device float* point = reference + candidate * params.p;
@@ -800,7 +930,9 @@ struct MetalKnnState {
   id<MTLComputePipelineState> accumulate_centroids_pipeline = nil;
   id<MTLComputePipelineState> finalize_centroids_pipeline = nil;
   id<MTLComputePipelineState> exact_pipeline = nil;
+  id<MTLComputePipelineState> exact_global_pipeline = nil;
   id<MTLComputePipelineState> exact_query_pipeline = nil;
+  id<MTLComputePipelineState> exact_query_global_pipeline = nil;
   id<MTLComputePipelineState> ivf_query_pipeline = nil;
   id<MTLComputePipelineState> ivf_pipeline = nil;
   id<MTLComputePipelineState> shortlist_pipeline = nil;
@@ -814,7 +946,9 @@ MetalKnnState& metal_knn_state() {
       state.clear_centroids_pipeline != nil &&
       state.accumulate_centroids_pipeline != nil &&
       state.finalize_centroids_pipeline != nil &&
-      state.exact_pipeline != nil && state.exact_query_pipeline != nil &&
+      state.exact_pipeline != nil && state.exact_global_pipeline != nil &&
+      state.exact_query_pipeline != nil &&
+      state.exact_query_global_pipeline != nil &&
       state.ivf_query_pipeline != nil &&
       state.ivf_pipeline != nil &&
       state.shortlist_pipeline != nil && state.rerank_pipeline != nil) {
@@ -843,8 +977,14 @@ MetalKnnState& metal_knn_state() {
   state.accumulate_centroids_pipeline = make_pipeline(state.device, state.library, @"accumulate_centroids");
   state.finalize_centroids_pipeline = make_pipeline(state.device, state.library, @"finalize_centroids");
   state.exact_pipeline = make_pipeline(state.device, state.library, @"exact_topk_simd");
+  state.exact_global_pipeline = make_pipeline(
+    state.device, state.library, @"exact_topk_simd_global_query"
+  );
   state.exact_query_pipeline = make_pipeline(
     state.device, state.library, @"exact_query_topk_simd"
+  );
+  state.exact_query_global_pipeline = make_pipeline(
+    state.device, state.library, @"exact_query_topk_simd_global_query"
   );
   state.ivf_query_pipeline = make_pipeline(
     state.device, state.library, @"ivf_query_topk_fused"
@@ -909,13 +1049,26 @@ Rcpp::List native_metal_knn_impl(SEXP data_sexp,
   const int n = input.nrow;
   const int p = input.ncol;
   const auto t_convert = Clock::now();
-  if (n < 2 || p < 1 || p > kMaxP || k < 1 || k > kMaxK || k >= n) {
-    Rcpp::stop("Native Metal KNN supports 1-%d dimensions and k <= %d.", kMaxP, kMaxK);
+  if (n < 2 || p < 1 || p > kMaxGlobalP ||
+      k < 1 || k > kMaxK || k >= n) {
+    Rcpp::stop(
+      "Native Metal KNN supports 1-%d dimensions and k <= %d.",
+      kMaxGlobalP, kMaxK
+    );
   }
   std::string method = requested_method;
-  if (method == "auto") method = n < 4096 ? "exact" : "ivf";
+  if (method == "auto") {
+    method = n < 4096 ? "exact" : "ivf";
+  }
   if (method != "exact" && method != "ivf") {
     Rcpp::stop("Native Metal KNN method must be `auto`, `exact`, or `ivf`.");
+  }
+  if (method == "ivf" && p > kMaxP) {
+    Rcpp::stop(
+      "Native Metal IVF KNN supports at most %d dimensions; use exact "
+      "search for this %d-dimensional input.",
+      kMaxP, p
+    );
   }
   const int qdim = projection_dim(p);
   const int nlist = std::max(16, std::min(kMaxLists, static_cast<int>(std::ceil(4.0 * std::sqrt(static_cast<double>(n))))));
@@ -947,6 +1100,8 @@ Rcpp::List native_metal_knn_impl(SEXP data_sexp,
     id<MTLComputePipelineState> accumulate_centroids_pipeline = state.accumulate_centroids_pipeline;
     id<MTLComputePipelineState> finalize_centroids_pipeline = state.finalize_centroids_pipeline;
     id<MTLComputePipelineState> exact_pipeline = state.exact_pipeline;
+    id<MTLComputePipelineState> exact_global_pipeline =
+      state.exact_global_pipeline;
     id<MTLComputePipelineState> ivf_pipeline = state.ivf_pipeline;
     id<MTLComputePipelineState> shortlist_pipeline = state.shortlist_pipeline;
     id<MTLComputePipelineState> rerank_pipeline = state.rerank_pipeline;
@@ -960,7 +1115,8 @@ Rcpp::List native_metal_knn_impl(SEXP data_sexp,
       id<MTLBuffer> params_buffer = [device newBufferWithBytes:&params length:sizeof(params) options:MTLResourceStorageModeShared];
       id<MTLCommandBuffer> command = [queue commandBuffer];
       id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
-      [encoder setComputePipelineState:exact_pipeline];
+      [encoder setComputePipelineState:
+        p <= kMaxP ? exact_pipeline : exact_global_pipeline];
       [encoder setBuffer:data_buffer offset:0 atIndex:0];
       [encoder setBuffer:out_id_buffer offset:0 atIndex:1];
       [encoder setBuffer:out_dist_buffer offset:0 atIndex:2];
@@ -1393,12 +1549,12 @@ Rcpp::List native_metal_query_knn_impl(SEXP data_sexp,
   const auto t_convert = Clock::now();
   if (reference.nrow < 1 || query.nrow < 1 ||
       reference.ncol < 1 || reference.ncol != query.ncol ||
-      reference.ncol > kMaxP || k < 1 || k > kMaxK ||
+      reference.ncol > kMaxGlobalP || k < 1 || k > kMaxK ||
       k > reference.nrow) {
     Rcpp::stop(
       "Native Metal query KNN requires matching 1-%d dimensional matrices "
       "and k <= min(%d, nrow(reference)).",
-      kMaxP, kMaxK
+      kMaxGlobalP, kMaxK
     );
   }
   std::string method = requested_method;
@@ -1408,6 +1564,13 @@ Rcpp::List native_metal_query_knn_impl(SEXP data_sexp,
   if (method != "exact" && method != "ivf") {
     Rcpp::stop(
       "Native Metal reference-query KNN supports `exact`, `ivf`, or `auto`."
+    );
+  }
+  if (method == "ivf" && reference.ncol > kMaxP) {
+    Rcpp::stop(
+      "Native Metal IVF query KNN supports at most %d dimensions; use exact "
+      "search for this %d-dimensional input.",
+      kMaxP, reference.ncol
     );
   }
   const int qdim = projection_dim(reference.ncol);
@@ -1491,7 +1654,10 @@ Rcpp::List native_metal_query_knn_impl(SEXP data_sexp,
         options:MTLResourceStorageModeShared];
       id<MTLCommandBuffer> command = [state.queue commandBuffer];
       id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
-      [encoder setComputePipelineState:state.exact_query_pipeline];
+      [encoder setComputePipelineState:
+        reference.ncol <= kMaxP
+          ? state.exact_query_pipeline
+          : state.exact_query_global_pipeline];
       [encoder setBuffer:reference_buffer offset:0 atIndex:0];
       [encoder setBuffer:queries offset:0 atIndex:1];
       [encoder setBuffer:output_ids offset:0 atIndex:2];

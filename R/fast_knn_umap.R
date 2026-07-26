@@ -48,6 +48,26 @@ fast_knn_umap_core <- function(indices,
                                n_epochs = NULL,
                                config_override = NULL,
                                graph_mode = c("binary", "fuzzy")) {
+  if (inherits(indices, "fastEmbedR_umap_initialization")) {
+    if (!is.null(distances)) {
+      stop(
+        "Do not pass `distances` when `indices` is a UMAP initialization object.",
+        call. = FALSE
+      )
+    }
+    prepared <- indices$prepared
+    prepared$initialization <- indices$layout
+    prepared$initialization_parameters <- indices$parameters
+    return(fast_knn_umap_prepared_core(
+      prepared,
+      n_components = n_components,
+      seed = seed,
+      verbose = verbose,
+      backend = backend,
+      n_threads = n_threads,
+      n_epochs = n_epochs
+    ))
+  }
   if (inherits(indices, "fastEmbedR_umap_prepared")) {
     if (!is.null(distances)) {
       stop("Do not pass `distances` when `indices` is a prepared UMAP object.", call. = FALSE)
@@ -778,36 +798,60 @@ fast_knn_umap_prepared_core <- function(prepared,
     stop("Prepared UMAP reuse currently supports `n_components = 2`.", call. = FALSE)
   }
 
-  init_from_knn_spectral <- backend %in% c("cuda", "metal") && identical(cfg$graph_mode, "fuzzy")
-  init <- if (init_from_knn_spectral) {
-    init_distances <- if (is_float32_matrix(distances)) {
-      matrix(as.numeric(distances), nrow = nrow(indices), ncol = ncol(indices))
-    } else {
-      distances
+  reuse_initialization <- !is.null(prepared$initialization)
+  if (reuse_initialization) {
+    init <- prepared$initialization
+    if (!identical(dim(init), c(nrow(indices), as.integer(n_components)))) {
+      stop(
+        "The reusable UMAP initialization has incompatible dimensions.",
+        call. = FALSE
+      )
     }
-    spectral_knn_init(
-      indices,
-      init_distances,
-      n_components = 2L,
-      min_dist = cfg$min_dist,
-      spectral_n_iter = cfg$spectral_n_iter,
-      seed = seed,
-      backend = "cpu",
-      n_threads = cfg$n_threads
-    )
+    init_is_finite <- if (is_float32_matrix(init)) {
+      float32_all_finite_cpp(init)
+    } else {
+      all(is.finite(init))
+    }
+    if (!isTRUE(init_is_finite)) {
+      stop("The reusable UMAP initialization contains non-finite values.", call. = FALSE)
+    }
+    cfg$initialization_reuse_hit <- TRUE
+    cfg$init_backend <- prepared$initialization_parameters$init_backend %||%
+      attr(init, "backend") %||% "external"
   } else {
-    umap_init_from_csr_graph(
-      graph,
-      n_components = 2L,
-      cfg = cfg,
-      seed = seed,
-      verbose = FALSE
-    )
+    init_from_knn_spectral <- backend %in% c("cuda", "metal") &&
+      identical(cfg$graph_mode, "fuzzy")
+    init <- if (init_from_knn_spectral) {
+      init_distances <- if (is_float32_matrix(distances)) {
+        matrix(as.numeric(distances), nrow = nrow(indices), ncol = ncol(indices))
+      } else {
+        distances
+      }
+      spectral_knn_init(
+        indices,
+        init_distances,
+        n_components = 2L,
+        min_dist = cfg$min_dist,
+        spectral_n_iter = cfg$spectral_n_iter,
+        seed = seed,
+        backend = "cpu",
+        n_threads = cfg$n_threads
+      )
+    } else {
+      umap_init_from_csr_graph(
+        graph,
+        n_components = 2L,
+        cfg = cfg,
+        seed = seed,
+        verbose = FALSE
+      )
+    }
+    if (isTRUE(init_from_knn_spectral)) {
+      init <- scale_embedding_sdev_r(init, cfg$init_scale)
+    }
+    cfg$initialization_reuse_hit <- FALSE
+    cfg$init_backend <- attr(init, "backend") %||% "cpu"
   }
-  if (isTRUE(init_from_knn_spectral)) {
-    init <- scale_embedding_sdev_r(init, cfg$init_scale)
-  }
-  cfg$init_backend <- attr(init, "backend") %||% "cpu"
 
   layout <- if (identical(backend, "metal")) {
     if (!embedding_metal_available_cpp()) {
@@ -960,7 +1004,8 @@ umap_init_from_csr_graph <- function(graph,
     as.integer(seed),
     isTRUE(verbose)
   )
-  attr(init, "backend") <- "cpu_binary_csr"
+  graph_mode <- graph$graph_mode %||% cfg$graph_mode %||% "fuzzy"
+  attr(init, "backend") <- paste0("cpu_", graph_mode, "_csr")
   init
 }
 

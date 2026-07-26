@@ -1,0 +1,81 @@
+test_that("UMAP initialization is deterministic and reusable", {
+  set.seed(701)
+  x <- matrix(rnorm(240L), 40L, 6L)
+  knn <- test_exact_knn(x, k = 8L, backend = "cpu")
+
+  init_a <- umap_init(
+    knn,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    seed = 701L,
+    n_threads = 2L
+  )
+  init_b <- umap_init(
+    knn,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    seed = 701L,
+    n_threads = 2L
+  )
+
+  expect_s3_class(init_a, "fastEmbedR_umap_initialization")
+  expect_equal(init_a$layout, init_b$layout, tolerance = 1e-7)
+  expect_identical(init_a$parameters$init_backend, "cpu_fuzzy_csr")
+  expect_s3_class(init_a$prepared, "fastEmbedR_umap_prepared")
+  expect_equal(
+    init_a$timings$stage,
+    c("knn", "graph", "initialization", "total")
+  )
+
+  layout <- umap_knn(
+    init_a,
+    backend = "cpu",
+    seed = 701L,
+    n_threads = 2L
+  )
+  expect_equal(dim(layout), c(nrow(x), 2L))
+  expect_true(all(is.finite(layout)))
+  cfg <- attr(layout, "fastEmbedR_config")
+  expect_true(isTRUE(cfg$prepared_reuse_hit))
+  expect_true(isTRUE(cfg$initialization_reuse_hit))
+})
+
+test_that("UMAP initialization validates prepared graph mode", {
+  set.seed(702)
+  x <- matrix(rnorm(120L), 30L, 4L)
+  knn <- test_exact_knn(x, k = 6L, backend = "cpu")
+  prepared <- prepare_umap_knn(knn, graph_mode = "binary")
+
+  expect_error(
+    umap_init(prepared, graph_mode = "fuzzy"),
+    "does not match"
+  )
+  init <- umap_init(prepared, seed = 702L)
+  expect_identical(init$parameters$graph_mode, "binary")
+})
+
+test_that("Metal can optimize a reusable CPU UMAP initialization", {
+  skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
+  set.seed(703)
+  x <- matrix(rnorm(240L), 40L, 6L)
+  knn <- test_exact_knn(x, k = 8L, backend = "cpu")
+  init <- umap_init(
+    knn,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    seed = 703L,
+    n_threads = 2L
+  )
+
+  layout <- umap_knn(
+    init,
+    backend = "metal",
+    seed = 703L,
+    n_threads = 2L
+  )
+  expect_equal(dim(layout), c(nrow(x), 2L))
+  expect_true(all(is.finite(layout)))
+  cfg <- attr(layout, "fastEmbedR_config")
+  expect_identical(cfg$optimizer_backend, "metal")
+  expect_true(isTRUE(cfg$initialization_reuse_hit))
+})

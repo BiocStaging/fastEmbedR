@@ -15,7 +15,7 @@ test_that("public API is KNN and openTSNE focused", {
   expect_true(all(c(
     "umap", "umap_knn", "opentsne", "opentsne_knn", "embed_knn",
     "evaluate_embedding", "transform_tsne", "landmark_tsne",
-    "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn",
+    "umap_init", "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn",
     "precompute_query_knn", "select_landmarks", "fit_landmark_model",
     "project_landmark_model", "pca",
     "knn_graph", "graph_cluster"
@@ -109,6 +109,16 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
   layout_prepared_umap <- umap_knn(prep_umap)
   expect_embedding(layout_prepared_umap, n)
   expect_true(isTRUE(attr(layout_prepared_umap, "fastEmbedR_config")$prepared_reuse_hit))
+
+  init_umap <- umap_init(prep_umap, seed = 101L)
+  expect_s3_class(init_umap, "fastEmbedR_umap_initialization")
+  expect_embedding(init_umap$layout, n)
+  expect_true(isTRUE(init_umap$parameters$initialization_reusable))
+  layout_initialized_umap <- umap_knn(init_umap, seed = 101L)
+  expect_embedding(layout_initialized_umap, n)
+  expect_true(isTRUE(
+    attr(layout_initialized_umap, "fastEmbedR_config")$initialization_reuse_hit
+  ))
 
   fit <- opentsne(x, perplexity = 1,
     early_exaggeration_iter = 2L, n_iter = 3L,

@@ -195,7 +195,7 @@ communities <- graph_cluster(graph, method = "leiden", seed = 1)
 
 `knn_graph()` uses the selected backend only when it must compute neighbours.
 `graph_cluster()` is native CPU code and does not call igraph, cuGraph, or an
-external clustering routine. Exact Walktrap is intended for small and moderate
+external clustering routine. Walktrap is intended for small and moderate
 graphs because its transition matrix is quadratic; use Leiden or Louvain for
 large graphs.
 
@@ -305,4 +305,4 @@ supplied neighbour graph.
 | `landmark_umap()` | Embed landmarks with UMAP, then project/refine remaining rows. |
 | `evaluate_embedding()` | Embedding quality metrics. |
 | `knn_graph()` | Compact graph from data, an embedding, or supplied KNN. |
-| `graph_cluster()` | Native Louvain, Leiden, or Walktrap communities. |
+| `graph_cluster()` | Native Louvain, Leiden, or Pons-Latapy Walktrap communities. |

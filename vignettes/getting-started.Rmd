@@ -267,6 +267,37 @@ layout_tsne_reused <- opentsne_knn(
 cbind(UMAP = dim(layout_umap_reused), openTSNE = dim(layout_tsne_reused))
 ```
 
+## Independent UMAP initialization
+
+`umap_init()` separates graph construction and sparse initialization from
+layout optimization. The returned object retains the exact prepared graph and
+initial coordinates, so `umap_knn()` can reuse both without rebuilding either
+stage. This is useful for repeated seeds, backend agreement tests, and
+optimizer-only timing.
+
+```{r independent-umap-init}
+umap_initialization <- umap_init(
+  prepared_umap,
+  backend = "cpu",
+  graph_mode = "fuzzy",
+  n_threads = 2,
+  seed = 4
+)
+
+layout_from_initialization <- umap_knn(
+  umap_initialization,
+  backend = "cpu",
+  n_threads = 2,
+  seed = 4
+)
+
+umap_initialization$timings
+```
+
+The initialization object can also be passed to a Metal or CUDA optimizer.
+That controlled comparison holds the graph and starting coordinates fixed;
+ordinary one-call GPU embeddings continue to use their resident backend path.
+
 # UMAP graph modes
 
 The graph mode is an explicit scientific choice, not a hidden speed setting.

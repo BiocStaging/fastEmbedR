@@ -1,0 +1,4 @@
+current_library <- Sys.getenv("FASTEMBEDR_CURRENT_RLIB", unset = "")
+if (nzchar(current_library)) {
+  .libPaths(c(current_library, .libPaths()))
+}

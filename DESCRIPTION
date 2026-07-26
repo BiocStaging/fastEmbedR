@@ -2,12 +2,25 @@ Package: fastEmbedR
 Type: Package
 Title: Fast Native Embeddings and Graph Clustering from KNN Matrices
 Version: 0.99.0
-Authors@R: person(given = "Stefano",
-    family = "Caccia",
-    role = c("aut", "cre"),
-    email = "tkcaccia@gmail.com")
-Author: Stefano Caccia [aut, cre]
-Maintainer: Stefano Caccia <tkcaccia@gmail.com>
+Authors@R: c(
+    person(given = "Moussa", family = "Kassim", role = "aut",
+        email = "Moussa.Kassim@icgeb.org"),
+    person(given = "Martin", family = "Ocharo", role = "aut",
+        email = "Martin.Ocharo@icgeb.org"),
+    person(given = "Alessia", family = "Vignoli", role = "aut",
+        email = "vignoli@cerm.unifi.it"),
+    person(given = "Leonardo", family = "Tenori", role = "aut",
+        email = "tenori@cerm.unifi.it"),
+    person(given = "Stefano", family = "Cacciatore",
+        role = c("aut", "cre"),
+        email = "tkcaccia@gmail.com")
+    )
+Author: Moussa Kassim [aut],
+    Martin Ocharo [aut],
+    Alessia Vignoli [aut],
+    Leonardo Tenori [aut],
+    Stefano Cacciatore [aut, cre]
+Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
 Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN
     components.
 Description: A compact UMAP and openTSNE-style implementation focused on fast

@@ -92,6 +92,7 @@ and quality metrics without changing the stored layout.
 | `precompute_knn()` | Native non-self KNN search on CPU, Metal, or CUDA, with backend-specific algorithm selection kept internal. |
 | `opentsne_knn()` | Native openTSNE-style t-SNE from a supplied KNN object. |
 | `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
+| `umap_init()` | Build and retain a reusable UMAP graph plus its independent sparse initialization. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
 | `pca()` | Backend-native truncated PCA; set `opentsne_init = TRUE` to return a ready-to-use openTSNE initialization. |
@@ -101,7 +102,7 @@ and quality metrics without changing the stored layout.
 | `landmark_tsne()` / `landmark_umap()` | One-call landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbour preservation, label accuracy, and related metrics. |
 | `knn_graph()` | Compact graph from data, an embedding, or supplied neighbours. |
-| `graph_cluster()` | Native Louvain, Leiden, or exact Walktrap communities. |
+| `graph_cluster()` | Native Louvain, Leiden, or Pons-Latapy Walktrap communities. |
 
 ## Installation
 

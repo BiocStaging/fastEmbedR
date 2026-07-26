@@ -1,6 +1,6 @@
 Files: src/native_knn_hnsw.cpp
 Copyright: Meta Platforms, Inc. and affiliates
-           Stefano Caccia
+           Stefano Cacciatore
 License: MIT
 Comment: Distilled from the HNSW organization in FAISS 1.14.3, commit
          0ca9df4792b173d573044ee14ca0704780176e82. The complete upstream
@@ -9,7 +9,7 @@ Comment: Distilled from the HNSW organization in FAISS 1.14.3, commit
 Files: src/native_knn_metal_impl.mm
 Copyright: Meta Platforms, Inc. and affiliates
            Sydney Bach, The Solace Project
-           Stefano Caccia
+           Stefano Cacciatore
 License: MIT and Apache-2.0
 Comment: Native Objective-C++/Metal implementation informed by FAISS 1.14.3
          and MLXPorts/Faiss-mlx commit
@@ -18,7 +18,7 @@ Comment: Native Objective-C++/Metal implementation informed by FAISS 1.14.3
 
 Files: src/native_knn_cuda_impl.cpp
        src/embedding_cuda_kernels.cpp
-Copyright: Stefano Caccia
+Copyright: Stefano Cacciatore
 License: MIT
 Comment: Package-owned adapter and postprocessing kernels call the installed
          FAISS GPU and RAPIDS cuVS C APIs. The adapter was distilled from faissR commit
@@ -35,7 +35,7 @@ Comment: Minimal stable DLPack C ABI declarations required by the optional
 
 Files: src/graph_clustering.cpp
 Copyright: NetworKit contributors
-           Stefano Caccia
+           Stefano Cacciatore
 License: MIT
 Comment: The native Leiden local-move, refinement, and aggregation phase
          organization is informed by NetworKit's MIT-licensed ParallelLeiden
@@ -44,5 +44,5 @@ Comment: The native Leiden local-move, refinement, and aggregation phase
          complete upstream license is installed as LICENSES/NETWORKIT-LICENSE.
 
 Files: *
-Copyright: Stefano Caccia
+Copyright: Stefano Cacciatore
 License: MIT

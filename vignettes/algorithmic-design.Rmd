@@ -1,6 +1,11 @@
 ---
 title: "Algorithmic design and acknowledgements"
-author: "Stefano Caccia"
+author:
+  - "Moussa Kassim"
+  - "Martin Ocharo"
+  - "Alessia Vignoli"
+  - "Leonardo Tenori"
+  - "Stefano Cacciatore"
 output:
   BiocStyle::html_document:
     toc: true
@@ -64,7 +69,7 @@ source row.
 
 1. multilevel Louvain local moving and graph aggregation;
 2. Leiden local moving, within-community refinement, and aggregation;
-3. exact Pons-Latapy Walktrap random-walk distances and adjacent-community
+3. Pons-Latapy Walktrap random-walk distances and adjacent-community
    agglomeration.
 
 Leiden's phase organization follows Traag et al. and is informed by the
@@ -102,6 +107,15 @@ mathematics:
 - `float` internal weights where safe;
 - parallel row-wise work where deterministic enough;
 - native sampled-edge optimization with negative sampling and learning-rate decay.
+
+### Independent initialization boundary
+
+`umap_init()` accepts raw data, a KNN object, or prepared UMAP graph state. It
+returns a `fastEmbedR_umap_initialization` object containing the prepared
+sparse graph, initial coordinates, resolved parameters, and stage timings.
+Passing this object to `umap_knn()` reuses the exact graph and coordinates.
+This boundary is intended for controlled backend comparisons and repeated
+optimization; it is not a different UMAP objective.
 
 ### `graph_mode`
 

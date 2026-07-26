@@ -9,6 +9,7 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | Function | CPU | Metal | CUDA | Notes |
 | --- | --- | --- | --- | --- |
 | `precompute_knn()` / internal one-call KNN | native float32 HNSW | native exact or recall-tuned IVF-Flat | direct FAISS GPU exact or RAPIDS cuVS IVF-Flat | KNN selection remains internal; the public function exposes only `k`, metric, backend, and CPU thread count. CUDA results stay device-resident. |
+| `umap_init()` | native sparse graph initialization | native Metal initialization from prepared graph state | native CUDA initialization when compiled | Returns reusable graph and initial coordinates; a raw CUDA diagnostic call may materialize KNN on the host, whereas ordinary one-call CUDA UMAP remains resident. |
 | `umap_knn()` | native C++ CSR graph and optimizer | native Metal `atomic_inplace` optimizer | native CUDA pure-atomic optimizer | Metal/CUDA optimizers use the supplied graph; unavailable GPU backends fail clearly. |
 | `umap()` | native HNSW, then `umap_knn()` | native exact/IVF-Flat, then native Metal UMAP | native FAISS/cuVS device KNN, then native CUDA UMAP | CUDA KNN is not copied through R. Metal IVF exact-reranks candidates in the original dimensions and records its pilot recall. |
 | `opentsne_knn()` | native C++ FFT-grid optimizer | native Metal FFT-grid optimizer | native CUDA FFT-grid optimizer using cuFFT | Use `Y_init` or `init_data` for explicit PCA initialization. |
@@ -21,6 +22,8 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | `project_landmark_model()` | native projection/transform/refinement | native Metal projection/transform/refinement | native CUDA resident projection/transform/refinement | Projects held-out or genuinely new observations while reference coordinates remain fixed. |
 | `landmark_umap()` | one-call landmark embed/project/refine | one-call Metal path | one-call CUDA path | Convenience wrapper; landmarking remains an explicit approximation. |
 | `landmark_tsne()` | one-call landmark embed plus transform | one-call Metal path | one-call CUDA path | Convenience wrapper; projection quality is tracked separately. |
+| `knn_graph()` | native C++ graph construction | Metal KNN followed by native CPU graph construction | CUDA KNN followed by native CPU graph construction | A GPU label applies to neighbour search only; graph conversion is never reported as GPU work. |
+| `graph_cluster()` | native Louvain, Leiden, and Pons-Latapy Walktrap | not supported | not supported | Community optimization is CPU-only and has no silent GPU label. |
 | `evaluate_embedding()` | native/R quality metrics | CPU metrics after final layout transfer | CPU metrics after final layout transfer | Metrics are not labelled as GPU work. |
 
 ## Distance Metrics
@@ -68,6 +71,12 @@ internally from 288 to 384 or 512 candidates when needed. Four deterministic
 pilot strata select shortlist size and `nprobe`; direct Metal reranking is the
 safety fallback. Failure to reach the requested pilot recall is reported
 instead of silently switching to CPU.
+
+Exact Metal search caches rows in threadgroup memory through 1,024 dimensions.
+For small data with up to 16,384 dimensions, a mathematically identical
+global-memory kernel avoids that fixed cache; Metal IVF remains limited to
+1,024 input dimensions. These routes fail explicitly outside their supported
+domain.
 
 The validated UMAP Metal path is `atomic_inplace`; other slower or distorted
 Metal UMAP optimizer experiments were removed from the public API.

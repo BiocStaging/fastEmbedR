@@ -31,11 +31,15 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Stefano Caccia \email{tkcaccia@gmail.com}
+\strong{Maintainer}: Stefano Cacciatore \email{tkcaccia@gmail.com}
 
 Authors:
 \itemize{
-  \item Stefano Caccia \email{tkcaccia@gmail.com}
+  \item Stefano Cacciatore \email{tkcaccia@gmail.com}
+  \item Moussa Kassim \email{Moussa.Kassim@icgeb.org}
+  \item Martin Ocharo \email{Martin.Ocharo@icgeb.org}
+  \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
+  \item Leonardo Tenori \email{tenori@cerm.unifi.it}
 }
 
 }
