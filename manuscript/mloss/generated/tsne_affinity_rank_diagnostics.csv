@@ -1,0 +1,2 @@
+"dataset","n","k","perplexity","common_edges","edge_jaccard","weight_pearson","weight_spearman","l1_similarity","median_absolute_difference","maximum_absolute_difference","fraction_within_1e_8","fraction_within_1e_7","unique_candidate_weights_rounded_12","unique_reference_weights_rounded_12"
+"MNIST",2000,30,30,42538,1,0.999999961668811,0.85203945506073,0.999961905957043,1.36769534505657e-09,1.66077426264888e-08,0.995321829893272,1,2,6922

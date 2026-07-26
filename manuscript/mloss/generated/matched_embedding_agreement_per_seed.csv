@@ -1,0 +1,37 @@
+"algorithm","seed","implementation_a","backend_a","implementation_b","backend_b","procrustes_rmsd","procrustes_correlation","embedding_neighbor_agreement_15"
+"t-SNE",4,"fastEmbedR","cpu","fastEmbedR","cuda",0.0171366220831725,0.706336183578524,0.566133333333333
+"t-SNE",4,"fastEmbedR","cpu","fastEmbedR","metal",0.0192407862152024,0.629792145820877,0.552866666666667
+"t-SNE",4,"fastEmbedR","cpu","Python openTSNE","python_cpu",0.012021644331862,0.855480067558209,0.626133333333333
+"t-SNE",4,"fastEmbedR","cuda","fastEmbedR","metal",0.0151375909542814,0.77085334010086,0.5798
+"t-SNE",4,"fastEmbedR","cuda","Python openTSNE","python_cpu",0.0172329693125677,0.703024768672102,0.6669
+"t-SNE",4,"fastEmbedR","metal","Python openTSNE","python_cpu",0.0195462576017351,0.617943813766612,0.581866666666667
+"t-SNE",17,"fastEmbedR","cpu","fastEmbedR","cuda",0.0152903625053162,0.766204814456022,0.577933333333333
+"t-SNE",17,"fastEmbedR","cpu","fastEmbedR","metal",0.0195740577334782,0.616856263846465,0.579933333333333
+"t-SNE",17,"fastEmbedR","cpu","Python openTSNE","python_cpu",0.0131678690145231,0.826607225616368,0.5806
+"t-SNE",17,"fastEmbedR","cuda","fastEmbedR","metal",0.0180355033252225,0.674720619805888,0.637733333333333
+"t-SNE",17,"fastEmbedR","cuda","Python openTSNE","python_cpu",0.0159657963606324,0.745093346570815,0.733733333333333
+"t-SNE",17,"fastEmbedR","metal","Python openTSNE","python_cpu",0.0175937479206148,0.690460034105862,0.6292
+"t-SNE",42,"fastEmbedR","cpu","fastEmbedR","cuda",0.0167728914847745,0.718670111239979,0.616
+"t-SNE",42,"fastEmbedR","cpu","fastEmbedR","metal",0.0113975851264303,0.870095053285775,0.567466666666667
+"t-SNE",42,"fastEmbedR","cpu","Python openTSNE","python_cpu",0.0195019834793189,0.61967264037237,0.610666666666667
+"t-SNE",42,"fastEmbedR","cuda","fastEmbedR","metal",0.0181161563770157,0.671804878123513,0.595066666666667
+"t-SNE",42,"fastEmbedR","cuda","Python openTSNE","python_cpu",0.0113001114864466,0.872307480393879,0.722666666666667
+"t-SNE",42,"fastEmbedR","metal","Python openTSNE","python_cpu",0.019105874965896,0.634965541787549,0.592366666666667
+"UMAP",4,"fastEmbedR","cpu","fastEmbedR","cuda",0.00187724041439317,0.996475968426572,0.733566666666667
+"UMAP",4,"fastEmbedR","cpu","fastEmbedR","metal",0.00656405533720738,0.956913177530079,0.681466666666667
+"UMAP",4,"fastEmbedR","cpu","uwot fast_sgd","reference_cpu",0.00207453999488896,0.995696283809603,0.728633333333333
+"UMAP",4,"fastEmbedR","cuda","fastEmbedR","metal",0.00659341920743188,0.95652682315507,0.682533333333333
+"UMAP",4,"fastEmbedR","cuda","uwot fast_sgd","reference_cpu",0.00205905644946327,0.995760286537921,0.727933333333333
+"UMAP",4,"fastEmbedR","metal","uwot fast_sgd","reference_cpu",0.00670337873357062,0.955064713554314,0.687133333333333
+"UMAP",17,"fastEmbedR","cpu","fastEmbedR","cuda",0.00233323332814393,0.994556022236438,0.7298
+"UMAP",17,"fastEmbedR","cpu","fastEmbedR","metal",0.00245579167695833,0.993969087239381,0.7082
+"UMAP",17,"fastEmbedR","cpu","uwot fast_sgd","reference_cpu",0.00243496803705936,0.994070930658501,0.706133333333333
+"UMAP",17,"fastEmbedR","cuda","fastEmbedR","metal",0.00234562440655081,0.994498046143391,0.697933333333333
+"UMAP",17,"fastEmbedR","cuda","uwot fast_sgd","reference_cpu",0.00273095640752352,0.992541877100204,0.704733333333333
+"UMAP",17,"fastEmbedR","metal","uwot fast_sgd","reference_cpu",0.00244204144511591,0.994036433580338,0.699766666666667
+"UMAP",42,"fastEmbedR","cpu","fastEmbedR","cuda",0.00625285630007746,0.960901788090584,0.706566666666667
+"UMAP",42,"fastEmbedR","cpu","fastEmbedR","metal",0.00679199854898091,0.953868755710643,0.684233333333333
+"UMAP",42,"fastEmbedR","cpu","uwot fast_sgd","reference_cpu",0.00665559134680267,0.955703103824368,0.6801
+"UMAP",42,"fastEmbedR","cuda","fastEmbedR","metal",0.00302601444258592,0.990843236593263,0.7123
+"UMAP",42,"fastEmbedR","cuda","uwot fast_sgd","reference_cpu",0.00282656962591058,0.99201050414988,0.7121
+"UMAP",42,"fastEmbedR","metal","uwot fast_sgd","reference_cpu",0.00266800865668935,0.992881729807832,0.705366666666667

@@ -1,0 +1,9 @@
+generated_at=2026-07-26 22:44:58 SAST
+bundle=/Users/stefano/Documents/umap/results/matched_embedding_correctness_mnist2000_20260726/bundle.rds
+inputs=results/matched_embedding_correctness_mnist2000_20260726
+initialization=identical within each seed and algorithm
+knn=identical exact kNN matrix
+tsne_negative_gradient_method=fft
+tsne_objective=KL evaluated against one common sparse affinity matrix
+layout_agreement=orthogonal Procrustes after centering and Frobenius scaling
+neighborhood_agreement=mean overlap at k=15 in the final 2-D layouts

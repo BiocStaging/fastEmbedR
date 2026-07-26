@@ -1,0 +1,124 @@
+{\scriptsize
+\setlength{\tabcolsep}{2.2pt}
+\begin{longtable}{p{0.11\textwidth}p{0.27\textwidth}llrrrr}
+\caption{Complete selected-method benchmark results. Runtime is the median total public-function time over three seeds; unavailable and failed rows are retained explicitly. FlowRepository and ImageNet contain unmatched fastEmbedR rows that are descriptive only and excluded from comparative summaries.}\label{tab:allselected}\\
+\toprule
+Dataset & Method & Backend & Profile & Seconds & Trust. & Preserve@30 & Label acc.\\
+\midrule
+\endfirsthead
+\toprule
+Dataset & Method & Backend & Profile & Seconds & Trust. & Preserve@30 & Label acc.\\
+\midrule
+\endhead
+COIL-20 & Rtsne::Rtsne & CPU & cpu4 & 8.238 & 0.845 & 0.528 & 0.590\\
+ & FIt-SNE & CPU & cpu4 & 21.694 & 0.870 & 0.626 & 0.622\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 16.438 & 0.906 & 0.574 & 0.577\\
+ & fastEmbedR::opentsne & CUDA & cuda & 6.420 & 0.905 & 0.572 & 0.577\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 23.495 & 0.860 & 0.582 & 0.647\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 13.469 & 0.827 & 0.485 & 0.628\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.602 & 0.860 & 0.514 & 0.603\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 13.705 & 0.805 & 0.438 & 0.494\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 0.615 & 0.870 & 0.544 & 0.558\\
+\addlinespace[2pt]
+USPS & Rtsne::Rtsne & CPU & cpu4 & 12.193 & 0.942 & 0.457 & 0.759\\
+ & FIt-SNE & CPU & cpu4 & 18.494 & 0.945 & 0.458 & 0.728\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 12.508 & 0.949 & 0.454 & 0.740\\
+ & fastEmbedR::opentsne & CUDA & cuda & 0.767 & 0.955 & 0.457 & 0.738\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 7.497 & 0.886 & 0.372 & 0.713\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 5.857 & 0.890 & 0.367 & 0.711\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.628 & 0.889 & 0.365 & 0.707\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 15.192 & 0.923 & 0.404 & 0.676\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 0.616 & 0.921 & 0.394 & 0.683\\
+\addlinespace[2pt]
+Fashion-MNIST & Rtsne::Rtsne & CPU & cpu4 & 101.257 & 0.924 & 0.516 & 0.714\\
+ & FIt-SNE & CPU & cpu4 & 105.280 & 0.931 & 0.517 & 0.734\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 69.958 & 0.963 & 0.553 & 0.737\\
+ & fastEmbedR::opentsne & CUDA & cuda & 1.868 & 0.966 & 0.556 & 0.742\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 61.679 & 0.944 & 0.545 & 0.717\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 47.722 & 0.966 & 0.581 & 0.728\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.972 & 0.964 & 0.575 & 0.735\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 121.761 & 0.968 & 0.594 & 0.718\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 1.040 & 0.969 & 0.586 & 0.725\\
+\addlinespace[2pt]
+FlowRepo. & Rtsne::Rtsne & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & FIt-SNE & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::opentsne & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::opentsne & CUDA & cuda & 90.995 & 0.974 & 0.445 & 0.476\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 76.840 & 0.968 & 0.443 & 0.479\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 81.348 & 0.969 & 0.449 & 0.472\\
+\addlinespace[2pt]
+flow18 & Rtsne::Rtsne & CPU & cpu4 & 1925.527 & 0.777 & 0.226 & 0.745\\
+ & FIt-SNE & CPU & cpu4 & 464.383 & 0.974 & 0.436 & 0.953\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 356.270 & 0.975 & 0.439 & 0.955\\
+ & fastEmbedR::opentsne & CUDA & cuda & 5.471 & 0.977 & 0.441 & 0.956\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 789.126 & 0.966 & 0.429 & 0.956\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 398.817 & 0.965 & 0.430 & 0.954\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 1.770 & 0.965 & 0.427 & 0.952\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 878.961 & 0.967 & 0.434 & 0.954\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 2.562 & 0.966 & 0.430 & 0.954\\
+\addlinespace[2pt]
+MNIST & Rtsne::Rtsne & CPU & cpu4 & 125.833 & 0.907 & 0.469 & 0.957\\
+ & FIt-SNE & CPU & cpu4 & 116.486 & 0.917 & 0.461 & 0.951\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 69.556 & 0.924 & 0.477 & 0.952\\
+ & fastEmbedR::opentsne & CUDA & cuda & 1.938 & 0.924 & 0.474 & 0.962\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 65.338 & 0.929 & 0.491 & 0.962\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 50.042 & 0.925 & 0.490 & 0.959\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.991 & 0.927 & 0.490 & 0.964\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 113.974 & 0.928 & 0.497 & 0.945\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 1.047 & 0.926 & 0.495 & 0.950\\
+\addlinespace[2pt]
+ImageNet & Rtsne::Rtsne & CPU & cpu4 & \textit{failed} & -- & -- & --\\
+ & FIt-SNE & CPU & cpu4 & \textit{failed} & -- & -- & --\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 1026.293 & 0.613 & 0.130 & 0.032\\
+ & fastEmbedR::opentsne & CUDA & cuda & \textit{not\_run} & -- & -- & --\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & \textit{failed} & -- & -- & --\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 1166.129 & 0.588 & 0.107 & 0.037\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & \textit{not\_run} & -- & -- & --\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 2140.430 & 0.626 & 0.140 & 0.029\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & \textit{not\_run} & -- & -- & --\\
+\addlinespace[2pt]
+MetRef & Rtsne::Rtsne & CPU & cpu4 & 0.878 & 0.878 & 0.413 & 0.699\\
+ & FIt-SNE & CPU & cpu4 & 5.548 & 0.869 & 0.404 & 0.726\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 1.761 & 0.884 & 0.443 & 0.708\\
+ & fastEmbedR::opentsne & CUDA & cuda & 0.701 & 0.886 & 0.451 & 0.723\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 1.578 & 0.865 & 0.423 & 0.725\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 0.669 & 0.862 & 0.414 & 0.703\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.580 & 0.871 & 0.424 & 0.717\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 0.955 & 0.802 & 0.347 & 0.551\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 0.578 & 0.816 & 0.364 & 0.550\\
+\addlinespace[2pt]
+mass41 & Rtsne::Rtsne & CPU & cpu4 & 2307.297 & 0.868 & 0.299 & 0.762\\
+ & FIt-SNE & CPU & cpu4 & 403.201 & 0.970 & 0.398 & 0.889\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 339.476 & 0.973 & 0.409 & 0.879\\
+ & fastEmbedR::opentsne & CUDA & cuda & 5.773 & 0.975 & 0.416 & 0.887\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 407.708 & 0.971 & 0.411 & 0.896\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 411.150 & 0.971 & 0.410 & 0.907\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 2.151 & 0.970 & 0.409 & 0.900\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 844.689 & 0.971 & 0.414 & 0.906\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 3.009 & 0.971 & 0.411 & 0.909\\
+\addlinespace[2pt]
+Tabula Muris & Rtsne::Rtsne & CPU & cpu4 & 105.214 & 0.933 & 0.563 & 0.814\\
+ & FIt-SNE & CPU & cpu4 & 59.028 & 0.977 & 0.609 & 0.839\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 48.910 & 0.977 & 0.618 & 0.840\\
+ & fastEmbedR::opentsne & CUDA & cuda & 3.088 & 0.983 & 0.632 & 0.841\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 59.054 & 0.982 & 0.640 & 0.827\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 33.012 & 0.970 & 0.612 & 0.819\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.891 & 0.964 & 0.603 & 0.814\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 105.016 & 0.986 & 0.648 & 0.814\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 0.981 & 0.984 & 0.650 & 0.826\\
+\addlinespace[2pt]
+Retina & Rtsne::Rtsne & CPU & cpu4 & 52.268 & 0.920 & 0.413 & 0.968\\
+ & FIt-SNE & CPU & cpu4 & 36.717 & 0.924 & 0.411 & 0.968\\
+ & fastEmbedR::opentsne & CPU & cpu4 & 19.013 & 0.925 & 0.419 & 0.968\\
+ & fastEmbedR::opentsne & CUDA & cuda & 0.916 & 0.925 & 0.424 & 0.966\\
+ & uwot::umap (fast\_sgd = TRUE) & CPU & cpu4 & 20.831 & 0.919 & 0.407 & 0.964\\
+ & fastEmbedR::umap (fuzzy) & CPU & cpu4 & 17.928 & 0.919 & 0.407 & 0.964\\
+ & fastEmbedR::umap (fuzzy) & CUDA & cuda & 0.656 & 0.912 & 0.399 & 0.965\\
+ & fastEmbedR::umap (binary) & CPU & cpu4 & 65.488 & 0.920 & 0.415 & 0.971\\
+ & fastEmbedR::umap (binary) & CUDA & cuda & 0.698 & 0.919 & 0.415 & 0.964\\
+\bottomrule
+\end{longtable}
+}
