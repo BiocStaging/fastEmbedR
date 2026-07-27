@@ -9,6 +9,8 @@ supplementary document.
   benchmark figures and references.
 - `fastEmbedR_MLOSS_supplement.tex`: implementation, API, validation,
   landmarking, data, and reproducibility details.
+- `deliverables/`: submission-ready manuscript and supplement files, rendered
+  HTML and PDF vignettes, and the generated package reference manual.
 - `fastEmbedR_MLOSS.bib`: shared bibliography.
 - `jmlr2e.sty`: unmodified official JMLR style file from commit
   `f413f638b407af76074813f8f88a82a7a5a81e9d` of
