@@ -16,23 +16,27 @@
 \renewcommand{\thetable}{S\arabic{table}}
 \renewcommand{\thefigure}{S\arabic{figure}}
 
-\jmlrheading{XX}{2026}{1--\pageref{LastPage}}{MM/YY}{MM/YY}{XX-0000}{Moussa Kassim, Martin Ocharo, Alessia Vignoli, Leonardo Tenori, and Stefano Cacciatore}
-\ShortHeadings{fastEmbedR Supplementary Material}{Kassim, Ocharo, Vignoli, Tenori, and Cacciatore}
+\jmlrheading{XX}{2026}{1--\pageref{LastPage}}{MM/YY}{MM/YY}{XX-0000}{Moussa Kassim, Martin Ocharo, Dalia Ahmed, Dupe Ojo, Alessia Vignoli, Leonardo Tenori, and Stefano Cacciatore}
+\ShortHeadings{fastEmbedR Supplementary Material}{Kassim et al.}
 \firstpageno{1}
 
 \begin{document}
 
 \title{fastEmbedR: Supplementary Material}
 
-\author{\name Moussa Kassim$^{1,2}$ \email Moussa.Kassim@icgeb.org\\
-\name Martin Ocharo$^{1,2}$ \email Martin.Ocharo@icgeb.org\\
-\name Alessia Vignoli$^{3,4}$ \email vignoli@cerm.unifi.it\\
-\name Leonardo Tenori$^{3,4}$ \email tenori@cerm.unifi.it\\
-\name Stefano Cacciatore$^{1,2}$ \email stefano.cacciatore@icgeb.org\\
-\addr $^1$Bioinformatics Unit, International Center for Genetic Engineering and Biotechnology, Cape Town 7925, South Africa\\
+\author{{\small\bf Moussa Kassim$^{1,2,\ast}$}\hfill{\footnotesize\sc moussa.kassim@icgeb.org}\\[-1pt]
+{\small\bf Martin Ocharo$^{1,2,\ast}$}\hfill{\footnotesize\sc martin.ocharo@icgeb.org}\\[-1pt]
+{\small\bf Dalia Ahmed$^{1}$}\hfill{\footnotesize\sc dalia.ahmed@icgeb.org}\\[-1pt]
+{\small\bf Dupe Ojo$^{1}$}\hfill{\footnotesize\sc dupe.ojo@icgeb.org}\\[-1pt]
+{\small\bf Alessia Vignoli$^{3,4}$}\hfill{\footnotesize\sc vignoli@cerm.unifi.it}\\[-1pt]
+{\small\bf Leonardo Tenori$^{3,4,\dagger}$}\hfill{\footnotesize\sc tenori@cerm.unifi.it}\\[-1pt]
+{\small\bf Stefano Cacciatore$^{1,2,\dagger}$}\hfill{\footnotesize\sc stefano.cacciatore@icgeb.org}\\[-1pt]
+{\footnotesize\it $^1$Bioinformatics Unit, International Centre for Genetic Engineering and Biotechnology (ICGEB), Cape Town 7925, South Africa\\
 $^2$Department of Integrative Biomedical Sciences, Institute of Infectious Disease \& Molecular Medicine (IDM), University of Cape Town, Cape Town 7925, South Africa\\
 $^3$Department of Chemistry ``Ugo Schiff'', University of Florence, Sesto Fiorentino, Italy\\
-$^4$Magnetic Resonance Center (CERM), University of Florence, Sesto Fiorentino, Italy}
+$^4$Magnetic Resonance Center (CERM), University of Florence, Sesto Fiorentino, Italy\\
+$^\ast$These authors contributed equally.\\
+$^\dagger$Co-corresponding authors: Leonardo Tenori and Stefano Cacciatore.}}
 
 \editor{To be assigned}
 \maketitle
@@ -123,7 +127,7 @@ No alternative SVD selector is exposed. The returned object includes scores, loa
 
 \section{UMAP Mathematics and Engineering}
 
-For point $i$, let $d_{ij}$ denote the distance to nearest neighbor $j$. The fuzzy path estimates $\rho_i$ from the local-connectivity rule and obtains $\sigma_i$ by binary search so that the effective nearest-neighbor mass matches the requested neighborhood scale. Directed memberships are
+For point $i$, let $d_{ij}$ denote the distance to nearest-neighbor point $j$. The fuzzy path estimates $\rho_i$ from the local-connectivity rule and obtains $\sigma_i$ by binary search so that the effective nearest-neighbor mass matches the requested neighborhood scale. Directed memberships are
 \[
  w_{j\mid i}=\exp\left\{-\frac{\max(0,d_{ij}-\rho_i)}{\sigma_i}\right\}.
 \]
@@ -215,7 +219,7 @@ For each row, \pkg{} searches the Gaussian precision $\beta_i$ so that the entro
 \]
 matches the requested perplexity. The sparse joint affinity is the symmetrized and globally normalized matrix $P$. In the embedding, $q_{ij}\propto(1+\|y_i-y_j\|^2)^{-1}$ and the optimization minimizes $\mathrm{KL}(P\Vert Q)$ \citep{vandermaaten2008}.
 
-The public \pkg{} policy uses \(\lceil P\rceil\) non-self neighbors for
+The public \pkg{} policy uses \(\lceil P\rceil\) non-self nearest-neighbor entries for
 perplexity \(P\). This deliberately compact support differs from Python
 openTSNE's usual larger candidate-neighborhood default and is part of the
 \pkg{} implementation, not an assertion of default compatibility. It is
@@ -236,7 +240,7 @@ Peak RSS does not fall by exactly 50\% because precision reduction affects only 
 
 \texttt{landmark\_tsne()} and \texttt{landmark\_umap()} implement an explicit approximation rather than silently reducing the data. A subset is selected by a deterministic projection/diversity policy or supplied by the user. The subset is embedded by the same reference function and settings as a full run. Remaining observations query the fixed landmarks, receive inverse-distance/interpolation coordinates, and may receive a regularized local affine correction estimated from high-dimensional and embedded landmark neighborhoods.
 
-For t-SNE, query-to-reference probabilities are computed once and each query is optimized while the reference embedding is fixed, following \citet{policar2021}. For UMAP, non-landmark rows are initialized from nearest landmark neighbors and optionally refined with short row-restricted UMAP updates while resetting landmark coordinates to their fixed values. CPU projection is parallel by query point. Metal and CUDA provide resident interpolation/refinement paths where supported. Returned objects record landmark indices, fraction, projection K, backend, reference timing, projection timing, and refinement timing so the approximation remains visible.
+For t-SNE, query-to-reference probabilities are computed once and each query is optimized while the reference embedding is fixed, following \citet{policar2021}. For UMAP, non-landmark rows are initialized from nearest-neighbor landmarks and optionally refined with short row-restricted UMAP updates while resetting landmark coordinates to their fixed values. CPU projection is parallel by query point. Metal and CUDA provide resident interpolation/refinement paths where supported. Returned objects record landmark indices, fraction, projection K, backend, reference timing, projection timing, and refinement timing so the approximation remains visible.
 
 \begin{table}[t]
 \caption{Landmark workflow and production defaults. The publication benchmark overrode landmark selection with the same explicit 20\% reference fraction for both methods; all other entries used the defaults below. Landmarking is a scalability approximation and is not asserted to accelerate every backend or dataset.}
@@ -256,11 +260,11 @@ Seeded projection/diversity sampling; supplied indices override it. &
 \texttt{landmarks=0.5}; count $\lceil0.5n\rceil$.\\
 Interpolation &
 Backend-native query-to-reference KNN; fixed reference coordinates. &
-Transform perplexity 5 and 25 neighbors unless overridden; affinities computed once. &
+Transform perplexity 5 and 25 nearest-neighbor entries unless overridden; affinities computed once. &
 Projection $k$ equals UMAP $k$ (30 in the benchmark); inverse-distance placement.\\
 Affine correction &
 Regularized local affine map with weighted-KNN fallback. &
-\multicolumn{2}{>{\raggedright\arraybackslash}p{0.44\textwidth}}{Up to 12 reference neighbors, ridge $10^{-3}$, and maximum extrapolation factor 2.5 on CPU, Metal, and fused CUDA paths.}\\
+\multicolumn{2}{>{\raggedright\arraybackslash}p{0.44\textwidth}}{Up to 12 reference nearest-neighbor entries, ridge $10^{-3}$, and maximum extrapolation factor 2.5 on CPU, Metal, and fused CUDA paths.}\\
 Refinement &
 Query coordinates update; reference coordinates remain fixed. &
 250 transform iterations; zero early-exaggeration iterations. &
@@ -367,17 +371,21 @@ KlugerLab FIt-SNE & 4 CPU threads & 4, 17, 42 & Internal and included in total t
 The additional implementations shown in Figures 1 and 2 used the recorded
 configurations in Table~\ref{tab:additional-parameters}. Reticulate and direct
 Python variants used the same model parameters. Their timing boundaries are
-kept distinct: the reticulate rows include the R/Python call boundary and data
-transfer, whereas direct rows report Python-side fitting time and retain
-process startup and input loading in a separate field.
+kept distinct: \texttt{r\_mediated\_total\_call\_sec} includes the R/Python
+call boundary, conversion, device transfer where applicable, model fitting,
+and return conversion; \texttt{direct\_python\_fit\_sec} measures only the
+Python model call. The direct subprocess wall time, including startup, NPZ
+input loading, fitting, and output writing, is retained separately as
+\texttt{direct\_python\_process\_total\_sec}.
 
 \begingroup
 \scriptsize
 \setlength{\tabcolsep}{2.2pt}
 \begin{longtable}{p{0.19\textwidth}p{0.13\textwidth}p{0.24\textwidth}p{0.20\textwidth}p{0.14\textwidth}}
-\caption{Parameters for the additional full-pipeline methods plotted in the
-runtime figures. All searches were internal and included in the corresponding
-full-pipeline timing boundary.}\label{tab:additional-parameters}\\
+\caption{Parameters for the additional methods plotted in the runtime figures.
+All searches were internal and included in the model call. R-mediated rows
+report total R-call time; direct-Python rows report fit time only, with
+subprocess wall time archived separately.}\label{tab:additional-parameters}\\
 \toprule
 Method & Neighborhood & Optimizer schedule & Initialization/search & Execution\\
 \midrule
@@ -386,12 +394,12 @@ Method & Neighborhood & Optimizer schedule & Initialization/search & Execution\\
 Method & Neighborhood & Optimizer schedule & Initialization/search & Execution\\
 \midrule
 \endhead
-Python openTSNE FFT & perplexity 30 & 250 early-exaggeration + 500 normal iterations; package-default exaggeration and automatic learning rate & PCA; internal affinity/search; Euclidean & 4 CPU threads; reticulate and direct Python\\
-RAPIDS cuML t-SNE & perplexity 30; at least 91 neighbors where supported & cuML defaults & cuML default initialization and internal GPU affinities; Euclidean & 1 CUDA device; reticulate and direct Python\\
+Python openTSNE FFT & perplexity 30 & 250 early-exaggeration + 500 normal iterations; package-default exaggeration and automatic learning rate & PCA; internal affinity/search; Euclidean & 4 CPU threads; R-mediated total call and direct-Python fit reported separately\\
+RAPIDS cuML t-SNE & perplexity 30; at least 91 nearest-neighbor entries where supported & cuML defaults & cuML default initialization and internal GPU affinities; Euclidean & 1 CUDA device; R-mediated total call and direct-Python fit reported separately\\
 \texttt{umap::umap} & $k=30$ & Package defaults except neighborhood size & Spectral; internal search; Euclidean & 4 CPU threads through R\\
 \texttt{uwot} default & $k=30$ & Package defaults; \texttt{fast\_sgd=FALSE} & Spectral; automatic internal search; Euclidean & 4 KNN + 4 SGD threads through R\\
-Python umap-learn & $k=30$ & Package defaults & Package-default initialization and internal approximate search; Euclidean & 4 CPU threads; reticulate and direct Python\\
-RAPIDS cuML UMAP & $k=30$ & cuML defaults & cuML default initialization and internal GPU graph construction; Euclidean & 1 CUDA device; reticulate and direct Python\\
+Python umap-learn & $k=30$ & Package defaults & Package-default initialization and internal approximate search; Euclidean & 4 CPU threads; R-mediated total call and direct-Python fit reported separately\\
+RAPIDS cuML UMAP & $k=30$ & cuML defaults & cuML default initialization and internal GPU graph construction; Euclidean & 1 CUDA device; R-mediated total call and direct-Python fit reported separately\\
 \bottomrule
 \end{longtable}
 \endgroup
@@ -404,7 +412,7 @@ The benchmark reset both the method seed and R's random-number generator before 
 diagnostic, optimizer-boundary experiments reused KNN matrices: \pkg{}
 \texttt{opentsne\_knn()} used $k=30$ at perplexity 30;
 \texttt{Rtsne\_neighbors()} used $k=91$ because its sparse affinity builder
-requires approximately $3P+1$ nearest neighbors for perplexity $P$; and \pkg{}
+requires approximately $3P+1$ nearest-neighbor entries for perplexity $P$; and \pkg{}
 \texttt{umap\_knn()} and the \texttt{uwot} KNN-input run used $k=30$.
 Those diagnostic timings excluded KNN construction and were not substituted
 for the full-function runtime comparisons in the main paper.
@@ -473,7 +481,7 @@ changes the scientific emphasis rather than providing a monotonic speed or
 quality improvement. The manuscript treats fuzzy mode as the standard UMAP
 comparison and reports binary mode as a separate, labeled approximation.
 
-The Python benchmark branch evaluated Python openTSNE, umap-learn, and RAPIDS cuML t-SNE/UMAP both through \texttt{reticulate} and, where available, as a direct Python subprocess. Timing modes remain separate: native Python fit time is not presented as equivalent to an R end-to-end call that includes process startup, input loading, conversion, and transfer. Main-text Figures 1 and 2 include every successful full-pipeline t-SNE and UMAP implementation, respectively, combining CPU and CUDA in one panel while retaining backend labels and distinct direct-Python and R-mediated entries. The complete three-seed Python summary is archived as \path{generated/python_summary_median.csv}; the exact rows plotted are archived as \path{generated/runtime_tsne_all_methods.csv} and \path{generated/runtime_umap_all_methods.csv}.
+The Python benchmark branch evaluated Python openTSNE, umap-learn, and RAPIDS cuML t-SNE/UMAP both through \texttt{reticulate} and, where available, as a direct Python subprocess. Timing modes remain separate: native Python fit time is not presented as equivalent to an R-mediated total call. Main-text Figures 1 and 2 include every successful t-SNE and UMAP implementation, respectively, combining CPU and CUDA in one panel while retaining backend labels and distinct direct-Python and R-mediated entries. The machine-readable files identify each row with \path{timing_scope} and \path{runtime_measure}. Values remain in separate \path{r_mediated_total_call_sec}, \path{direct_python_fit_sec}, and \path{direct_python_process_total_sec} columns. The complete three-seed Python summary is archived as \path{generated/python_summary_median.csv}. The exact plotted rows are archived separately in \path{generated/runtime_tsne_all_methods.csv} and \path{generated/runtime_umap_all_methods.csv}.
 
 \section{Reference-Implementation and Backend Validation}
 
@@ -568,7 +576,7 @@ force differences can select different low-dimensional arrangements without
 implying a worse objective. We therefore report KL, Procrustes alignment, and
 neighborhood agreement together. Separately, within-backend reproducibility
 across three full-MNIST runs gave openTSNE Procrustes correlations above
-0.9993 and neighbor stability@15 of 0.929--0.953; those values measure
+0.9993 and nearest-neighbor stability@15 of 0.929--0.953; those values measure
 cross-seed stability within a backend and are not presented as cross-backend
 agreement.
 
@@ -611,7 +619,9 @@ Louvain, Leiden, and Pons--Latapy Walktrap implementations
 upstream nearest-neighbor and graph construction. Behavioral validation against
 \texttt{igraph} on identical weighted graphs is archived in
 \path{generated/local_clustering_oracle_summary.csv}. These utilities are
-presented as conveniences rather than new clustering objectives.
+presented only as supplementary conveniences rather than new clustering
+objectives or principal software contributions. They are not used to support
+the runtime or embedding-quality claims in the main paper.
 
 \clearpage
 \input{generated/selected_embedding_figures.tex}

@@ -36,8 +36,8 @@ landmark count, or explicit row indices.}
 \item{reference_method}{Kept for compatibility. Only `"opentsne"` is
 accepted in the cleaned package API.}
 
-\item{n_neighbors}{Number of non-self neighbours used to embed the landmark
-reference set. If `NULL`, it follows the same neighbour policy as
+\item{n_neighbors}{Number of non-self neighbors used to embed the landmark
+reference set. If `NULL`, it follows the same neighbor policy as
 [opentsne()]: `ceiling(perplexity)` when perplexity is supplied.}
 
 \item{perplexity}{t-SNE perplexity for the landmark reference embedding. If

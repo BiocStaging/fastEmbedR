@@ -21,7 +21,7 @@ umap_init(
 \item{distances}{Optional KNN distance matrix when \code{x} is an index
 matrix.}
 
-\item{n_neighbors}{Number of non-self neighbours when KNN must be computed.}
+\item{n_neighbors}{Number of non-self neighbors when KNN must be computed.}
 
 \item{n_components}{Output dimensionality.}
 
@@ -42,7 +42,7 @@ prepared KNN/CSR graph, resolved parameters, and component timings. The object
 can be passed directly to \code{umap_knn()}.
 }
 \description{
-Separates UMAP neighbour search, graph construction, and initialization from
+Separates UMAP neighbor search, graph construction, and initialization from
 stochastic optimization. This permits repeated CPU, Metal, or CUDA optimizer
 runs from the same graph and coordinates without recomputing either stage.
 }

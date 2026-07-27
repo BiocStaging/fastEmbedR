@@ -10,32 +10,36 @@
 \newcommand{\pkg}{\texttt{fastEmbedR}}
 \newcommand{\R}{\textsf{R}}
 
-\jmlrheading{XX}{2026}{1--\pageref{LastPage}}{MM/YY}{MM/YY}{XX-0000}{Moussa Kassim, Martin Ocharo, Alessia Vignoli, Leonardo Tenori, and Stefano Cacciatore}
-\ShortHeadings{Native UMAP and openTSNE-Style t-SNE for R}{Kassim, Ocharo, Vignoli, Tenori, and Cacciatore}
+\jmlrheading{XX}{2026}{1--\pageref{LastPage}}{MM/YY}{MM/YY}{XX-0000}{Moussa Kassim, Martin Ocharo, Dalia Ahmed, Dupe Ojo, Alessia Vignoli, Leonardo Tenori, and Stefano Cacciatore}
+\ShortHeadings{Native UMAP and openTSNE-Style t-SNE for R}{Kassim et al.}
 \firstpageno{1}
 
 \begin{document}
 
 \title{fastEmbedR: Native CPU, Metal, and CUDA Implementations of UMAP and openTSNE-Style t-SNE for R}
 
-\author{\name Moussa Kassim$^{1,2}$ \email Moussa.Kassim@icgeb.org\\
-\name Martin Ocharo$^{1,2}$ \email Martin.Ocharo@icgeb.org\\
-\name Alessia Vignoli$^{3,4}$ \email vignoli@cerm.unifi.it\\
-\name Leonardo Tenori$^{3,4}$ \email tenori@cerm.unifi.it\\
-\name Stefano Cacciatore$^{1,2}$ \email stefano.cacciatore@icgeb.org\\
-\addr $^1$Bioinformatics Unit, International Center for Genetic Engineering and Biotechnology,\\
+\author{{\small\bf Moussa Kassim$^{1,2,\ast}$}\hfill{\footnotesize\sc moussa.kassim@icgeb.org}\\[-1pt]
+{\small\bf Martin Ocharo$^{1,2,\ast}$}\hfill{\footnotesize\sc martin.ocharo@icgeb.org}\\[-1pt]
+{\small\bf Dalia Ahmed$^{1}$}\hfill{\footnotesize\sc dalia.ahmed@icgeb.org}\\[-1pt]
+{\small\bf Dupe Ojo$^{1}$}\hfill{\footnotesize\sc dupe.ojo@icgeb.org}\\[-1pt]
+{\small\bf Alessia Vignoli$^{3,4}$}\hfill{\footnotesize\sc vignoli@cerm.unifi.it}\\[-1pt]
+{\small\bf Leonardo Tenori$^{3,4,\dagger}$}\hfill{\footnotesize\sc tenori@cerm.unifi.it}\\[-1pt]
+{\small\bf Stefano Cacciatore$^{1,2,\dagger}$}\hfill{\footnotesize\sc stefano.cacciatore@icgeb.org}\\[-1pt]
+{\footnotesize\it $^1$Bioinformatics Unit, International Centre for Genetic Engineering and Biotechnology (ICGEB),\\
 Cape Town 7925, South Africa\\
 $^2$Department of Integrative Biomedical Sciences, Institute of Infectious Disease \& Molecular Medicine (IDM),\\
 University of Cape Town, Cape Town 7925, South Africa\\
 $^3$Department of Chemistry ``Ugo Schiff'', University of Florence, Sesto Fiorentino, Italy\\
-$^4$Magnetic Resonance Center (CERM), University of Florence, Sesto Fiorentino, Italy}
+$^4$Magnetic Resonance Center (CERM), University of Florence, Sesto Fiorentino, Italy\\
+$^\ast$These authors contributed equally.\\
+$^\dagger$Co-corresponding authors: Leonardo Tenori and Stefano Cacciatore.}}
 
 \editor{To be assigned}
 
 \maketitle
 
 \begin{abstract}%
-The most widely used accelerated implementations of t-distributed stochastic neighbor embedding (t-SNE) and Uniform Manifold Approximation and Projection (UMAP) are fragmented across R, Python, C++, and accelerator-specific libraries. We present \pkg, an R package that implements complete UMAP and openTSNE-style t-SNE workflows with native CPU, Apple Metal, and NVIDIA CUDA execution. Here, ``openTSNE-style'' denotes algorithmic lineage, not compatibility with Python openTSNE. The package accepts either a data matrix or reusable nearest-neighbor indices and distances, constructs UMAP graphs or t-SNE affinities internally, and executes optimization without calling Python. Its numerical core uses compact float32 and int32 storage, while GPU paths retain major working arrays on device. Backend-selectable randomized PCA supplies t-SNE initialization without implying a universal speed advantage, and explicit landmark functions support reference embedding and projection of new observations. In three-seed HPC benchmarks across 11 image, cytometry, metabolomics, and single-cell datasets, nine datasets supported matched full-pipeline comparisons. Median speedups (dataset-level interquartile ranges [IQRs]) were 1.81 (0.97--2.75) and 54.2 (15.9--64.9) for CPU/CUDA openTSNE versus Rtsne, and 1.31 (1.28--1.79) and 63.5 (31.8--66.3) for fuzzy UMAP versus uwot fast SGD. Median trustworthiness differences were $+0.039$, $+0.041$, $-0.0012$, and $-0.0012$, respectively. \pkg{} therefore makes accelerated embeddings directly available to R users through one coherent, inspectable API without concealing runtime or quality trade-offs.
+The most widely used accelerated implementations of t-distributed stochastic neighbor embedding (t-SNE) and Uniform Manifold Approximation and Projection (UMAP) are fragmented across R, Python, C++, and accelerator-specific libraries. We present \pkg, an R package that implements complete UMAP and openTSNE-style t-SNE workflows with native CPU, Apple Metal, and NVIDIA CUDA execution. Here, ``openTSNE-style'' denotes algorithmic lineage, not compatibility with Python openTSNE. The package accepts either a data matrix or reusable nearest-neighbor indices and distances, constructs UMAP graphs or t-SNE affinities internally, and executes optimization without calling Python. Its numerical core uses compact float32 and int32 storage, while GPU paths retain major working arrays on device. Backend-selectable randomized PCA supplies an integrated t-SNE initialization; its speed is benchmark-dependent rather than uniformly better than \texttt{irlba}. Explicit landmark functions support reference embedding and projection of new observations. In three-seed HPC benchmarks across 11 image, cytometry, metabolomics, and single-cell datasets, nine datasets supported matched full-pipeline comparisons. Median speedups (dataset-level interquartile ranges [IQRs]) were 1.81 (0.97--2.75) and 54.2 (15.9--64.9) for CPU/CUDA openTSNE versus Rtsne, and 1.31 (1.28--1.79) and 63.5 (31.8--66.3) for fuzzy UMAP versus uwot fast SGD. Median trustworthiness differences were $+0.039$, $+0.041$, $-0.0012$, and $-0.0012$, respectively. \pkg{} therefore makes accelerated embeddings directly available to R users through one coherent, inspectable API without concealing runtime or quality trade-offs.
 \end{abstract}
 
 \begin{keywords}
@@ -82,7 +86,7 @@ Correctness was evaluated at matched mathematical boundaries. On a fixed 2,000-p
 
 \section{Discussion and Availability}
 
-\pkg{} exposes t-SNE and UMAP on multicore CPU, Metal, and CUDA with matrix/KNN input, float32 storage, PCA initialization, and transforms. Platform libraries provide primitives; graph/affinity construction and optimization are package code. Native PCA enables backend integration and device residency but is not uniformly faster (supplement).
+\pkg{} exposes t-SNE and UMAP on multicore CPU, Metal, and CUDA with matrix/KNN input, float32 storage, PCA initialization, and transforms. Platform libraries provide primitives; graph/affinity construction and optimization are package code. Native PCA enables backend integration and device residency, not guaranteed acceleration: \texttt{irlba} was faster in the reported MNIST CPU experiment (supplement).
 
 Fixed seeds reproduce sampling and random streams, but asynchronous atomic order precludes bitwise GPU reproducibility. Landmark functions interpolate and affinely correct an explicit reference subset, optionally refine against fixed coordinates, and report component timings.
 
@@ -95,7 +99,7 @@ Landmarking accelerated median CPU but not CUDA runs (supplement). \pkg{} is MIT
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth]{figures/runtime_tsne_all_methods.pdf}
-\caption{Total full-pipeline runtime for the available t-SNE implementations. The single panel includes CPU and CUDA results, identified explicitly in the legend, for Rtsne, FIt-SNE, \pkg{} openTSNE, Python openTSNE, and RAPIDS cuML t-SNE. Gray denotes established R references, blue denotes \pkg{}, purple denotes Python openTSNE, and orange denotes RAPIDS; shades distinguish backend or timing interface. The continuous pseudo-log runtime axis retains a true zero baseline. Bars are medians over seeds 4, 17, and 42; error bars span the interquartile range. Direct-Python and R-mediated calls remain separate because their timing boundaries differ. Missing or failed rows remain in the supplementary result files. Unmatched FlowRepository and ImageNet rows are descriptive only and excluded from comparative summaries.}
+\caption{Runtime for the available t-SNE implementations. The single panel includes CPU and CUDA results, identified explicitly in the legend, for Rtsne, FIt-SNE, \pkg{} openTSNE, Python openTSNE, and RAPIDS cuML t-SNE. Gray denotes established R references, blue denotes \pkg{}, purple denotes Python openTSNE, and orange denotes RAPIDS; shades distinguish backend or timing interface. The continuous pseudo-log runtime axis retains a true zero baseline. Bars are medians over seeds 4, 17, and 42; error bars span the interquartile range. R-mediated Python rows report total elapsed R-call time, including conversion and transfer, whereas direct-Python rows report Python \texttt{fit} time only; the two timing boundaries remain separate in the figure and archived tables. Missing or failed rows remain in the supplementary result files. Unmatched FlowRepository and ImageNet rows are descriptive only and excluded from comparative summaries.}
 \label{fig:tsneruntime}
 \end{figure}
 
@@ -104,7 +108,7 @@ Landmarking accelerated median CPU but not CUDA runs (supplement). \pkg{} is MIT
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth]{figures/runtime_umap_all_methods.pdf}
-\caption{Total full-pipeline runtime for the available UMAP implementations. The single panel combines CPU and CUDA results, identified in the legend, for the R \texttt{umap} package, uwot default and fast-SGD modes, \pkg{} fuzzy and binary modes, Python umap-learn, and RAPIDS cuML UMAP. Colors and timing conventions follow Figure~\ref{fig:tsneruntime}; the pseudo-log runtime axis likewise retains a true zero baseline. Binary \pkg{} results are an explicitly labeled adjacency-only approximation; fuzzy mode is the standard comparison. Unmatched FlowRepository and ImageNet rows are descriptive only.}
+\caption{Runtime for the available UMAP implementations. The single panel combines CPU and CUDA results, identified in the legend, for the R \texttt{umap} package, uwot default and fast-SGD modes, \pkg{} fuzzy and binary modes, Python umap-learn, and RAPIDS cuML UMAP. Colors follow Figure~\ref{fig:tsneruntime}; R-mediated Python rows again report total elapsed R-call time, and direct-Python rows report Python \texttt{fit} time only. These timing scopes are labeled separately and are not pooled. The pseudo-log runtime axis likewise retains a true zero baseline. Binary \pkg{} results are an explicitly labeled adjacency-only approximation; fuzzy mode is the standard comparison. Unmatched FlowRepository and ImageNet rows are descriptive only.}
 \label{fig:umapruntime}
 \end{figure}
 

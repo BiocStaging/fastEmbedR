@@ -6,7 +6,7 @@
 \alias{fastEmbedR-package}
 \title{fastEmbedR: native embeddings and graph clustering from KNN}
 \description{
-fastEmbedR combines native CPU/Metal nearest-neighbour search with native
+fastEmbedR combines native CPU/Metal nearest-neighbor search with native
 UMAP/openTSNE-style embeddings and native graph clustering from data or
 precomputed KNN matrices. Use
 [umap()] or [opentsne()] for one-call workflows, [precompute_knn()] to run

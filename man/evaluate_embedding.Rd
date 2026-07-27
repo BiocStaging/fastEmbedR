@@ -47,14 +47,14 @@ list. It may include a self-neighbor column.}
 for all-pairs global distance metrics.}
 
 \item{sample_size_for_local_metrics}{Maximum deterministic subsample size for
-local trustworthiness, continuity, and neighbour preservation metrics.}
+local trustworthiness, continuity, and neighbor preservation metrics.}
 
-\item{use_cache}{Cache the high-dimensional reference neighbours used by
+\item{use_cache}{Cache the high-dimensional reference neighbors used by
 quality metrics.}
 
-\item{cache_dir}{Directory for quality-metric reference-neighbour cache files.}
+\item{cache_dir}{Directory for quality-metric reference-neighbor cache files.}
 
-\item{force_recompute}{Ignore cached quality reference neighbours.}
+\item{force_recompute}{Ignore cached quality reference neighbors.}
 
 \item{seed}{Random seed recorded in the output and used for subsampling.}
 

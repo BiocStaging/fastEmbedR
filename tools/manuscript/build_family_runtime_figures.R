@@ -88,6 +88,8 @@ standard_spec <- data.frame(
     "cpu", "cpu", "cpu", "cpu", "cuda", "cpu", "cuda"
   ),
   timing_interface = "R public function",
+  timing_scope = "r_public_function_total_call",
+  runtime_measure = "r_public_function_total_call_sec",
   stringsAsFactors = FALSE
 )
 
@@ -119,6 +121,8 @@ standard_plot <- data.frame(
   backend = standard_rows$backend.spec,
   profile = standard_rows$profile.spec,
   timing_interface = standard_rows$timing_interface,
+  timing_scope = standard_rows$timing_scope,
+  runtime_measure = standard_rows$runtime_measure,
   n_runs = suppressWarnings(as.integer(standard_rows$n_runs)),
   runtime = suppressWarnings(as.numeric(
     standard_rows$total_runtime_sec_median
@@ -129,6 +133,12 @@ standard_plot <- data.frame(
   runtime_q3 = suppressWarnings(as.numeric(
     standard_rows$total_runtime_sec_q3
   )),
+  r_public_function_total_call_sec = suppressWarnings(as.numeric(
+    standard_rows$total_runtime_sec_median
+  )),
+  r_mediated_total_call_sec = NA_real_,
+  direct_python_fit_sec = NA_real_,
+  direct_python_process_total_sec = NA_real_,
   stringsAsFactors = FALSE
 )
 
@@ -144,14 +154,14 @@ python_spec <- data.frame(
     "rapids_cuml_umap_full_direct"
   ),
   method_label = c(
-    "Python openTSNE via R",
-    "Python openTSNE direct",
-    "RAPIDS cuML t-SNE via R",
-    "RAPIDS cuML t-SNE direct",
-    "Python umap-learn via R",
-    "Python umap-learn direct",
-    "RAPIDS cuML UMAP via R",
-    "RAPIDS cuML UMAP direct"
+    "Python openTSNE via R (total call)",
+    "Python openTSNE direct (fit only)",
+    "RAPIDS cuML t-SNE via R (total call)",
+    "RAPIDS cuML t-SNE direct (fit only)",
+    "Python umap-learn via R (total call)",
+    "Python umap-learn direct (fit only)",
+    "RAPIDS cuML UMAP via R (total call)",
+    "RAPIDS cuML UMAP direct (fit only)"
   ),
   family = c(rep("t-SNE", 4L), rep("UMAP", 4L)),
   profile = c("cpu4", "cpu4", "cuda", "cuda",
@@ -163,6 +173,18 @@ python_spec <- data.frame(
     "R/reticulate", "direct Python",
     "R/reticulate", "direct Python",
     "R/reticulate", "direct Python"
+  ),
+  timing_scope = c(
+    "r_mediated_total_call", "direct_python_fit",
+    "r_mediated_total_call", "direct_python_fit",
+    "r_mediated_total_call", "direct_python_fit",
+    "r_mediated_total_call", "direct_python_fit"
+  ),
+  runtime_measure = c(
+    "r_mediated_total_call_sec", "direct_python_fit_sec",
+    "r_mediated_total_call_sec", "direct_python_fit_sec",
+    "r_mediated_total_call_sec", "direct_python_fit_sec",
+    "r_mediated_total_call_sec", "direct_python_fit_sec"
   ),
   stringsAsFactors = FALSE
 )
@@ -179,6 +201,21 @@ python_rows <- merge(
   all.y = FALSE,
   suffixes = c(".spec", "")
 )
+python_runtime <- ifelse(
+  python_rows$timing_scope == "direct_python_fit",
+  suppressWarnings(as.numeric(python_rows$direct_python_fit_sec_median)),
+  suppressWarnings(as.numeric(python_rows$r_mediated_total_call_sec_median))
+)
+python_runtime_q1 <- ifelse(
+  python_rows$timing_scope == "direct_python_fit",
+  suppressWarnings(as.numeric(python_rows$direct_python_fit_sec_q1)),
+  suppressWarnings(as.numeric(python_rows$r_mediated_total_call_sec_q1))
+)
+python_runtime_q3 <- ifelse(
+  python_rows$timing_scope == "direct_python_fit",
+  suppressWarnings(as.numeric(python_rows$direct_python_fit_sec_q3)),
+  suppressWarnings(as.numeric(python_rows$r_mediated_total_call_sec_q3))
+)
 python_plot <- data.frame(
   dataset = python_rows$dataset,
   method = python_rows$method.spec,
@@ -187,10 +224,22 @@ python_plot <- data.frame(
   backend = python_rows$backend.spec,
   profile = python_rows$profile.spec,
   timing_interface = python_rows$timing_interface,
+  timing_scope = python_rows$timing_scope.spec,
+  runtime_measure = python_rows$runtime_measure.spec,
   n_runs = suppressWarnings(as.integer(python_rows$n_runs)),
-  runtime = suppressWarnings(as.numeric(python_rows$runtime_sec_median)),
-  runtime_q1 = suppressWarnings(as.numeric(python_rows$runtime_sec_q1)),
-  runtime_q3 = suppressWarnings(as.numeric(python_rows$runtime_sec_q3)),
+  runtime = python_runtime,
+  runtime_q1 = python_runtime_q1,
+  runtime_q3 = python_runtime_q3,
+  r_public_function_total_call_sec = NA_real_,
+  r_mediated_total_call_sec = suppressWarnings(as.numeric(
+    python_rows$r_mediated_total_call_sec_median
+  )),
+  direct_python_fit_sec = suppressWarnings(as.numeric(
+    python_rows$direct_python_fit_sec_median
+  )),
+  direct_python_process_total_sec = suppressWarnings(as.numeric(
+    python_rows$direct_python_process_total_sec_median
+  )),
   stringsAsFactors = FALSE
 )
 
@@ -227,27 +276,29 @@ write.csv(
 tsne_levels <- c(
   "Rtsne [CPU]", "FIt-SNE [CPU]",
   "fastEmbedR openTSNE [CPU]", "fastEmbedR openTSNE [CUDA]",
-  "Python openTSNE via R [CPU]", "Python openTSNE direct [CPU]",
-  "RAPIDS cuML t-SNE via R [CUDA]",
-  "RAPIDS cuML t-SNE direct [CUDA]"
+  "Python openTSNE via R (total call) [CPU]",
+  "Python openTSNE direct (fit only) [CPU]",
+  "RAPIDS cuML t-SNE via R (total call) [CUDA]",
+  "RAPIDS cuML t-SNE direct (fit only) [CUDA]"
 )
 tsne_colors <- c(
   "Rtsne [CPU]" = "#4D4D4D",
   "FIt-SNE [CPU]" = "#9E9E9E",
   "fastEmbedR openTSNE [CPU]" = "#0072B2",
   "fastEmbedR openTSNE [CUDA]" = "#56B4E9",
-  "Python openTSNE via R [CPU]" = "#7B3294",
-  "Python openTSNE direct [CPU]" = "#C2A5CF",
-  "RAPIDS cuML t-SNE via R [CUDA]" = "#D55E00",
-  "RAPIDS cuML t-SNE direct [CUDA]" = "#E69F00"
+  "Python openTSNE via R (total call) [CPU]" = "#7B3294",
+  "Python openTSNE direct (fit only) [CPU]" = "#C2A5CF",
+  "RAPIDS cuML t-SNE via R (total call) [CUDA]" = "#D55E00",
+  "RAPIDS cuML t-SNE direct (fit only) [CUDA]" = "#E69F00"
 )
 umap_levels <- c(
   "umap [CPU]", "uwot default [CPU]", "uwot fast SGD [CPU]",
   "fastEmbedR fuzzy [CPU]", "fastEmbedR fuzzy [CUDA]",
   "fastEmbedR binary [CPU]", "fastEmbedR binary [CUDA]",
-  "Python umap-learn via R [CPU]", "Python umap-learn direct [CPU]",
-  "RAPIDS cuML UMAP via R [CUDA]",
-  "RAPIDS cuML UMAP direct [CUDA]"
+  "Python umap-learn via R (total call) [CPU]",
+  "Python umap-learn direct (fit only) [CPU]",
+  "RAPIDS cuML UMAP via R (total call) [CUDA]",
+  "RAPIDS cuML UMAP direct (fit only) [CUDA]"
 )
 umap_colors <- c(
   "umap [CPU]" = "#777777",
@@ -257,10 +308,10 @@ umap_colors <- c(
   "fastEmbedR fuzzy [CUDA]" = "#56B4E9",
   "fastEmbedR binary [CPU]" = "#004B6B",
   "fastEmbedR binary [CUDA]" = "#8FD3EA",
-  "Python umap-learn via R [CPU]" = "#7B3294",
-  "Python umap-learn direct [CPU]" = "#C2A5CF",
-  "RAPIDS cuML UMAP via R [CUDA]" = "#D55E00",
-  "RAPIDS cuML UMAP direct [CUDA]" = "#E69F00"
+  "Python umap-learn via R (total call) [CPU]" = "#7B3294",
+  "Python umap-learn direct (fit only) [CPU]" = "#C2A5CF",
+  "RAPIDS cuML UMAP via R (total call) [CUDA]" = "#D55E00",
+  "RAPIDS cuML UMAP direct (fit only) [CUDA]" = "#E69F00"
 )
 
 publication_theme <- ggplot2::theme_minimal(base_size = 10.5) +
@@ -280,7 +331,7 @@ publication_theme <- ggplot2::theme_minimal(base_size = 10.5) +
     plot.margin = ggplot2::margin(5, 8, 5, 8)
   )
 
-build_plot <- function(data, levels, colors, title) {
+build_plot <- function(data, levels, colors, title, legend_rows = 3L) {
   data$display_label <- factor(data$display_label, levels = levels)
   ggplot2::ggplot(
     data,
@@ -303,16 +354,16 @@ build_plot <- function(data, levels, colors, title) {
     ) +
     ggplot2::scale_fill_manual(values = colors, drop = TRUE) +
     ggplot2::guides(
-      fill = ggplot2::guide_legend(nrow = 3L, byrow = TRUE)
+      fill = ggplot2::guide_legend(nrow = legend_rows, byrow = TRUE)
     ) +
     ggplot2::labs(
       x = NULL,
-      y = "Median total runtime (seconds, pseudo-log scale)",
+      y = "Median reported time (seconds, pseudo-log scale)",
       title = title,
-      subtitle = paste(
-        "CPU and CUDA share one panel; labels identify the backend.",
-        "The pseudo-log axis retains a true zero baseline;",
-        "medians and IQRs use three seeds."
+      subtitle = paste0(
+        "CPU and CUDA share one panel; labels identify the backend.\n",
+        "R-mediated Python rows report total-call time; direct Python rows report fit time only.\n",
+        "The pseudo-log axis retains a true zero baseline; medians and IQRs use three seeds."
       )
     ) +
     publication_theme
@@ -322,13 +373,15 @@ tsne_plot <- build_plot(
   plot_data[plot_data$family == "t-SNE", , drop = FALSE],
   tsne_levels,
   tsne_colors,
-  "Full-pipeline t-SNE runtime"
+  "t-SNE runtime by timing boundary",
+  legend_rows = 3L
 )
 umap_plot <- build_plot(
   plot_data[plot_data$family == "UMAP", , drop = FALSE],
   umap_levels,
   umap_colors,
-  "Full-pipeline UMAP runtime"
+  "UMAP runtime by timing boundary",
+  legend_rows = 4L
 )
 
 save_plot <- function(plot, stem, width, height) {

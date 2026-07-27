@@ -2,7 +2,7 @@
 % Please edit documentation in R/native_knn.R
 \name{precompute_knn}
 \alias{precompute_knn}
-\title{Precompute native nearest neighbours}
+\title{Precompute native nearest neighbors}
 \usage{
 precompute_knn(
   data,
@@ -16,7 +16,7 @@ precompute_knn(
 \item{data}{Numeric matrix, numeric data frame, or a `float::float32` matrix
 with observations in rows.}
 
-\item{k}{Number of non-self nearest neighbours to return.}
+\item{k}{Number of non-self nearest neighbors to return.}
 
 \item{metric}{Distance metric: `"euclidean"`, `"cosine"`,
 `"correlation"`, or `"inner_product"`. Raw inner product is available only
@@ -33,7 +33,7 @@ A `fastEmbedR_knn` object. Host results contain `indices` and
   and own device-resident index and distance buffers.
 }
 \description{
-`precompute_knn()` exposes the same package-native nearest-neighbour search
+`precompute_knn()` exposes the same package-native nearest-neighbor search
 used internally by [umap()] and [opentsne()]. The search algorithm is chosen
 by fastEmbedR for the requested backend and is deliberately not a user
 parameter.

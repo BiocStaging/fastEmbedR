@@ -29,7 +29,7 @@ query observations in the same feature space.}
 
 \item{query_indices}{Optional rows of `data` to project.}
 
-\item{transform_k}{Number of reference neighbours.}
+\item{transform_k}{Number of reference neighbors.}
 
 \item{refinement_epochs}{Fixed-reference UMAP refinement epochs.}
 

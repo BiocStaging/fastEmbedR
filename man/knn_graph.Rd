@@ -1,7 +1,7 @@
 \name{knn_graph}
 \alias{knn_graph}
 \alias{print.fastEmbedR_graph}
-\title{Build a compact nearest-neighbour graph}
+\title{Build a compact nearest-neighbor graph}
 \usage{
 knn_graph(
   x,
@@ -17,7 +17,7 @@ knn_graph(
 \arguments{
 \item{x}{Numeric data, a \code{fastEmbedR_embedding}, a precomputed KNN list,
 or an existing \code{fastEmbedR_graph}.}
-\item{k}{Number of non-self neighbours retained.}
+\item{k}{Number of non-self neighbors retained.}
 \item{backend}{KNN-search backend used only for data input.}
 \item{metric}{Euclidean, cosine, or correlation distance.}
 \item{weight}{SNN/Jaccard, inverse-distance, or binary edge weights.}
@@ -28,8 +28,8 @@ or an existing \code{fastEmbedR_graph}.}
 \value{A compact \code{fastEmbedR_graph} edge-list object.}
 \description{
 Builds one undirected weighted graph from data, an embedding, or precomputed
-neighbours. The function reuses fastEmbedR's existing KNN route and does not
-expose another nearest-neighbour tuning surface.
+neighbors. The function reuses fastEmbedR's existing KNN route and does not
+expose another nearest-neighbor tuning surface.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

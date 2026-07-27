@@ -86,6 +86,35 @@ python_rows <- lapply(python_quality_files, function(path) {
 python_rows <- Filter(Negate(is.null), python_rows)
 python_runs <- if (length(python_rows)) do.call(rbind, python_rows) else data.frame()
 if (nrow(python_runs)) {
+  direct_python <- python_runs$timing_mode == "native_python_process"
+  python_runs$timing_scope <- ifelse(
+    direct_python,
+    "direct_python_fit",
+    "r_mediated_total_call"
+  )
+  python_runs$runtime_measure <- ifelse(
+    direct_python,
+    "direct_python_fit_sec",
+    "r_mediated_total_call_sec"
+  )
+  process_elapsed <- clean_number(python_runs$process_elapsed_sec)
+  selected_runtime <- clean_number(python_runs$runtime_sec)
+  python_fit <- clean_number(python_runs$python_fit_sec)
+  python_runs$r_mediated_total_call_sec <- ifelse(
+    !direct_python,
+    ifelse(is.finite(process_elapsed), process_elapsed, selected_runtime),
+    NA_real_
+  )
+  python_runs$direct_python_fit_sec <- ifelse(
+    direct_python,
+    ifelse(is.finite(python_fit), python_fit, selected_runtime),
+    NA_real_
+  )
+  python_runs$direct_python_process_total_sec <- ifelse(
+    direct_python,
+    process_elapsed,
+    NA_real_
+  )
   write.csv(python_runs, file.path(output_dir, "python_non_kodama_runs.csv"),
             row.names = FALSE, na = "")
   python_success <- python_runs[python_runs$status == "success", , drop = FALSE]
@@ -99,16 +128,43 @@ if (nrow(python_runs)) {
       python_success$dataset, python_success$method, python_success$backend,
       python_success$profile, drop = TRUE
     )
+    summarize_time <- function(values) {
+      values <- clean_number(values)
+      values <- values[is.finite(values)]
+      if (!length(values)) {
+        return(c(median = NA_real_, q1 = NA_real_, q3 = NA_real_))
+      }
+      c(
+        median = stats::median(values),
+        q1 = as.numeric(stats::quantile(values, 0.25, names = FALSE)),
+        q3 = as.numeric(stats::quantile(values, 0.75, names = FALSE))
+      )
+    }
     python_summary <- do.call(rbind, lapply(split(python_success, grouping), function(x) {
+      selected <- summarize_time(x$runtime_sec)
+      r_total <- summarize_time(x$r_mediated_total_call_sec)
+      direct_fit <- summarize_time(x$direct_python_fit_sec)
+      direct_process <- summarize_time(x$direct_python_process_total_sec)
       data.frame(
         dataset = x$dataset[[1L]],
         method = x$method[[1L]],
         backend = x$backend[[1L]],
         profile = x$profile[[1L]],
+        timing_scope = x$timing_scope[[1L]],
+        runtime_measure = x$runtime_measure[[1L]],
         n_runs = nrow(x),
-        runtime_sec_median = median(x$runtime_sec, na.rm = TRUE),
-        runtime_sec_q1 = as.numeric(quantile(x$runtime_sec, 0.25, na.rm = TRUE)),
-        runtime_sec_q3 = as.numeric(quantile(x$runtime_sec, 0.75, na.rm = TRUE)),
+        runtime_sec_median = selected[["median"]],
+        runtime_sec_q1 = selected[["q1"]],
+        runtime_sec_q3 = selected[["q3"]],
+        r_mediated_total_call_sec_median = r_total[["median"]],
+        r_mediated_total_call_sec_q1 = r_total[["q1"]],
+        r_mediated_total_call_sec_q3 = r_total[["q3"]],
+        direct_python_fit_sec_median = direct_fit[["median"]],
+        direct_python_fit_sec_q1 = direct_fit[["q1"]],
+        direct_python_fit_sec_q3 = direct_fit[["q3"]],
+        direct_python_process_total_sec_median = direct_process[["median"]],
+        direct_python_process_total_sec_q1 = direct_process[["q1"]],
+        direct_python_process_total_sec_q3 = direct_process[["q3"]],
         trustworthiness_median = median(x$trustworthiness, na.rm = TRUE),
         nn_preservation_median = median(x$nn_preservation, na.rm = TRUE),
         silhouette_median = median(x$silhouette, na.rm = TRUE),

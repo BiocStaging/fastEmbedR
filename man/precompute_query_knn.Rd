@@ -2,7 +2,7 @@
 % Please edit documentation in R/native_knn.R
 \name{precompute_query_knn}
 \alias{precompute_query_knn}
-\title{Precompute query-to-reference nearest neighbours}
+\title{Precompute query-to-reference nearest neighbors}
 \usage{
 precompute_query_knn(
   reference,
@@ -19,7 +19,7 @@ precompute_query_knn(
 \item{query}{Query observations in rows and the same feature space as
 `reference`.}
 
-\item{k}{Number of non-self nearest neighbours to return.}
+\item{k}{Number of non-self nearest neighbors to return.}
 
 \item{metric}{Distance metric: `"euclidean"`, `"cosine"`,
 `"correlation"`, or `"inner_product"`. Raw inner product is available only
@@ -38,7 +38,7 @@ A `fastEmbedR_knn` object with one row per query observation and
 `precompute_query_knn()` searches a fixed reference matrix for every row of
 a query matrix. It uses the same package-native backend family and routing
 policy as [precompute_knn()], but does not compute unnecessary
-reference-to-reference or query-to-query neighbours.
+reference-to-reference or query-to-query neighbors.
 }
 \details{
 CPU uses the native recall-tuned HNSW reference-query path. Metal routes

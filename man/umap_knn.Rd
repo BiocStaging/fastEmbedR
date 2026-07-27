@@ -15,7 +15,7 @@ umap_knn(
 }
 \arguments{
 \item{indices}{A KNN object, or an integer KNN
-index matrix. A self-neighbour first column is removed automatically.}
+index matrix. A self-neighbor first column is removed automatically.}
 
 \item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave
 \code{NULL} when \code{indices} is an \code{nn()} result.}
@@ -41,7 +41,7 @@ A numeric embedding matrix with resolved settings in
 \code{attr(layout, "fastEmbedR_config")}.
 }
 \description{
-\code{umap_knn()} embeds observations from a supplied nearest-neighbour graph
+\code{umap_knn()} embeds observations from a supplied nearest-neighbor graph
 using the stable native UMAP path. It is the KNN-input UMAP entry
 point used by \code{\link{embed_knn}} with \code{method = "umap"}.
 }

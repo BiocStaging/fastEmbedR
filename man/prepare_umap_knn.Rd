@@ -21,7 +21,7 @@ prepare_umap_knn(
 A prepared UMAP object containing normalized KNN data, a CSR graph, graph weights, and \code{epochs_per_sample}. Pass it to \code{umap_knn()} for repeated runs without rebuilding the graph.
 }
 \description{
-\code{prepare_umap_knn()} builds the reusable UMAP graph once from a KNN object or index/distance matrices. This is useful for repeated seeds, benchmark grids, and CPU/GPU comparisons where the neighbour graph should remain fixed.
+\code{prepare_umap_knn()} builds the reusable UMAP graph once from a KNN object or index/distance matrices. This is useful for repeated seeds, benchmark grids, and CPU/GPU comparisons where the neighbor graph should remain fixed.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

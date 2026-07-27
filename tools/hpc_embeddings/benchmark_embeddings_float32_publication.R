@@ -573,6 +573,20 @@ method_parameter_row <- function(method) {
   base <- list(
     method = method,
     backend = backend,
+    timing_scope = if (is_direct_python_method(method)) {
+      "direct_python_fit"
+    } else if (grepl("python|rapids_cuml", method)) {
+      "r_mediated_total_call"
+    } else {
+      "r_public_function_total_call"
+    },
+    runtime_measure = if (is_direct_python_method(method)) {
+      "direct_python_fit_sec"
+    } else if (grepl("python|rapids_cuml", method)) {
+      "r_mediated_total_call_sec"
+    } else {
+      "r_public_function_total_call_sec"
+    },
     n_neighbors_k = NA_character_,
     perplexity = NA_character_,
     iterations_or_epochs = NA_character_,
@@ -997,9 +1011,35 @@ worker_main <- function() {
       "standard_R_matrix"
     },
     timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
+    timing_scope = if (is_direct_python_method(method)) {
+      "direct_python_fit"
+    } else if (grepl("python|rapids_cuml", method)) {
+      "r_mediated_total_call"
+    } else {
+      "r_public_function_total_call"
+    },
+    runtime_measure = if (is_direct_python_method(method)) {
+      "direct_python_fit_sec"
+    } else if (grepl("python|rapids_cuml", method)) {
+      "r_mediated_total_call_sec"
+    } else {
+      "r_public_function_total_call_sec"
+    },
     elapsed_sec = elapsed,
     process_elapsed_sec = if (is_direct_python_method(method)) direct_process_elapsed else process_elapsed,
     python_fit_sec = if (is_direct_python_method(method)) python_fit_sec else NA_real_,
+    r_mediated_total_call_sec = if (!is_direct_python_method(method) &&
+                                       grepl("python|rapids_cuml", method)) {
+      process_elapsed
+    } else {
+      NA_real_
+    },
+    direct_python_fit_sec = if (is_direct_python_method(method)) python_fit_sec else NA_real_,
+    direct_python_process_total_sec = if (is_direct_python_method(method)) {
+      direct_process_elapsed
+    } else {
+      NA_real_
+    },
     trust = scores$trustworthiness,
     trustworthiness = scores$trustworthiness,
     knn_preservation = scores$knn_preservation,
@@ -1054,8 +1094,13 @@ ensure_quality_columns <- function(tab) {
     max_rss_kb = NA_real_,
     max_rss_gb = NA_real_,
     timing_mode = NA_character_,
+    timing_scope = NA_character_,
+    runtime_measure = NA_character_,
     process_elapsed_sec = NA_real_,
-    python_fit_sec = NA_real_
+    python_fit_sec = NA_real_,
+    r_mediated_total_call_sec = NA_real_,
+    direct_python_fit_sec = NA_real_,
+    direct_python_process_total_sec = NA_real_
   )
   for (nm in names(defaults)) {
     if (!nm %in% names(tab)) tab[[nm]] <- defaults[[nm]]
@@ -1368,8 +1413,10 @@ write_quality_outputs <- function(tab) {
   tab <- ensure_quality_columns(tab)
   quality_cols <- c(
     "dataset", "method", "backend", "status", "n", "p",
-    "cpu_threads", "timing_mode", "elapsed_sec", "process_elapsed_sec",
-    "python_fit_sec", "max_rss_gb", "trustworthiness",
+    "cpu_threads", "timing_mode", "timing_scope", "runtime_measure",
+    "elapsed_sec", "process_elapsed_sec", "python_fit_sec",
+    "r_mediated_total_call_sec", "direct_python_fit_sec",
+    "direct_python_process_total_sec", "max_rss_gb", "trustworthiness",
     "knn_preservation_30", "silhouette", "knn_label_accuracy",
     "knn_preservation_15", "knn_preservation_50", "quality_sample_n",
     "plot_file", "error"
@@ -1389,7 +1436,8 @@ write_quality_outputs <- function(tab) {
   write.csv(quality, file.path(out_dir, "embedding_quality_table.csv"), row.names = FALSE)
 
   md_cols <- c(
-    "dataset", "method", "backend", "cpu_threads", "runtime_sec", "trustworthiness",
+    "dataset", "method", "backend", "cpu_threads", "runtime_sec",
+    "runtime_measure", "trustworthiness",
     "nn_preservation", "silhouette", "knn_label_accuracy", "max_rss_gb",
     "timing_mode", "status"
   )
@@ -1463,7 +1511,13 @@ write_quality_outputs <- function(tab) {
 
 write_combined_outputs <- function(results) {
   if (!length(results)) return(invisible(NULL))
-  tab <- do.call(rbind, results)
+  all_names <- unique(unlist(lapply(results, names), use.names = FALSE))
+  normalized <- lapply(results, function(row) {
+    missing <- setdiff(all_names, names(row))
+    for (nm in missing) row[[nm]] <- NA
+    row[, all_names, drop = FALSE]
+  })
+  tab <- do.call(rbind, normalized)
   tab <- ensure_quality_columns(tab)
   write.csv(tab, file.path(out_dir, "embedding_benchmark_results.csv"), row.names = FALSE)
   write_quality_outputs(tab)
@@ -1512,9 +1566,26 @@ if (worker) {
         "standard_R_matrix"
       },
       timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
+      timing_scope = if (is_direct_python_method(method)) {
+        "direct_python_fit"
+      } else if (grepl("python|rapids_cuml", method)) {
+        "r_mediated_total_call"
+      } else {
+        "r_public_function_total_call"
+      },
+      runtime_measure = if (is_direct_python_method(method)) {
+        "direct_python_fit_sec"
+      } else if (grepl("python|rapids_cuml", method)) {
+        "r_mediated_total_call_sec"
+      } else {
+        "r_public_function_total_call_sec"
+      },
       elapsed_sec = NA_real_,
       process_elapsed_sec = NA_real_,
       python_fit_sec = NA_real_,
+      r_mediated_total_call_sec = NA_real_,
+      direct_python_fit_sec = NA_real_,
+      direct_python_process_total_sec = NA_real_,
       trust = NA_real_,
       trustworthiness = NA_real_,
       knn_preservation = NA_real_,
@@ -1639,9 +1710,26 @@ for (current_threads in thread_grid) {
           parameters = method_parameter_summary(method),
           input_fastEmbedR = if (grepl("^fastEmbedR", method)) "float32" else "standard_R_matrix",
           timing_mode = if (is_direct_python_method(method)) "native_python_process" else if (grepl("python|rapids_cuml", method)) "reticulate" else "R",
+          timing_scope = if (is_direct_python_method(method)) {
+            "direct_python_fit"
+          } else if (grepl("python|rapids_cuml", method)) {
+            "r_mediated_total_call"
+          } else {
+            "r_public_function_total_call"
+          },
+          runtime_measure = if (is_direct_python_method(method)) {
+            "direct_python_fit_sec"
+          } else if (grepl("python|rapids_cuml", method)) {
+            "r_mediated_total_call_sec"
+          } else {
+            "r_public_function_total_call_sec"
+          },
           elapsed_sec = NA_real_,
           process_elapsed_sec = NA_real_,
           python_fit_sec = NA_real_,
+          r_mediated_total_call_sec = NA_real_,
+          direct_python_fit_sec = NA_real_,
+          direct_python_process_total_sec = NA_real_,
           trust = NA_real_,
           trustworthiness = NA_real_,
           knn_preservation = NA_real_,

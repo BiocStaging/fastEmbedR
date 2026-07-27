@@ -21,7 +21,7 @@ umap(
 \arguments{
 \item{data}{Numeric matrix/data frame, or a KNN object with \code{indices} and \code{distances} fields.}
 
-\item{n_neighbors}{Number of non-self neighbours. \code{NULL} chooses the
+\item{n_neighbors}{Number of non-self neighbors. \code{NULL} chooses the
 package default for the data size.}
 
 \item{n_components}{Output dimensionality.}
@@ -56,7 +56,7 @@ and should be used for reference-implementation comparisons.}
 A \code{fastEmbedR_embedding} object.
 }
 \description{
-\code{umap()} computes or reuses a nearest-neighbour graph and then calls
+\code{umap()} computes or reuses a nearest-neighbor graph and then calls
 \code{\link{umap_knn}}. Quality metrics are computed explicitly with
 \code{\link{evaluate_embedding}} rather than inside the embedding call.
 }

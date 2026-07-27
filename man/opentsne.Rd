@@ -38,14 +38,14 @@ opentsne(
 containing KNN `indices` and `distances`.}
 
 \item{perplexity}{t-SNE perplexity. The one-call API uses
-`ceiling(perplexity)` non-self neighbours internally. If `NULL`, uses the
+`ceiling(perplexity)` non-self neighbors internally. If `NULL`, uses the
 largest safe value up to 30 that is available for the input.}
 
 \item{n_components}{Output dimensionality, from 1 to 3.}
 
 \item{init_data}{Optional original high-dimensional data matrix used only to
 compute PCA initialization with [opentsne_pca_init()]. It is not used for
-neighbour search or optimization.}
+neighbor search or optimization.}
 
 \item{Y_init}{Optional explicit initial layout. Use [opentsne_pca_init()] to
 precompute and reuse a PCA initialization.}

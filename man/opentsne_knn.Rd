@@ -111,7 +111,7 @@ A numeric embedding matrix with settings stored in
 \description{
 `opentsne_knn()` is the direct KNN-input entry point for the native
 openTSNE-style optimizer. It accepts either a list containing KNN `indices`
-and `distances` or separate KNN index and distance matrices. No neighbour
+and `distances` or separate KNN index and distance matrices. No neighbor
 search, scaling, or PCA is done inside this function.
 Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
 the Python package. fastEmbedR defines its own R API, defaults, objects, and

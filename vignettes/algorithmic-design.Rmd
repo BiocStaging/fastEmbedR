@@ -3,6 +3,8 @@ title: "Algorithmic design and acknowledgements"
 author:
   - "Moussa Kassim"
   - "Martin Ocharo"
+  - "Dalia Ahmed"
+  - "Dupe Ojo"
   - "Alessia Vignoli"
   - "Leonardo Tenori"
   - "Stefano Cacciatore"
@@ -34,13 +36,13 @@ or software projects inspired the current code.
 `fastEmbedR` owns its one-call KNN routes, PCA initialization, UMAP,
 openTSNE-style t-SNE, KNN graph construction, community detection, landmark
 transforms, and quality metrics. It does not call another R package for
-nearest-neighbour search. A reusable host KNN may still be passed as a plain
+nearest-neighbor search. A reusable host KNN may still be passed as a plain
 list containing `indices` and `distances`; this separates KNN and embedding
 time for controlled comparisons. A CUDA result from `precompute_knn()` remains
 device-resident and is reusable directly by the CUDA KNN-input embedding APIs.
 
 The embedding functions also accept plain precomputed KNN matrices, so the
-core package can be checked without any external nearest-neighbour library:
+core package can be checked without any external nearest-neighbor library:
 
 ```{r precomputed-knn-smoke}
 library(fastEmbedR)
@@ -59,7 +61,7 @@ dim(layout)
 
 ## Graph construction and community detection
 
-`knn_graph()` consumes only neighbour indices and distances after the KNN
+`knn_graph()` consumes only neighbor indices and distances after the KNN
 boundary. Its deliberately small weighting surface contains SNN/Jaccard,
 inverse-distance, and binary edges. Duplicate directed KNN observations are
 collapsed into one undirected edge, and graph construction is parallelized by
@@ -128,7 +130,7 @@ y_fuzzy <- umap_knn(knn, graph_mode = "fuzzy")
 
 `graph_mode = "fuzzy"` uses the standard UMAP fuzzy graph. `graph_mode =
 "binary"` assigns unit weight to the symmetric KNN union. Binary mode is an
-adjacency-only sensitivity analysis for cases where neighbour identity is
+adjacency-only sensitivity analysis for cases where neighbor identity is
 trusted more than distance calibration; it is not standard UMAP or a
 guaranteed acceleration. Because every binary edge receives the maximum
 sampling frequency, binary optimization can be slower than fuzzy UMAP on CPU.
@@ -188,7 +190,7 @@ KNN matrices.
 
 The high-level steps are:
 
-1. convert neighbour distances to perplexity affinities;
+1. convert neighbor distances to perplexity affinities;
 2. symmetrize sparse probabilities;
 3. initialize the layout, usually with PCA;
 4. run early exaggeration;

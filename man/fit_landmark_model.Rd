@@ -30,7 +30,7 @@ indices.}
 
 \item{method}{`"umap"` or `"opentsne"`.}
 
-\item{n_neighbors}{UMAP neighbourhood size. For openTSNE this is the
+\item{n_neighbors}{UMAP neighborhood size. For openTSNE this is the
 precomputed KNN support width; `NULL` derives it from `perplexity`.}
 
 \item{perplexity}{openTSNE perplexity.}

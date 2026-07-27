@@ -27,7 +27,7 @@ KNN, local affine placement, and optional fixed-reference refinement.
 \item{data}{Numeric matrix or data frame with observations in rows.}
 \item{landmarks}{\code{TRUE} for an automatic subset, a fraction such as
 \code{0.5}, a landmark count, or explicit row indices.}
-\item{n_neighbors}{Number of non-self neighbours.}
+\item{n_neighbors}{Number of non-self neighbors.}
 \item{n_components}{Output dimensionality.}
 \item{standardize}{Center and scale columns before KNN.}
 \item{pca_dims}{Optional PCA dimension before KNN.}
@@ -36,7 +36,7 @@ KNN, local affine placement, and optional fixed-reference refinement.
 \code{"metal"}. CPU uses native HNSW; Metal uses native exact/IVF-Flat;
 CUDA requests package-native RAPIDS cuVS KNN with \code{target_recall = 0.99}. GPU requests must use a
 real native backend and are not silently relabelled as CPU.}
-\item{transform_k}{Number of landmark neighbours used to project
+\item{transform_k}{Number of landmark neighbors used to project
 non-landmark observations. Defaults to \code{n_neighbors}.}
 \item{n_threads}{Number of CPU worker threads.}
 \item{keep_knn}{Keep projection KNN matrices in the returned object.}

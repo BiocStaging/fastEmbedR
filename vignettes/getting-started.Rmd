@@ -3,6 +3,8 @@ title: "fastEmbedR: native UMAP and openTSNE workflows"
 author:
   - "Moussa Kassim"
   - "Martin Ocharo"
+  - "Dalia Ahmed"
+  - "Dupe Ojo"
   - "Alessia Vignoli"
   - "Leonardo Tenori"
   - "Stefano Cacciatore"
@@ -69,7 +71,7 @@ The public workflow is intentionally small:
 
 | Goal | Function |
 | --- | --- |
-| Precompute native non-self neighbours | `precompute_knn()` |
+| Precompute native non-self neighbors | `precompute_knn()` |
 | Run UMAP from a data matrix | `umap()` |
 | Run openTSNE-style t-SNE from a data matrix | `opentsne()` |
 | Reuse a KNN graph | `umap_knn()` or `opentsne_knn()` |
@@ -161,8 +163,8 @@ label-aware metrics rather than visual appearance alone.
 # Graph clustering
 
 `knn_graph()` builds a compact undirected graph from raw data, an embedding, or
-precomputed neighbours. It uses the existing KNN route selected by `backend`;
-there is no second nearest-neighbour method menu inside the graph API.
+precomputed neighbors. It uses the existing KNN route selected by `backend`;
+there is no second nearest-neighbor method menu inside the graph API.
 
 ```{r graph-clustering}
 graph <- knn_graph(fit_tsne, k = 20, weight = "snn", n_threads = 2)
@@ -498,7 +500,7 @@ umap_projected <- project_landmark_model(
 `opentsne()` implementation on the reference rows. Consequently, UMAP
 `graph_mode`, optimizer settings, seed, and backend are explicit and
 consistent with a full-data fit. `project_landmark_model()` computes only the
-query-to-reference neighbours. It does not recompute neighbours among
+query-to-reference neighbors. It does not recompute neighbors among
 landmarks or among query observations. Passing a matrix of new observations
 instead of `x` projects those observations into the same fixed reference
 embedding.
