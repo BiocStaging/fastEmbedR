@@ -19,10 +19,10 @@ x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
 y_tsne <- fastEmbedR::opentsne(
-  x, perplexity = 10, backend = "cpu", n_threads = 4, seed = 1
+  x, perplexity = 10, backend = "cpu", n.cores = 4, seed = 1
 )$layout
 y_umap <- fastEmbedR::umap(
-  x, n_neighbors = 15, backend = "cpu", n_threads = 4,
+  x, n_neighbors = 15, backend = "cpu", n.cores = 4,
   graph_mode = "fuzzy", seed = 1
 )$layout
 
@@ -37,7 +37,7 @@ fit <- fastEmbedR::opentsne(
   x,
   perplexity = 30,
   backend = "cpu",
-  n_threads = 4,
+  n.cores = 4,
   seed = 1
 )
 
@@ -54,15 +54,14 @@ a plain precomputed host KNN list when benchmarking an alternative search.
 
 ## Iris One-Call UMAP
 
-For standard UMAP comparison use the fuzzy graph:
+Standard UMAP fuzzy weighting is the default:
 
 ```r
 fit <- fastEmbedR::umap(
   x,
   n_neighbors = 30,
   backend = "cpu",
-  graph_mode = "fuzzy",
-  n_threads = 4,
+  n.cores = 4,
   seed = 1
 )
 
@@ -136,13 +135,13 @@ results <- list()
 results[[length(results) + 1L]] <- run_method(
   "fastEmbedR openTSNE CPU", "cpu",
   fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cpu",
-                       n_threads = 4, seed = seed)
+                       n.cores = 4, seed = seed)
 )
 
 results[[length(results) + 1L]] <- run_method(
   "fastEmbedR openTSNE CUDA", "cuda",
   fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cuda",
-                       n_threads = 4, seed = seed)
+                       n.cores = 4, seed = seed)
 )
 
 results[[length(results) + 1L]] <- run_method(
@@ -154,13 +153,13 @@ results[[length(results) + 1L]] <- run_method(
 results[[length(results) + 1L]] <- run_method(
   "fastEmbedR UMAP CPU fuzzy", "cpu",
   fastEmbedR::umap(x_fast, n_neighbors = k, backend = "cpu",
-                   graph_mode = "fuzzy", n_threads = 4, seed = seed)
+                   graph_mode = "fuzzy", n.cores = 4, seed = seed)
 )
 
 results[[length(results) + 1L]] <- run_method(
   "fastEmbedR UMAP CUDA fuzzy", "cuda",
   fastEmbedR::umap(x_fast, n_neighbors = k, backend = "cuda",
-                   graph_mode = "fuzzy", n_threads = 4, seed = seed)
+                   graph_mode = "fuzzy", n.cores = 4, seed = seed)
 )
 
 results[[length(results) + 1L]] <- run_method(
@@ -218,6 +217,26 @@ This run used:
 The benchmark intentionally does not show `graph_mode = "binary"`.
 
 ### MNIST 70k Results
+
+The following presentation view summarizes the publication benchmark rather
+than the single run shown below. It reports median end-to-end public-function
+runtime and interquartile range over three seeds on linear axes with a true
+zero baseline. Bar-end labels state how many times faster the fastest method
+in each panel was (`1x` marks the fastest method). CPU and CUDA measurements
+used an Intel Xeon Gold 6442Y and NVIDIA L40S; Metal measurements used an
+Apple M3 and are identified separately rather than treated as matched-machine
+comparisons.
+
+![MNIST 70k linear-scale runtime comparison with speed ratios](assets/mnist70k_presentation_runtime_20260801/mnist70k_runtime_linear_slide.png)
+
+Presentation assets:
+
+- [vector PDF](assets/mnist70k_presentation_runtime_20260801/mnist70k_runtime_linear_slide.pdf)
+- [plotted medians and IQRs](assets/mnist70k_presentation_runtime_20260801/mnist70k_runtime_linear_plot_data.csv)
+- [reproducible plotting script](../tools/make_mnist70k_presentation_runtime_plot.R)
+
+The single-run example output remains below so that its table, machine
+description, and embedding panels stay tied to the executable R example.
 
 ![MNIST 70k computational time](assets/mnist70k_cuda_codex_20260621_4threads/mnist70k_github_benchmark_time_barplot.png)
 
