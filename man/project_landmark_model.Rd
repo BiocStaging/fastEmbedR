@@ -16,7 +16,7 @@ project_landmark_model(
   transform_n_negatives = NULL,
   initialization = c("median", "weighted", "random"),
   keep_knn = FALSE,
-  n_threads = NULL,
+  n.cores = NULL,
   verbose = FALSE,
   ...
 )
@@ -45,7 +45,7 @@ query observations in the same feature space.}
 
 \item{keep_knn}{Retain query-to-reference KNN output.}
 
-\item{n_threads}{CPU worker threads.}
+\item{n.cores}{Number of CPU cores.}
 
 \item{verbose}{Print optimizer progress.}
 

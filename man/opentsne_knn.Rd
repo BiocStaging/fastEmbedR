@@ -15,7 +15,7 @@ opentsne_knn(
   seed = 4L,
   verbose = FALSE,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
+  n.cores = NULL,
   learning_rate = "auto",
   early_exaggeration_iter = NULL,
   early_exaggeration = "auto",
@@ -64,7 +64,7 @@ rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
 device pointers directly to native CUDA openTSNE.
 Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
-\item{n_threads}{Number of CPU worker threads used by CPU KNN and CPU
+\item{n.cores}{Number of CPU cores used by CPU KNN and CPU
 openTSNE optimization. Native GPU optimizers ignore this argument.}
 
 \item{learning_rate}{Positive number or `"auto"`. With `"auto"`, the native
@@ -115,7 +115,7 @@ and `distances` or separate KNN index and distance matrices. No neighbor
 search, scaling, or PCA is done inside this function.
 Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
 the Python package. fastEmbedR defines its own R API, defaults, objects, and
-native optimizer kernels; it does not call or port Python \code{openTSNE}.
+native optimizer kernels; it does not call or port Python `openTSNE`.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

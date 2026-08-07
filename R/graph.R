@@ -1,23 +1,23 @@
-#' Build a compact nearest-neighbour graph
+#' Build a compact nearest-neighbor graph
 #'
 #' `knn_graph()` converts a data matrix, a `fastEmbedR_embedding`, or a
-#' precomputed KNN object into a native undirected edge graph. When neighbours
+#' precomputed KNN object into a native undirected edge graph. When neighbors
 #' must be computed, the function uses fastEmbedR's existing native KNN route;
-#' it does not expose a second nearest-neighbour tuning API.
+#' it does not expose a second nearest-neighbor tuning API.
 #'
 #' @param x Numeric data matrix, a `fastEmbedR_embedding`, a list containing
 #'   `indices` and `distances`, or an existing `fastEmbedR_graph`.
-#' @param k Number of non-self neighbours retained.
+#' @param k Number of non-self neighbors retained.
 #' @param backend KNN-search backend used only when `x` is data: `"cpu"`,
 #'   `"cuda"`, or `"metal"`.
 #' @param metric Distance metric used only when KNN must be computed:
 #'   `"euclidean"`, `"cosine"`, or `"correlation"`.
-#' @param weight Edge weighting: shared-neighbour Jaccard (`"snn"`),
+#' @param weight Edge weighting: shared-neighbor Jaccard (`"snn"`),
 #'   inverse distance (`"distance"`), or unit weights (`"binary"`).
 #' @param mutual Keep only reciprocal KNN edges.
 #' @param prune Remove edges whose final weight is less than or equal to this
 #'   non-negative threshold.
-#' @param n_threads CPU threads used by KNN search and graph construction.
+#' @param n.cores CPU cores used by KNN search and graph construction.
 #' @return A compact `fastEmbedR_graph` list with `from`, `to`, `weight`,
 #'   `n_vertices`, and construction metadata.
 #' @references
@@ -35,13 +35,14 @@ knn_graph <- function(x,
                       weight = c("snn", "distance", "binary"),
                       mutual = FALSE,
                       prune = 0,
-                      n_threads = 1L) {
+                      n.cores = 1L) {
+  n_threads <- n.cores
   if (inherits(x, "fastEmbedR_graph")) return(validate_fastembedr_graph(x))
   backend <- match.arg(backend)
   metric <- match.arg(metric)
   weight <- match.arg(weight)
   k <- graph_positive_integer(k, "k")
-  n_threads <- graph_positive_integer(n_threads, "n_threads")
+  n_threads <- graph_positive_integer(n_threads, "n.cores")
   if (length(mutual) != 1L || is.na(mutual)) {
     stop("`mutual` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -90,7 +91,7 @@ knn_graph <- function(x,
   }
 
   k <- min(k, knn$n_neighbors)
-  if (k < 1L) stop("The KNN input has no usable non-self neighbours.", call. = FALSE)
+  if (k < 1L) stop("The KNN input has no usable non-self neighbors.", call. = FALSE)
   selected <- materialize_knn_range(
     knn$indices,
     knn$distances,
@@ -117,7 +118,7 @@ knn_graph <- function(x,
     source = source,
     requested_knn_backend = if (identical(source, "precomputed_knn")) NA_character_ else backend,
     knn_backend = graph_backend_name(knn$input_backend, knn_backend),
-    n_threads = n_threads,
+    n.cores = n_threads,
     elapsed_sec = unname(proc.time()[[3L]] - started)
   )
   class(graph) <- c("fastEmbedR_graph", "list")
@@ -128,13 +129,17 @@ knn_graph <- function(x,
 #'
 #' `graph_cluster()` clusters a compact `fastEmbedR_graph` with a native
 #' multilevel Louvain implementation, a Leiden local-move/refine/aggregate
-#' implementation, or the Pons-Latapy Walktrap algorithm. No Python, `igraph`,
-#' cuGraph, or external clustering function is called at run time.
+#' implementation, or the Pons-Latapy Walktrap algorithm. Louvain and Leiden
+#' have CPU, CUDA, and Metal implementations. Walktrap is CPU-only. No Python,
+#' `igraph`, cuGraph, or external clustering function is called at run time.
 #'
 #' @param graph A `fastEmbedR_graph`, or an edge-list list containing `from`,
 #'   `to`, `weight`, and `n_vertices`.
 #' @param method `"leiden"`, `"louvain"`, or `"walktrap"`. Walktrap is the
 #'   package's true random-walk community method.
+#' @param backend Execution backend. `"cuda"` and `"metal"` are available for
+#'   Louvain and Leiden only and fail explicitly if the requested accelerator
+#'   was not compiled or is unavailable. They never fall back to CPU.
 #' @param resolution Positive modularity resolution for Louvain and Leiden.
 #'   Walktrap uses its reference resolution of 1.
 #' @param n_iterations Maximum local-moving passes for Louvain and Leiden.
@@ -161,12 +166,14 @@ knn_graph <- function(x,
 #' @export
 graph_cluster <- function(graph,
                           method = c("leiden", "louvain", "walktrap"),
+                          backend = c("cpu", "cuda", "metal"),
                           resolution = 1,
                           n_iterations = 10L,
                           n_runs = 1L,
                           steps = 4L,
                           seed = 1L) {
   method <- match.arg(method)
+  backend <- match.arg(backend)
   graph <- validate_fastembedr_graph(graph)
   resolution <- as.numeric(resolution)
   if (length(resolution) != 1L || !is.finite(resolution) || resolution <= 0) {
@@ -180,6 +187,12 @@ graph_cluster <- function(graph,
   if (identical(method, "walktrap") && !isTRUE(all.equal(resolution, 1))) {
     stop("Walktrap uses its reference modularity resolution of 1.", call. = FALSE)
   }
+  if (identical(method, "walktrap") && !identical(backend, "cpu")) {
+    stop(
+      "Walktrap is supported only with `backend = \"cpu\"`; fastEmbedR does not silently replace a requested GPU backend.",
+      call. = FALSE
+    )
+  }
 
   started <- proc.time()[[3L]]
   result <- if (identical(method, "walktrap")) {
@@ -188,8 +201,28 @@ graph_cluster <- function(graph,
       n_vertices = graph$n_vertices,
       steps = steps
     )
-  } else {
+  } else if (identical(backend, "cpu")) {
     fastembedr_graph_cluster_cpp(
+      graph$from, graph$to, graph$weight,
+      n_vertices = graph$n_vertices,
+      method = method,
+      resolution = resolution,
+      n_iterations = n_iterations,
+      n_runs = n_runs,
+      seed = seed
+    )
+  } else if (identical(backend, "cuda")) {
+    fastembedr_graph_cluster_cuda_cpp(
+      graph$from, graph$to, graph$weight,
+      n_vertices = graph$n_vertices,
+      method = method,
+      resolution = resolution,
+      n_iterations = n_iterations,
+      n_runs = n_runs,
+      seed = seed
+    )
+  } else {
+    fastembedr_graph_cluster_metal_cpp(
       graph$from, graph$to, graph$weight,
       n_vertices = graph$n_vertices,
       method = method,
@@ -200,7 +233,8 @@ graph_cluster <- function(graph,
     )
   }
   result$method <- method
-  result$backend <- "cpu"
+  result$backend_requested <- backend
+  result$backend <- backend
   result$parameters <- list(
     resolution = if (identical(method, "walktrap")) 1 else resolution,
     n_iterations = if (identical(method, "walktrap")) NA_integer_ else n_iterations,

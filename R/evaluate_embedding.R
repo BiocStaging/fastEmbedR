@@ -423,15 +423,15 @@ local_density_radius_metrics <- function(high_distances,
 #' @param sample_size_for_global_metrics Maximum deterministic subsample size
 #'   for all-pairs global distance metrics.
 #' @param sample_size_for_local_metrics Maximum deterministic subsample size for
-#'   local trustworthiness, continuity, and neighbour preservation metrics.
-#' @param use_cache Cache the high-dimensional reference neighbours used by
+#'   local trustworthiness, continuity, and neighbor preservation metrics.
+#' @param use_cache Cache the high-dimensional reference neighbors used by
 #'   quality metrics.
-#' @param cache_dir Directory for quality-metric reference-neighbour cache files.
-#' @param force_recompute Ignore cached quality reference neighbours.
+#' @param cache_dir Directory for quality-metric reference-neighbor cache files.
+#' @param force_recompute Ignore cached quality reference neighbors.
 #' @param seed Random seed recorded in the output and used for subsampling.
 #' @param method Method name recorded in the output.
 #' @param backend Backend name recorded in the output.
-#' @param n_threads Number of CPU worker threads used when quality metrics need
+#' @param n.cores Number of CPU cores used when quality metrics need
 #'   nearest-neighbor searches. Ignored by native GPU metric backends.
 #' @param dataset Dataset name recorded in the output.
 #' @return A one-row data frame with local, global, label-aware, batch-aware,
@@ -460,8 +460,9 @@ evaluate_embedding <- function(x_high,
                                seed = NA_integer_,
                                method = NA_character_,
                                backend = NA_character_,
-                               n_threads = NULL,
+                               n.cores = NULL,
                                dataset = NA_character_) {
+  n_threads <- n.cores
   if (!is.matrix(x_high) && !is_float32_matrix(x_high)) x_high <- as.matrix(x_high)
   if (!is.matrix(embedding) && !is_float32_matrix(embedding)) embedding <- as.matrix(embedding)
   if (nrow(x_high) != nrow(embedding)) stop("`x_high` and `embedding` must have the same row count.", call. = FALSE)

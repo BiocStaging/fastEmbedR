@@ -4,8 +4,8 @@ test_that("landmark selection is reusable across embedding methods", {
     matrix(rnorm(120, 0, 0.2), ncol = 4),
     matrix(rnorm(120, 3, 0.2), ncol = 4)
   )
-  first <- select_landmarks(x, landmarks = 0.5, seed = 7, n_threads = 2)
-  second <- select_landmarks(x, landmarks = 0.5, seed = 7, n_threads = 2)
+  first <- select_landmarks(x, landmarks = 0.5, seed = 7, n.cores = 2)
+  second <- select_landmarks(x, landmarks = 0.5, seed = 7, n.cores = 2)
 
   expect_s3_class(first, "fastEmbedR_landmark_selection")
   expect_identical(first$indices, second$indices)
@@ -31,7 +31,7 @@ test_that("staged UMAP model preserves graph mode and original row order", {
     n_neighbors = 8L,
     graph_mode = "fuzzy",
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 8L
   )
   fit <- project_landmark_model(
@@ -39,7 +39,7 @@ test_that("staged UMAP model preserves graph mode and original row order", {
     x,
     transform_k = 8L,
     refinement_epochs = 2L,
-    n_threads = 2L,
+    n.cores = 2L,
     keep_knn = TRUE
   )
 
@@ -76,7 +76,7 @@ test_that("staged openTSNE uses the ordinary reference optimizer", {
     n_neighbors = 12L,
     perplexity = 4,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 9L,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
@@ -89,7 +89,7 @@ test_that("staged openTSNE uses the ordinary reference optimizer", {
     transform_perplexity = 2,
     transform_iter = 3L,
     transform_n_negatives = 8L,
-    n_threads = 2L
+    n.cores = 2L
   )
 
   expect_identical(model$fit$method, "opentsne")
@@ -115,7 +115,7 @@ test_that("query KNN searches only the fixed reference", {
     query,
     k = 10L,
     backend = "cpu",
-    n_threads = 2L
+    n.cores = 2L
   )
 
   expect_s3_class(found, "fastEmbedR_knn")
@@ -137,7 +137,7 @@ test_that("one-call landmark UMAP passes graph mode to its reference fit", {
     n_neighbors = 8L,
     standardize = FALSE,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     graph_mode = "fuzzy",
     seed = 10L
   )
@@ -160,7 +160,7 @@ test_that("staged landmark projection preserves float32 layout output", {
     method = "umap",
     n_neighbors = 6L,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 11L
   )
   fit <- project_landmark_model(
@@ -168,7 +168,7 @@ test_that("staged landmark projection preserves float32 layout output", {
     x,
     transform_k = 6L,
     refinement_epochs = 0L,
-    n_threads = 2L
+    n.cores = 2L
   )
 
   expect_true(inherits(model$reference_data, "float32"))

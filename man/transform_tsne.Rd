@@ -24,7 +24,7 @@ transform_tsne(
   max_step_norm = Inf,
   n_negatives = NULL,
   exact_repulsion_threshold = 4096L,
-  n_threads = NULL,
+  n.cores = NULL,
   seed = 4L,
   backend = "auto",
   verbose = FALSE
@@ -79,7 +79,7 @@ repulsion is native and experimental for large reference sets.}
 \item{exact_repulsion_threshold}{Use exact query-reference repulsion at or
 below this reference count.}
 
-\item{n_threads}{Number of CPU worker threads for the native optimizer.}
+\item{n.cores}{Number of CPU cores for the native optimizer.}
 
 \item{seed}{Random seed.}
 

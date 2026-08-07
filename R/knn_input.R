@@ -74,6 +74,15 @@ is_float32_matrix <- function(x) {
   inherits(x, "float32")
 }
 
+public_core_config <- function(config) {
+  if (!is.list(config)) return(config)
+  if (!is.null(config$n_threads)) {
+    config$n.cores <- config$n_threads
+    config$n_threads <- NULL
+  }
+  config
+}
+
 fastembedr_knn_output_type <- function(data, backend) {
   if (!requireNamespace("float", quietly = TRUE)) return("double")
   if (is_float32_matrix(data)) return("float")

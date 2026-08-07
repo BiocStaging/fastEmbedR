@@ -1,6 +1,6 @@
 #' Precompute a reusable UMAP initialization
 #'
-#' `umap_init()` separates UMAP neighbour search, graph construction, and
+#' `umap_init()` separates UMAP neighbor search, graph construction, and
 #' initialization from stochastic optimization. The returned object can be
 #' passed directly to [umap_knn()] so repeated or cross-backend runs reuse the
 #' same KNN graph and initial coordinates.
@@ -8,14 +8,15 @@
 #' @param x Numeric data, a KNN object, or an object returned by
 #'   [prepare_umap_knn()].
 #' @param distances Optional KNN distance matrix when `x` is an index matrix.
-#' @param n_neighbors Number of non-self neighbours when `x` is data. `NULL`
+#' @param n_neighbors Number of non-self neighbors when `x` is data. `NULL`
 #'   uses the package's size-aware default.
 #' @param n_components Output dimensionality.
 #' @param metric Distance metric used only when KNN must be computed.
 #' @param backend Initialization backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @param seed Random seed.
-#' @param n_threads Number of CPU worker threads.
-#' @param graph_mode UMAP graph weighting: `"binary"` or `"fuzzy"`.
+#' @param n.cores Number of CPU cores.
+#' @param graph_mode UMAP graph weighting. `"fuzzy"` is the standard default;
+#'   `"binary"` requests the adjacency-only sensitivity graph.
 #'
 #' @details
 #' For the fuzzy graph, CPU initialization is computed from the prepared CSR
@@ -54,8 +55,9 @@ umap_init <- function(x,
                       ),
                       backend = c("cpu", "cuda", "metal"),
                       seed = 4L,
-                      n_threads = NULL,
-                      graph_mode = c("binary", "fuzzy")) {
+                      n.cores = NULL,
+                      graph_mode = c("fuzzy", "binary")) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   n_components <- validate_n_components(n_components)
   supplied_prepared <- inherits(x, "fastEmbedR_umap_prepared")
@@ -89,7 +91,7 @@ umap_init <- function(x,
         x,
         distances = distances,
         backend = backend,
-        n_threads = n_threads,
+        n.cores = n_threads,
         graph_mode = graph_mode
       )
     })
@@ -108,7 +110,7 @@ umap_init <- function(x,
         k = n_neighbors,
         metric = metric,
         backend = backend,
-        n_threads = n_threads
+        n.cores = n_threads
       )
     })
     knn_elapsed <- unname(knn_time[["elapsed"]])
@@ -119,7 +121,7 @@ umap_init <- function(x,
       prepared_result <- prepare_umap_knn(
         knn,
         backend = backend,
-        n_threads = n_threads,
+        n.cores = n_threads,
         graph_mode = graph_mode
       )
     })
@@ -134,7 +136,7 @@ umap_init <- function(x,
     requested_threads <- suppressWarnings(as.integer(n_threads))
     if (length(requested_threads) != 1L || is.na(requested_threads) ||
         requested_threads < 1L) {
-      stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
+      stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
     }
     cfg$n_threads <- max(1L, min(4L, requested_threads))
   }
@@ -197,14 +199,14 @@ umap_init <- function(x,
   cfg$initialization_reusable <- TRUE
   cfg$initialization_seed <- as.integer(seed)
   cfg$initialization_n_components <- as.integer(n_components)
-  attr(layout, "fastEmbedR_config") <- cfg
+  attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
   prepared$initialization <- layout
   prepared$initialization_parameters <- cfg
 
   out <- list(
     layout = layout,
     prepared = prepared,
-    parameters = cfg,
+    parameters = public_core_config(cfg),
     timings = data.frame(
       stage = c("knn", "graph", "initialization", "total"),
       elapsed_sec = c(

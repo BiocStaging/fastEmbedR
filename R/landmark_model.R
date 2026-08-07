@@ -8,7 +8,7 @@
 #' @param landmarks `TRUE` for an automatic count, a fraction in `(0, 1)`, a
 #'   landmark count, or explicit row indices.
 #' @param seed Random seed used by projection-based landmark selection.
-#' @param n_threads Number of CPU threads used for float32 selection features.
+#' @param n.cores Number of CPU cores used for float32 selection features.
 #' @return A `fastEmbedR_landmark_selection` object containing `indices` and
 #'   `query_indices`.
 #' @examples
@@ -19,7 +19,8 @@
 select_landmarks <- function(data,
                              landmarks = TRUE,
                              seed = 4L,
-                             n_threads = NULL) {
+                             n.cores = NULL) {
+  n_threads <- n.cores
   prepared <- prepare_embedding_data(
     data,
     standardize = FALSE,
@@ -109,15 +110,16 @@ normalize_landmark_selection <- function(selection, data) {
 #' @param selection A result from [select_landmarks()] or explicit landmark row
 #'   indices.
 #' @param method `"umap"` or `"opentsne"`.
-#' @param n_neighbors UMAP neighbourhood size. For openTSNE this is the
+#' @param n_neighbors UMAP neighborhood size. For openTSNE this is the
 #'   precomputed KNN support width; `NULL` derives it from `perplexity`.
 #' @param perplexity openTSNE perplexity.
 #' @param n_components Embedding dimensionality.
 #' @param metric KNN metric.
 #' @param seed Random seed.
 #' @param backend `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param n_threads CPU worker threads.
-#' @param graph_mode UMAP graph mode, passed unchanged to [umap()].
+#' @param n.cores Number of CPU cores.
+#' @param graph_mode UMAP graph mode, passed unchanged to [umap()]. The
+#'   standard `"fuzzy"` graph is the default.
 #' @param keep_knn Retain reference KNN output.
 #' @param verbose Print optimizer progress.
 #' @param ... Additional optimizer arguments passed to [opentsne()].
@@ -142,11 +144,12 @@ fit_landmark_model <- function(data,
                                ),
                                seed = 4L,
                                backend = c("cpu", "cuda", "metal"),
-                               n_threads = NULL,
-                               graph_mode = c("binary", "fuzzy"),
+                               n.cores = NULL,
+                               graph_mode = c("fuzzy", "binary"),
                                keep_knn = FALSE,
                                verbose = FALSE,
                                ...) {
+  n_threads <- n.cores
   method <- match.arg(method)
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
@@ -189,7 +192,7 @@ fit_landmark_model <- function(data,
         k = n_neighbors,
         metric = metric,
         backend = backend,
-        n_threads = n_threads
+        n.cores = n_threads
       )
       fit <- umap(
         reference_data,
@@ -200,7 +203,7 @@ fit_landmark_model <- function(data,
         nn = reference_knn,
         seed = seed,
         backend = backend,
-        n_threads = n_threads,
+        n.cores = n_threads,
         keep_knn = keep_knn,
         graph_mode = graph_mode,
         verbose = verbose
@@ -218,7 +221,7 @@ fit_landmark_model <- function(data,
         k = n_neighbors,
         metric = metric,
         backend = backend,
-        n_threads = n_threads
+        n.cores = n_threads
       )
       fit <- opentsne(
         reference_data,
@@ -232,7 +235,7 @@ fit_landmark_model <- function(data,
         backend = backend,
         keep_knn = keep_knn,
         verbose = verbose,
-        n_threads = n_threads,
+        n.cores = n_threads,
         ...
       )
       perplexity <- fit$parameters$perplexity %||% perplexity
@@ -253,7 +256,7 @@ fit_landmark_model <- function(data,
     graph_mode = if (identical(method, "umap")) graph_mode else NA_character_,
     backend = backend,
     seed = as.integer(seed),
-    n_threads = normalize_nn_threads(n_threads),
+    n.cores = normalize_nn_threads(n_threads),
     elapsed_sec = unname(elapsed[["elapsed"]])
   )
   class(out) <- c("fastEmbedR_landmark_model", "list")
@@ -287,7 +290,7 @@ landmark_query_data <- function(model, data, query_indices = NULL) {
         x,
         query_indices,
         setdiff(seq_len(nrow(x)), query_indices),
-        as.integer(model$n_threads)
+        as.integer(model$n.cores)
       )$landmarks
     } else {
       x[query_indices, , drop = FALSE]
@@ -507,7 +510,7 @@ project_landmark_tsne <- function(model,
     max_step_norm = max_step_norm,
     n_negatives = n_negatives,
     exact_repulsion_threshold = exact_threshold,
-    n_threads = n_threads,
+    n.cores = n_threads,
     seed = model$seed + 1009L,
     backend = model$backend,
     verbose = verbose
@@ -526,7 +529,7 @@ project_landmark_tsne <- function(model,
 #' @param data The original full data matrix, or a matrix containing only new
 #'   query observations in the same feature space.
 #' @param query_indices Optional rows of `data` to project.
-#' @param transform_k Number of reference neighbours.
+#' @param transform_k Number of reference neighbors.
 #' @param refinement_epochs Fixed-reference UMAP refinement epochs.
 #' @param transform_perplexity Perplexity of the openTSNE transform.
 #' @param transform_iter Number of openTSNE transform iterations.
@@ -534,7 +537,7 @@ project_landmark_tsne <- function(model,
 #' @param transform_n_negatives Number of reference negatives for openTSNE.
 #' @param initialization openTSNE query initialization.
 #' @param keep_knn Retain query-to-reference KNN output.
-#' @param n_threads CPU worker threads.
+#' @param n.cores Number of CPU cores.
 #' @param verbose Print optimizer progress.
 #' @param ... Low-level openTSNE transform controls.
 #' @return A `fastEmbedR_embedding`. When `data` is the original full matrix,
@@ -561,7 +564,7 @@ project_landmark_model <- function(model,
                                      "median", "weighted", "random"
                                    ),
                                    keep_knn = FALSE,
-                                   n_threads = NULL,
+                                   n.cores = NULL,
                                    verbose = FALSE,
                                    ...) {
   if (!inherits(model, "fastEmbedR_landmark_model")) {
@@ -573,7 +576,7 @@ project_landmark_model <- function(model,
     return(model$fit)
   }
   initialization <- match.arg(initialization)
-  n_threads <- normalize_nn_threads(n_threads %||% model$n_threads)
+  n_threads <- normalize_nn_threads(n.cores %||% model$n.cores)
   query_info <- landmark_query_data(model, data, query_indices)
   query <- query_info$data
   if (nrow(query) < 1L) {
@@ -592,7 +595,7 @@ project_landmark_model <- function(model,
       k = transform_k,
       metric = model$metric,
       backend = model$backend,
-      n_threads = n_threads
+      n.cores = n_threads
     )
   })
   projection_time <- system.time({

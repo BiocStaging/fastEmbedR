@@ -18,7 +18,7 @@ test_that("transform_tsne places query rows from supplied reference neighbours",
     perplexity = 5,
     n_iter = 6L,
     n_negatives = 10L,
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 401L
   )
 
@@ -53,7 +53,7 @@ test_that("transform_tsne CPU transform is deterministic across query-parallel t
     n_iter = 5L,
     n_negatives = 12L,
     exact_repulsion_threshold = 8L,
-    n_threads = 1L,
+    n.cores = 1L,
     backend = "cpu",
     seed = 406L
   )
@@ -64,14 +64,14 @@ test_that("transform_tsne CPU transform is deterministic across query-parallel t
     n_iter = 5L,
     n_negatives = 12L,
     exact_repulsion_threshold = 8L,
-    n_threads = 4L,
+    n.cores = 4L,
     backend = "cpu",
     seed = 406L
   )
 
   expect_equal(dim(four_threads), dim(one_thread))
   expect_equal(as.numeric(four_threads), as.numeric(one_thread), tolerance = 0)
-  expect_equal(attr(four_threads, "fastEmbedR_config")$n_threads, 4L)
+  expect_equal(attr(four_threads, "fastEmbedR_config")$n.cores, 4L)
 })
 
 test_that("transform_tsne CPU batching preserves fixed-reference results", {
@@ -103,7 +103,7 @@ test_that("transform_tsne CPU batching preserves fixed-reference results", {
     n_iter = 4L,
     n_negatives = 10L,
     exact_repulsion_threshold = 8L,
-    n_threads = 4L,
+    n.cores = 4L,
     backend = "cpu",
     seed = 407L
   )
@@ -116,7 +116,7 @@ test_that("transform_tsne CPU batching preserves fixed-reference results", {
     n_iter = 4L,
     n_negatives = 10L,
     exact_repulsion_threshold = 8L,
-    n_threads = 4L,
+    n.cores = 4L,
     backend = "cpu",
     seed = 407L
   )
@@ -327,7 +327,7 @@ test_that("landmark_tsne uses native HNSW for CPU projection KNN", {
     standardize = FALSE,
     keep_knn = TRUE,
     backend = "cpu",
-    n_threads = 2L
+    n.cores = 2L
   )
 
   expect_s3_class(fit, "fastEmbedR_embedding")
@@ -363,7 +363,7 @@ test_that("landmark_tsne uses the native Metal reference-query KNN", {
     standardize = FALSE,
     keep_knn = TRUE,
     backend = "metal",
-    n_threads = 2L,
+    n.cores = 2L,
     negative_gradient_method = "exact"
   )
 
@@ -403,7 +403,7 @@ test_that("landmark_tsne keeps Metal query search and transform native", {
     standardize = FALSE,
     keep_knn = FALSE,
     backend = "metal",
-    n_threads = 2L,
+    n.cores = 2L,
     record_costs = FALSE,
     negative_gradient_method = "exact"
   )

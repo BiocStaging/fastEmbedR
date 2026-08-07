@@ -76,7 +76,7 @@ test_that("one-call and KNN openTSNE agree with a shared initialization", {
     perplexity = 5,
     Y_init = y_init,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
     auto_config = FALSE,
@@ -87,7 +87,7 @@ test_that("one-call and KNN openTSNE agree with a shared initialization", {
     perplexity = 5,
     Y_init = y_init,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
     auto_config = FALSE,
@@ -109,7 +109,7 @@ test_that("evaluate_embedding accepts float32 data and layouts", {
     k = 5L,
     sample_size_for_local_metrics = 30L,
     sample_size_for_global_metrics = 30L,
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 104L
   )
 

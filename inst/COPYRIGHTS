@@ -43,6 +43,22 @@ Comment: The native Leiden local-move, refinement, and aggregation phase
          own compact graph representation and does not link to NetworKit. The
          complete upstream license is installed as LICENSES/NETWORKIT-LICENSE.
 
+Files: src/graph_clustering_accel_common.h
+       src/graph_clustering_cuda_api.h
+       src/graph_clustering_cuda_bridge.cpp
+       src/graph_clustering_cuda_kernels.cu
+       src/graph_clustering_cuda_stub.cpp
+       src/graph_clustering_metal_api.h
+       src/graph_clustering_metal_bridge.cpp
+       src/graph_clustering_metal_impl.mm
+       src/graph_clustering_metal_stub.cpp
+Copyright: Stefano Cacciatore
+License: MIT
+Comment: Independent package-native CUDA and Metal graph-clustering
+         implementation. RAPIDS cuGraph public documentation informed the
+         parallel CSR design, but no cuGraph source or binary is included,
+         linked, or called.
+
 Files: *
 Copyright: Stefano Cacciatore
 License: MIT

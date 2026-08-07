@@ -2,16 +2,20 @@
 backend_info <- function() {
   cuda_knn <- backend_flag(native_cuda_knn_available_cpp)
   cuda_embedding <- backend_flag(embedding_cuda_available_cpp)
+  cuda_clustering <- backend_flag(graph_clustering_cuda_available_cpp)
   metal_knn <- backend_flag(native_metal_knn_available_cpp)
   metal_embedding <- backend_flag(embedding_metal_available_cpp)
+  metal_clustering <- backend_flag(graph_clustering_metal_available_cpp)
   knn_available <- c(TRUE, cuda_knn, cuda_knn, metal_knn)
   embedding_available <- c(TRUE, FALSE, cuda_embedding, metal_embedding)
+  clustering_available <- c(TRUE, FALSE, cuda_clustering, metal_clustering)
 
   data.frame(
     backend = c("cpu", "cuvs", "cuda", "metal"),
-    available = knn_available | embedding_available,
+    available = knn_available | embedding_available | clustering_available,
     knn_available = knn_available,
     embedding_available = embedding_available,
+    clustering_available = clustering_available,
     explicit_backend = c("cpu", "cuda", "cuda", "metal"),
     device = c(cpu_summary(), NA_character_, NA_character_, NA_character_),
     runtime = rep(R.version$platform, 4L),
@@ -22,13 +26,13 @@ backend_info <- function() {
       } else {
         "RAPIDS cuVS KNN is unavailable in this build."
       },
-      if (cuda_embedding) {
-        "Package-native CUDA embedding kernels are available."
+      if (cuda_embedding && cuda_clustering) {
+        "Package-native CUDA embedding and graph-clustering kernels are available."
       } else {
-        "CUDA embedding kernels are unavailable in this build."
+        "One or more CUDA embedding/clustering components are unavailable."
       },
-      if (metal_knn && metal_embedding) {
-        "Package-native Metal KNN and embedding kernels are available."
+      if (metal_knn && metal_embedding && metal_clustering) {
+        "Package-native Metal KNN, embedding, and graph-clustering kernels are available."
       } else {
         "One or more Metal components are unavailable in this build."
       }

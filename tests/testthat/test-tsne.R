@@ -11,7 +11,7 @@ test_that("embed_knn runs native openTSNE from supplied neighbours", {
     n_iter = 4L,
     learning_rate = "auto",
     negative_gradient_method = "fft",
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 321L
   )
 
@@ -77,7 +77,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
       negative_gradient_method = "bh",
       early_exaggeration_iter = 2L,
       n_iter = 3L,
-      n_threads = 2L,
+      n.cores = 2L,
       seed = 312L
     ),
     "removed"
@@ -90,7 +90,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
       negative_gradient_method = "sampled",
       early_exaggeration_iter = 2L,
       n_iter = 3L,
-      n_threads = 2L,
+      n.cores = 2L,
       seed = 312L
     ),
     "changes the optimization mathematics"
@@ -103,7 +103,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
     negative_gradient_method = "exact",
     early_exaggeration_iter = 2L,
     n_iter = 3L,
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 312L
   )
   expect_equal(attr(exact, "fastEmbedR_config")$repulsion, "pair_symmetric")
@@ -115,7 +115,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
     negative_gradient_method = "fft",
     early_exaggeration_iter = 2L,
     n_iter = 3L,
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 312L
   )
   expect_equal(attr(fft, "fastEmbedR_config")$repulsion, "fft_grid")
@@ -135,7 +135,7 @@ test_that("opentsne has direct KNN input functions", {
     perplexity = 3,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
-    n_threads = 2L,
+    n.cores = 2L,
     seed = 322L
   )
   expect_equal(dim(layout), c(nrow(x), 2L))

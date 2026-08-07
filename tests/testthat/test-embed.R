@@ -20,7 +20,7 @@ test_that("embedding metrics expose the supported native choices", {
   expect_error(fastEmbedR:::resolve_embedding_metric("manhattan"), "arg")
 })
 
-test_that("preprocessing PCA uses fastPLS-style RSVD", {
+test_that("preprocessing PCA uses package-native RSVD", {
   set.seed(39)
   x <- matrix(rnorm(80L * 40L), 80L, 40L)
   pre <- fastEmbedR:::prepare_embedding_data(
@@ -152,7 +152,7 @@ test_that("opentsne and umap accept float32 matrix input", {
     early_exaggeration_iter = 2L,
     n_iter = 3L,
     seed = 42L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_s3_class(fit_tsne, "fastEmbedR_embedding")
   expect_equal(dim(fit_tsne$layout), c(30L, 2L))
@@ -163,7 +163,7 @@ test_that("opentsne and umap accept float32 matrix input", {
     x,
     n_neighbors = 5L,
     seed = 42L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_s3_class(fit_umap, "fastEmbedR_embedding")
   expect_equal(dim(fit_umap$layout), c(30L, 2L))
@@ -181,7 +181,7 @@ test_that("double matrix input keeps a double layout despite float internal KNN"
     early_exaggeration_iter = 2L,
     n_iter = 3L,
     seed = 46L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_type(fit_tsne$layout, "double")
   expect_false(inherits(fit_tsne$layout, "float32"))
@@ -190,7 +190,7 @@ test_that("double matrix input keeps a double layout despite float internal KNN"
     x,
     n_neighbors = 5L,
     seed = 46L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_type(fit_umap$layout, "double")
   expect_false(inherits(fit_umap$layout, "float32"))
@@ -640,35 +640,83 @@ test_that("opentsne convenience wrapper runs the automatic KNN workflow", {
   expect_equal(fit$parameters$method, "opentsne")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
   expect_equal(colnames(fit$layout), c("openTSNE1", "openTSNE2"))
-  expect_match(fit$parameters$init, "^pca_(fastPLS_)?rsvd$")
-  expect_match(fit$parameters$init_backend, "^(fastPLS_)?cpu_rsvd$")
+  expect_equal(fit$parameters$init, "pca_rsvd")
+  expect_equal(fit$parameters$init_backend, "cpu_rsvd")
 })
 
-test_that("opentsne PCA initialization can use fastPLS package backend", {
-  skip_if_not_installed("fastPLS")
+test_that("opentsne PCA initialization uses native CPU RSVD", {
   set.seed(44)
   x <- matrix(rnorm(160L), 40L, 4L)
   init <- opentsne_pca_init(x, n_components = 2L, seed = 44L, backend = "cpu")
 
   expect_equal(dim(init), c(40L, 2L))
   expect_true(all(is.finite(init)))
-  expect_match(attr(init, "fastEmbedR_init_method"), "^pca_fastPLS_rsvd$")
-  expect_equal(attr(init, "fastEmbedR_init_backend"), "fastPLS_cpu_rsvd")
+  expect_equal(attr(init, "fastEmbedR_init_method"), "pca_rsvd")
+  expect_equal(attr(init, "fastEmbedR_init_backend"), "cpu_rsvd")
+  expect_equal(
+    attr(init, "fastEmbedR_init_package"),
+    "fastEmbedR native CPU RSVD"
+  )
 })
 
 test_that("public PCA API uses randomized SVD", {
   set.seed(45)
   x <- matrix(rnorm(300L), 60L, 5L)
-  fit <- pca(x, ncomp = 2L, seed = 45L, backend = "cpu")
+  fit <- pca(x, ncomp = 2L, seed = 45L, backend = "cpu", n.cores = 2L)
 
   expect_s3_class(fit, "fastEmbedR_pca")
   expect_equal(dim(fit$scores), c(60L, 2L))
   expect_equal(dim(fit$loadings), c(5L, 2L))
   expect_equal(fit$method, "rsvd")
   expect_equal(fit$backend, "cpu_rsvd")
+  expect_equal(fit$engine, "native_cpu_float32")
+  expect_equal(fit$precision, "float32")
   expect_true(all(is.finite(fit$scores)))
   expect_true(all(is.finite(fit$loadings)))
   expect_true(all(is.finite(fit$singular_values)))
+  expect_identical(fit$n.cores_requested, 2L)
+  expect_true(is.na(fit$n.cores_effective) || fit$n.cores_effective >= 1L)
+  expect_match(fit$core_control, "environment")
+  expect_error(pca(x, n.cores = 0L), "positive integer")
+  expect_error(pca(x, n.cores = NA_integer_), "positive integer")
+})
+
+test_that("native CPU RSVD agrees with exact PCA", {
+  set.seed(451)
+  x <- matrix(rnorm(2400L), 120L, 20L)
+  fit <- pca(x, ncomp = 5L, seed = 451L, backend = "cpu", n.cores = 2L)
+  reference <- stats::prcomp(x, center = TRUE, scale. = FALSE, rank. = 5L)
+  reference_scores <- scale(reference$x, center = TRUE, scale = FALSE)
+  candidate_scores <- scale(as.matrix(fit$scores), center = TRUE, scale = FALSE)
+  correlation <- sum(svd(
+    crossprod(reference_scores, candidate_scores),
+    nu = 0L,
+    nv = 0L
+  )$d) / sqrt(
+    sum(reference_scores * reference_scores) *
+      sum(candidate_scores * candidate_scores)
+  )
+
+  expect_gte(correlation, 0.999)
+  expect_equal(
+    sum(candidate_scores * candidate_scores) /
+      sum(reference_scores * reference_scores),
+    1,
+    tolerance = 1e-5
+  )
+})
+
+test_that("native CPU RSVD preserves float32 output", {
+  skip_if_not_installed("float")
+  set.seed(452)
+  x <- float::fl(matrix(rnorm(2400L), 120L, 20L))
+  fit <- pca(x, ncomp = 5L, seed = 452L, backend = "cpu", n.cores = 2L)
+
+  expect_s4_class(fit$scores, "float32")
+  expect_s4_class(fit$loadings, "float32")
+  expect_identical(fit$precision, "float32")
+  expect_lt(as.numeric(object.size(fit$scores)), 120L * 5L * 8L)
+  expect_true(all(is.finite(as.matrix(fit$scores))))
 })
 
 test_that("public PCA API can return an openTSNE-ready initialization", {

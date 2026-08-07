@@ -7,12 +7,12 @@ by the package.
 This notice documents code provenance and design references for the cleaned
 package. The public API is focused on native UMAP and openTSNE-style embeddings
 from data matrices or precomputed KNN matrices. CPU and Metal one-call
-workflows use package-native nearest-neighbour implementations. Optional CUDA
+workflows use package-native nearest-neighbor implementations. Optional CUDA
 builds link directly to the installed RAPIDS cuVS C API. The earlier
 legacy t-SNE, InfoTSNE, PaCMAP, TriMap, and LocalMAP reducers were removed from
 the exported package API.
 
-Nearest-neighbour ownership and GPU design references
+Nearest-neighbor ownership and GPU design references
 -----------------------------------------------------
 
 fastEmbedR contains a compact CPU HNSW implementation distilled from FAISS
@@ -24,7 +24,7 @@ projection, four native Metal centroid passes, four-SIMD-group fused list
 selection, and a two-stage projected-shortlist/exact-rerank search. Four
 deterministic pilot strata select `nprobe` and expand the shortlist from 288 to
 384 or 512 candidates when needed. Direct Metal reranking is retained as a
-safety fallback. Returned neighbours are always ranked with the original
+safety fallback. Returned neighbors are always ranked with the original
 full-dimensional distance.
 
 The Metal list-scan/top-k organization was also informed by the fused
@@ -50,9 +50,9 @@ Apple Metal Performance Shaders in a single resident unified-memory workspace.
 Only the small projected Gram matrix is handled by fastEmbedR's float32 Jacobi
 eigensolver on the CPU. The resident workspace and block-subspace organization
 were informed by RAPIDS RAFT TSVD, but no RAPIDS source is copied, vendored, or
-called by the Metal implementation. CPU PCA continues to use the
-fastPLS-style RSVD family; optional CUDA builds use native RAPIDS RAFT TSVD
-when compiled.
+called by the Metal implementation. CPU and public CUDA PCA use fastEmbedR's
+package-native RSVD implementation; resident CUDA openTSNE initialization uses
+native RAPIDS RAFT TSVD when compiled.
 
 The GPU-resident pipeline architecture was informed by:
 
@@ -89,9 +89,14 @@ also informed by:
   Repository: https://github.com/networkit/networkit
   License: MIT
 
-fastEmbedR uses its own compact graph storage and sequential optimizer. It does
-not vendor or link NetworKit. The full NetworKit MIT notice is installed as
-`LICENSES/NETWORKIT-LICENSE`.
+fastEmbedR uses its own compact graph storage and CPU, CUDA, and Metal
+optimizers. CUDA and Metal use package-owned float32 CSR kernels for seeded
+local moving and Leiden refinement; package-owned C++ performs graph
+compaction and coarsening between levels. The accelerator organization was
+informed by the public RAPIDS cuGraph documentation, but no cuGraph source,
+library, Python module, or runtime symbol is copied, vendored, linked, or
+called. fastEmbedR also does not vendor or link NetworKit. The full NetworKit
+MIT notice is installed as `LICENSES/NETWORKIT-LICENSE`.
 
 Walktrap independently implements the random-walk distance and
 adjacent-community agglomeration described by Pons and Latapy. No igraph
@@ -99,7 +104,7 @@ Walktrap source is copied. The implementation is validated against igraph in
 guarded package tests.
 
 The native Metal UMAP backend receives the package's host-prepared CSR fuzzy or
-binary graph, packs its active row-neighbour schedule into float32/int32 Metal
+binary graph, packs its active row-neighbor schedule into float32/int32 Metal
 buffers once, and keeps layout updates on the GPU for all epochs. Graph
 construction time remains labelled separately from Metal optimization. It does
 not call Python or MLX.

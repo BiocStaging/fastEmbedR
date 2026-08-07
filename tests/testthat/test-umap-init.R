@@ -8,19 +8,21 @@ test_that("UMAP initialization is deterministic and reusable", {
     backend = "cpu",
     graph_mode = "fuzzy",
     seed = 701L,
-    n_threads = 2L
+    n.cores = 2L
   )
   init_b <- umap_init(
     knn,
     backend = "cpu",
     graph_mode = "fuzzy",
     seed = 701L,
-    n_threads = 2L
+    n.cores = 2L
   )
 
   expect_s3_class(init_a, "fastEmbedR_umap_initialization")
   expect_equal(init_a$layout, init_b$layout, tolerance = 1e-7)
   expect_identical(init_a$parameters$init_backend, "cpu_fuzzy_csr")
+  expect_identical(init_a$parameters$n.cores, 2L)
+  expect_null(init_a$parameters$n_threads)
   expect_s3_class(init_a$prepared, "fastEmbedR_umap_prepared")
   expect_equal(
     init_a$timings$stage,
@@ -31,13 +33,42 @@ test_that("UMAP initialization is deterministic and reusable", {
     init_a,
     backend = "cpu",
     seed = 701L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_equal(dim(layout), c(nrow(x), 2L))
   expect_true(all(is.finite(layout)))
   cfg <- attr(layout, "fastEmbedR_config")
   expect_true(isTRUE(cfg$prepared_reuse_hit))
   expect_true(isTRUE(cfg$initialization_reuse_hit))
+})
+
+test_that("standard fuzzy graph is the UMAP default", {
+  set.seed(700)
+  x <- matrix(rnorm(180L), 30L, 6L)
+  knn <- test_exact_knn(x, k = 8L, backend = "cpu")
+
+  prepared <- prepare_umap_knn(knn, backend = "cpu", n.cores = 2L)
+  expect_identical(prepared$config$graph_mode, "fuzzy")
+
+  default_layout <- umap_knn(
+    knn,
+    backend = "cpu",
+    seed = 700L,
+    n.cores = 2L
+  )
+  explicit_layout <- umap_knn(
+    knn,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    seed = 700L,
+    n.cores = 2L
+  )
+
+  expect_identical(
+    attr(default_layout, "fastEmbedR_config")$graph_mode,
+    "fuzzy"
+  )
+  expect_equal(default_layout, explicit_layout, tolerance = 1e-7)
 })
 
 test_that("UMAP initialization validates prepared graph mode", {
@@ -64,14 +95,14 @@ test_that("Metal can optimize a reusable CPU UMAP initialization", {
     backend = "cpu",
     graph_mode = "fuzzy",
     seed = 703L,
-    n_threads = 2L
+    n.cores = 2L
   )
 
   layout <- umap_knn(
     init,
     backend = "metal",
     seed = 703L,
-    n_threads = 2L
+    n.cores = 2L
   )
   expect_equal(dim(layout), c(nrow(x), 2L))
   expect_true(all(is.finite(layout)))

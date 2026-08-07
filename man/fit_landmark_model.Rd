@@ -14,8 +14,8 @@ fit_landmark_model(
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   seed = 4L,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
-  graph_mode = c("binary", "fuzzy"),
+  n.cores = NULL,
+  graph_mode = c("fuzzy", "binary"),
   keep_knn = FALSE,
   verbose = FALSE,
   ...
@@ -43,9 +43,10 @@ precomputed KNN support width; `NULL` derives it from `perplexity`.}
 
 \item{backend}{`"cpu"`, `"cuda"`, or `"metal"`.}
 
-\item{n_threads}{CPU worker threads.}
+\item{n.cores}{Number of CPU cores.}
 
-\item{graph_mode}{UMAP graph mode, passed unchanged to [umap()].}
+\item{graph_mode}{UMAP graph mode, passed unchanged to [umap()]. The
+standard `"fuzzy"` graph is the default.}
 
 \item{keep_knn}{Retain reference KNN output.}
 

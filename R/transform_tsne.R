@@ -35,7 +35,7 @@
 #'   repulsion is native and experimental for large reference sets.
 #' @param exact_repulsion_threshold Use exact query-reference repulsion at or
 #'   below this reference count.
-#' @param n_threads Number of CPU worker threads for the native optimizer.
+#' @param n.cores Number of CPU cores for the native optimizer.
 #' @param seed Random seed.
 #' @param backend Backend used for query KNN when `knn` is `NULL`; `"metal"`
 #'   and `"cuda"` run their native fixed-reference transform optimizers when
@@ -73,10 +73,11 @@ transform_tsne <- function(reference_layout,
                            max_step_norm = Inf,
                            n_negatives = NULL,
                            exact_repulsion_threshold = 4096L,
-                           n_threads = NULL,
+                           n.cores = NULL,
                            seed = 4L,
                            backend = "auto",
                            verbose = FALSE) {
+  n_threads <- n.cores
   if (inherits(reference_layout, "fastEmbedR_embedding")) {
     reference_layout <- reference_layout$layout
   }
@@ -166,7 +167,7 @@ transform_tsne <- function(reference_layout,
   }
   n_threads <- as.integer(n_threads)
   if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 0L) {
-    stop("`n_threads` must be NULL or a non-negative integer.", call. = FALSE)
+    stop("`n.cores` must be NULL or a non-negative integer.", call. = FALSE)
   }
   n_iter <- as.integer(n_iter)
   early_exaggeration_iter <- as.integer(early_exaggeration_iter)
@@ -311,7 +312,7 @@ transform_tsne <- function(reference_layout,
     affinity_storage = out$affinity_storage,
     transform_batch_size = out$transform_batch_size,
     transform_batches = out$transform_batches,
-    n_threads = if (is.null(out$n_threads)) NA_integer_ else out$n_threads,
+    n.cores = if (is.null(out$n_threads)) NA_integer_ else out$n_threads,
     seed = as.integer(seed),
     provenance = "openTSNE_transform_design_native_cpp"
   )
@@ -694,7 +695,7 @@ resident_projected_layout <- function(resident,
     affinity_storage = resident$affinity_storage,
     transform_batch_size = NA_integer_,
     transform_batches = NA_integer_,
-    n_threads = NA_integer_,
+    n.cores = NA_integer_,
     seed = as.integer(seed),
     resident = TRUE,
     returned_intermediates = resident$returned_intermediates,
@@ -737,8 +738,8 @@ resident_projection_result <- function(backend, k) {
 #' @param transform_perplexity Perplexity used by `transform_tsne()`.
 #' @param transform_iter Number of normal transform iterations. Use `0` for
 #'   projection-only landmarking with no transform refinement.
-#' @param n_neighbors Number of non-self neighbours used to embed the landmark
-#'   reference set. If `NULL`, it follows the same neighbour policy as
+#' @param n_neighbors Number of non-self neighbors used to embed the landmark
+#'   reference set. If `NULL`, it follows the same neighbor policy as
 #'   [opentsne()]: `ceiling(perplexity)` when perplexity is supplied.
 #' @param perplexity t-SNE perplexity for the landmark reference embedding. If
 #'   `NULL`, the optimizer chooses a safe value from the reference KNN width and
@@ -750,7 +751,7 @@ resident_projection_result <- function(backend, k) {
 #'   is native and experimental for large reference sets.
 #' @param initialization Initial placement for transformed observations.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param n_threads Number of CPU worker threads used by CPU KNN and CPU
+#' @param n.cores Number of CPU cores used by CPU KNN and CPU
 #'   transform optimization. Native GPU stages ignore this argument.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
@@ -779,8 +780,9 @@ landmark_tsne <- function(data,
                           initialization = c("median", "weighted", "random"),
                           keep_knn = FALSE,
                           verbose = FALSE,
-                          n_threads = NULL,
+                          n.cores = NULL,
                           ...) {
+  n_threads <- n.cores
   dots <- list(...)
   reference_method <- match.arg(reference_method)
   initialization <- match.arg(initialization)
@@ -812,7 +814,7 @@ landmark_tsne <- function(data,
     x,
     landmarks,
     seed = seed,
-    n_threads = n_threads
+    n.cores = n_threads
   )
   landmark_indices <- landmark_selection$indices
   if (length(landmark_selection$query_indices) == 0L) {
@@ -826,7 +828,7 @@ landmark_tsne <- function(data,
       backend = backend,
       keep_knn = keep_knn,
       verbose = verbose,
-      n_threads = n_threads,
+      n.cores = n_threads,
       ...
     ))
   }
@@ -858,7 +860,7 @@ landmark_tsne <- function(data,
       seed = seed,
       backend = backend,
       verbose = verbose,
-      n_threads = n_threads,
+      n.cores = n_threads,
       ...
     )
   })
@@ -1120,7 +1122,7 @@ landmark_tsne <- function(data,
             max_grad_norm = resident_max_grad_norm,
             max_step_norm = resident_max_step_norm,
             n_negatives = transform_n_negatives,
-            n_threads = n_threads,
+            n.cores = n_threads,
             seed = seed + 1009L,
             backend = backend,
             verbose = verbose
@@ -1216,7 +1218,7 @@ landmark_tsne <- function(data,
       projection_init_method = projection_init_method,
       backend = attr(projected, "backend"),
       transform_backend = attr(projected, "backend"),
-      n_threads = normalize_nn_threads(n_threads),
+      n.cores = normalize_nn_threads(n_threads),
       landmark = TRUE,
       n_landmarks = n_landmarks,
       landmark_fraction = n_landmarks / n,

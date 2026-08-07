@@ -10,8 +10,8 @@ umap_init(
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   backend = c("cpu", "cuda", "metal"),
   seed = 4L,
-  n_threads = NULL,
-  graph_mode = c("binary", "fuzzy")
+  n.cores = NULL,
+  graph_mode = c("fuzzy", "binary")
 )
 }
 \arguments{
@@ -32,9 +32,10 @@ matrix.}
 
 \item{seed}{Random seed.}
 
-\item{n_threads}{Number of CPU worker threads.}
+\item{n.cores}{Number of CPU cores.}
 
-\item{graph_mode}{UMAP graph weighting: \code{"binary"} or \code{"fuzzy"}.}
+\item{graph_mode}{UMAP graph weighting. \code{"fuzzy"} is the standard
+default; \code{"binary"} requests the adjacency-only sensitivity graph.}
 }
 \value{
 A \code{fastEmbedR_umap_initialization} object containing the initial layout,

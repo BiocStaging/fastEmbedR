@@ -12,7 +12,7 @@ embed_knn(
   seed = 4L,
   verbose = FALSE,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
+  n.cores = NULL,
   ...
 )
 }
@@ -34,7 +34,7 @@ automatically.}
 
 \item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.}
 
-\item{n_threads}{Number of CPU worker threads used by the CPU optimizer.
+\item{n.cores}{Number of CPU cores used by the CPU optimizer.
 Native GPU optimizers ignore this argument.}
 
 \item{...}{Additional openTSNE-specific parameters such as `perplexity`,

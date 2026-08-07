@@ -14,6 +14,8 @@ permissively licensed project.
   walks. J Graph Algorithms Appl. 2006;10:191-218.
 - NetworKit repository: <https://github.com/networkit/networkit>
 - NetworKit license: MIT
+- RAPIDS cuGraph repository: <https://github.com/rapidsai/cugraph>
+- RAPIDS cuGraph license: Apache-2.0
 
 Current use in `fastEmbedR`:
 
@@ -22,14 +24,21 @@ Current use in `fastEmbedR`:
   phases. The Leiden phase organization is informed by NetworKit's
   MIT-licensed ParallelLeiden implementation; no NetworKit library or source
   file is linked or vendored.
+- `src/graph_clustering_accel_common.h`,
+  `src/graph_clustering_cuda_kernels.cu`, and
+  `src/graph_clustering_metal_impl.mm` implement the shared multilevel
+  orchestration and independent CUDA/Metal local-moving and refinement
+  kernels. Public cuGraph documentation informed the CSR/parallel-processing
+  design, but no cuGraph source, binary, Python module, or runtime symbol is
+  copied, linked, or called.
 - `src/walktrap.cpp` independently implements the Pons-Latapy transition
   probabilities, degree-scaled random-walk distance, Ward/Lance-Williams
   updates on adjacent communities, and modularity-selected cut.
 - `tests/testthat/test-graph-clustering.R` compares canonical and stochastic
   graph results with guarded igraph reference implementations. igraph is not a
   runtime dependency.
-- cuGraph was evaluated as a possible GPU dependency and deliberately omitted:
-  this package surface does not justify the additional runtime stack.
+- cuGraph was evaluated as a possible GPU dependency and deliberately omitted;
+  fastEmbedR retains its own graph representation and device kernels.
 
 ## annembed
 
@@ -48,12 +57,12 @@ Ideas worth testing later:
 - Distance-aware landmark projection jitter: initialize non-landmarks near the
   matched landmark with noise scaled by the high-dimensional projection
   distance.
-- Directed probability-normalized graph weights: convert neighbour distances
+- Directed probability-normalized graph weights: convert neighbor distances
   to shifted exponential weights, normalize per source row, and allow local
   density to modulate the scale.
 - Diffusion-map or spectral initialization from the ANN graph.
-- Graph-neighbour preservation diagnostics: estimate quality by checking
-  whether original graph neighbours remain within comparable radii in the
+- Graph-neighbor preservation diagnostics: estimate quality by checking
+  whether original graph neighbors remain within comparable radii in the
   embedded KNN graph.
 - Possible utility ideas: randomized range/SVD routines, hubness diagnostics,
   and intrinsic-dimension diagnostics.
@@ -63,10 +72,10 @@ Source locations studied, not copied:
 - `README.md`: overview of HNSW initialization, density-aware graph weights,
   diffusion maps, and quality estimation.
 - `src/tools/kdumap.rs::get_scale_from_proba_normalisation`: row-normalized
-  shifted exponential neighbour weighting.
+  shifted exponential neighbor weighting.
 - `src/embedder.rs::h_embed`: hierarchical embedding and landmark projection
   initialization.
-- `src/embedder.rs::get_quality_estimate_from_edge_length`: neighbourhood
+- `src/embedder.rs::get_quality_estimate_from_edge_length`: neighborhood
   preservation quality diagnostic.
 
 If any future implementation copies or closely adapts annembed source code,
@@ -79,17 +88,17 @@ MIT/Apache-2.0 copyright and license notices.
 - CRAN: <https://cran.r-project.org/package=Rtsne>
 - Version studied locally: 0.17
 - License: BSD-style package license in Rtsne's `LICENSE` file.
-- Current use in `fastEmbedR`: R-level neighbour-input behaviour and parameter
+- Current use in `fastEmbedR`: R-level neighbor-input behaviour and parameter
   checking are informed by `Rtsne::Rtsne_neighbors()`. Rtsne's Barnes-Hut C++
   source files are not copied or vendored.
 
 Ideas/code behaviour used:
 
 - KNN input validation: index/distance matrices must have identical dimensions
-  and valid neighbour indices.
+  and valid neighbor indices.
 - Translated t-SNE defaults: perplexity, `theta`, `max_iter`, early
   exaggeration, momentum switch, adaptive gains, and learning rate controls.
-- Gaussian bandwidth binary search from neighbour distances to match target
+- Gaussian bandwidth binary search from neighbor distances to match target
   perplexity.
 - Sparse symmetrized high-dimensional probabilities from precomputed KNN.
 
@@ -138,7 +147,7 @@ Ideas implemented:
 Implemented locations:
 
 - `src/tsne_neighbors.cpp::tsne_auto_parameters_cpp`
-- `src/tsne_neighbors.cpp::knn_tsne_opentsne_cpp`
+- `src/tsne_neighbors.cpp::knn_tsne_opentsne_float_cpp`
 - `R/fast_knn_tsne.R::resolve_opentsne_auto_parameters`
 
 ## openTSNE
@@ -168,7 +177,7 @@ Ideas/code behaviour used:
   compute an approximate negative gradient and normalizer from a quadtree,
   then add sparse positive KNN forces.
 - For transforms/landmark projection, initialize query points from reference
-  embedding neighbours, compute asymmetric query-to-reference affinities, and
+  embedding neighbors, compute asymmetric query-to-reference affinities, and
   optimize query points against the fixed reference embedding.
 - For the native Metal full-embedding path, compute exact dense symmetric KNN
   affinities from row-wise perplexity probabilities and use a global t-SNE
@@ -361,12 +370,12 @@ Ideas used:
 Ideas reviewed:
 
 - Keeping the public API independent from a specific R implementation.
-- Separating neighbour search, graph construction, initialization, and
+- Separating neighbor search, graph construction, initialization, and
   optimization into testable modules.
 - Maintaining package-local optimizer code rather than adapting GPL-only
   implementation details from benchmark reference packages.
 
-## FAISS And Faiss-mlx Nearest-Neighbour Search
+## FAISS And Faiss-mlx Nearest-Neighbor Search
 
 - FAISS repository: <https://github.com/facebookresearch/faiss>
 - FAISS source: release 1.14.3, commit
@@ -428,20 +437,6 @@ Ideas used:
 Implemented locations:
 
 - `src/embedding_metal_impl.mm`: native Metal UMAP/openTSNE kernels.
-
-## fastPLS
-
-- Repository: <https://github.com/tkcaccia/fastPLS>
-- Current use in `fastEmbedR`: optional runtime provider of randomized-SVD PCA
-  initialization and backend-aware linear algebra for CPU when fastPLS 0.99.3
-  or newer is installed. fastEmbedR retains a package-local CPU RSVD fallback;
-  Metal openTSNE initialization now uses the package-native MPS TSVD path.
-
-Implemented locations:
-
-- `R/fast_knn_tsne.R::make_opentsne_pca_init`
-- `R/fast_knn_tsne.R::make_opentsne_pca_init_from_data`
-- `R/embed.R::fastembedr_fastpls_pca`
 
 ## Apple Metal Performance Shaders Matrix
 

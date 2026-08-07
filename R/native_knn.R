@@ -196,21 +196,21 @@ fastembedr_nn_policy_engine <- function(policy, keep_gpu = FALSE) {
   "native_unavailable"
 }
 
-#' Precompute native nearest neighbours
+#' Precompute native nearest neighbors
 #'
-#' `precompute_knn()` exposes the same package-native nearest-neighbour search
+#' `precompute_knn()` exposes the same package-native nearest-neighbor search
 #' used internally by [umap()] and [opentsne()]. The search algorithm is chosen
 #' by fastEmbedR for the requested backend and is deliberately not a user
 #' parameter.
 #'
 #' @param data Numeric matrix, numeric data frame, or a `float::float32` matrix
 #'   with observations in rows.
-#' @param k Number of non-self nearest neighbours to return.
+#' @param k Number of non-self nearest neighbors to return.
 #' @param metric Distance metric: `"euclidean"`, `"cosine"`,
 #'   `"correlation"`, or `"inner_product"`. Raw inner product is available only
 #'   in CUDA builds that support it.
 #' @param backend Search backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param n_threads Number of CPU worker threads. Native GPU backends ignore
+#' @param n.cores Number of CPU cores. Native GPU backends ignore
 #'   this argument.
 #'
 #' @details
@@ -231,7 +231,7 @@ fastembedr_nn_policy_engine <- function(policy, keep_gpu = FALSE) {
 #'   and own device-resident index and distance buffers.
 #' @examples
 #' x <- scale(as.matrix(iris[, 1:4]))
-#' knn <- precompute_knn(x, k = 15, backend = "cpu", n_threads = 2)
+#' knn <- precompute_knn(x, k = 15, backend = "cpu", n.cores = 2)
 #' layout <- umap_knn(knn, backend = "cpu", seed = 1)
 #' @export
 precompute_knn <- function(data,
@@ -241,7 +241,8 @@ precompute_knn <- function(data,
                              "inner_product"
                            ),
                            backend = c("cpu", "cuda", "metal"),
-                           n_threads = NULL) {
+                           n.cores = NULL) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   metric <- resolve_embedding_metric(metric, data)
   prepared <- prepare_embedding_data(
@@ -301,12 +302,12 @@ precompute_knn <- function(data,
   out
 }
 
-#' Precompute query-to-reference nearest neighbours
+#' Precompute query-to-reference nearest neighbors
 #'
 #' `precompute_query_knn()` searches a fixed reference matrix for every row of
 #' a query matrix. It uses the same package-native backend family and routing
 #' policy as [precompute_knn()], but does not compute unnecessary
-#' reference-to-reference or query-to-query neighbours.
+#' reference-to-reference or query-to-query neighbors.
 #'
 #' @param reference Reference observations in rows.
 #' @param query Query observations in rows and the same feature space as
@@ -337,7 +338,8 @@ precompute_query_knn <- function(reference,
                                    "inner_product"
                                  ),
                                  backend = c("cpu", "cuda", "metal"),
-                                 n_threads = NULL) {
+                                 n.cores = NULL) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   metric <- resolve_embedding_metric(metric, reference)
   reference_prepared <- prepare_embedding_data(

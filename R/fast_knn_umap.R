@@ -10,8 +10,9 @@
 #' @param seed Integer random seed.
 #' @param verbose Print progress from C++.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param graph_mode Graph weighting mode. `"binary"` uses a symmetric
-#'   unit-weight graph. `"fuzzy"` uses standard UMAP fuzzy graph weights.
+#' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses
+#'   standard UMAP fuzzy graph weights. `"binary"` uses a symmetric
+#'   unit-weight sensitivity graph.
 #' @return A numeric matrix with `nrow(indices)` rows and `n_components` columns.
 #' @details The public API intentionally keeps only the inputs that matter. The
 #'   package chooses epochs, negative sampling, learning rate, spectral
@@ -25,7 +26,7 @@ fast_knn_umap <- function(indices,
                           verbose = FALSE,
                           backend = c("cpu", "cuda", "metal"),
                           n_threads = NULL,
-                          graph_mode = c("binary", "fuzzy")) {
+                          graph_mode = c("fuzzy", "binary")) {
   fast_knn_umap_core(
     indices,
     distances,
@@ -47,7 +48,7 @@ fast_knn_umap_core <- function(indices,
                                n_threads = NULL,
                                n_epochs = NULL,
                                config_override = NULL,
-                               graph_mode = c("binary", "fuzzy")) {
+                               graph_mode = c("fuzzy", "binary")) {
   if (inherits(indices, "fastEmbedR_umap_initialization")) {
     if (!is.null(distances)) {
       stop(
@@ -423,7 +424,7 @@ fast_knn_umap_core <- function(indices,
       "UMAP",
       return_float32 = is_float32_matrix(distances)
     )
-    attr(layout, "fastEmbedR_config") <- cfg
+    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
     return(layout)
   }
 
@@ -451,7 +452,7 @@ fast_knn_umap_core <- function(indices,
       "UMAP",
       return_float32 = is_float32_matrix(distances)
     )
-    attr(layout, "fastEmbedR_config") <- cfg
+    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
     return(layout)
   }
 
@@ -500,7 +501,7 @@ fast_knn_umap_core <- function(indices,
       "UMAP",
       return_float32 = is_float32_matrix(distances)
     )
-    attr(layout, "fastEmbedR_config") <- cfg
+    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
     return(layout)
   }
   graph <- umap_build_csr_graph(
@@ -547,7 +548,7 @@ fast_knn_umap_core <- function(indices,
     "UMAP",
     return_float32 = is_float32_matrix(distances)
   )
-  attr(layout, "fastEmbedR_config") <- cfg
+  attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
   layout
 }
 
@@ -558,7 +559,7 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
                                         n_threads = NULL,
                                         n_epochs = NULL,
                                         config_override = NULL,
-                                        graph_mode = c("binary", "fuzzy")) {
+                                        graph_mode = c("fuzzy", "binary")) {
   graph_mode <- match.arg(graph_mode)
   if (n_components != 2L) {
     stop("Native CUDA UMAP currently supports only `n_components = 2`.", call. = FALSE)
@@ -641,7 +642,7 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
     identical(graph_mode, "binary")
   )
   layout <- finalize_embedding_layout(layout, "UMAP", return_float32 = TRUE)
-  attr(layout, "fastEmbedR_config") <- cfg
+  attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
   layout
 }
 
@@ -670,8 +671,9 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
 prepare_umap_knn <- function(indices,
                              distances = NULL,
                              backend = c("cpu", "cuda", "metal"),
-                             n_threads = NULL,
-                             graph_mode = c("binary", "fuzzy")) {
+                             n.cores = NULL,
+                             graph_mode = c("fuzzy", "binary")) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   knn <- coerce_knn_input(indices, distances)
@@ -719,7 +721,7 @@ prepare_umap_knn <- function(indices,
   if (!is.null(n_threads)) {
     n_threads <- as.integer(n_threads)
     if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
-      stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
+      stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
     }
     cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
   }
@@ -933,7 +935,7 @@ fast_knn_umap_prepared_core <- function(prepared,
     "UMAP",
     return_float32 = is_float32_matrix(graph$weights)
   )
-  attr(layout, "fastEmbedR_config") <- cfg
+  attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
   layout
 }
 
@@ -943,7 +945,7 @@ umap_build_csr_graph <- function(indices,
                                  n_cols,
                                  edge_budget,
                                  n_threads,
-                                 graph_mode = c("binary", "fuzzy")) {
+                                 graph_mode = c("fuzzy", "binary")) {
   graph_mode <- match.arg(graph_mode)
   distance_is_float32 <- is_float32_matrix(distances)
   if (identical(graph_mode, "binary")) {
@@ -1133,7 +1135,7 @@ fast_knn_umap_auto_pilot_skip_reason <- function(cfg,
   if (!cfg$epoch_source %in% c("clean_large_default")) return("default is not the clean atomic UMAP path")
   if (!isTRUE(getOption("fastEmbedR.knn_pilot", FALSE))) return("disabled by default; set option fastEmbedR.knn_pilot = TRUE for internal benchmarking")
   if (nrow(indices) < fast_knn_umap_auto_pilot_min_n()) return("below auto KNN pilot size threshold")
-  if (ncol(indices) < 10L) return("too few supplied neighbours for a stable pilot")
+  if (ncol(indices) < 10L) return("too few supplied neighbors for a stable pilot")
   "not selected"
 }
 
@@ -1519,5 +1521,42 @@ spectral_knn_init <- function(indices,
   out
 }
 
-# Compatibility alias. The public KNN API is `embed_knn(method = "umap")`.
-umap_knn <- fast_knn_umap
+#' Run UMAP from precomputed nearest neighbors
+#'
+#' @param indices Integer matrix of nearest-neighbor indices, one row per
+#'   observation, or a KNN object containing `indices` and `distances`.
+#'   One-based and zero-based indices are accepted. A self-neighbor first
+#'   column is removed automatically.
+#' @param distances Numeric matrix matching `indices`. Leave as `NULL` when
+#'   `indices` is a KNN object.
+#' @param n_components Output dimensionality.
+#' @param seed Integer random seed.
+#' @param verbose Print native optimizer progress.
+#' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
+#' @param n.cores Number of CPU cores used by CPU UMAP. Native GPU backends
+#'   ignore this argument.
+#' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses
+#'   standard UMAP fuzzy graph weights. `"binary"` uses a symmetric
+#'   unit-weight sensitivity graph.
+#' @return A numeric embedding matrix with `nrow(indices)` rows and
+#'   `n_components` columns.
+#' @export
+umap_knn <- function(indices,
+                     distances = NULL,
+                     n_components = 2L,
+                     seed = 42L,
+                     verbose = FALSE,
+                     backend = c("cpu", "cuda", "metal"),
+                     n.cores = NULL,
+                     graph_mode = c("fuzzy", "binary")) {
+  fast_knn_umap(
+    indices,
+    distances,
+    n_components = n_components,
+    seed = seed,
+    verbose = verbose,
+    backend = backend,
+    n_threads = n.cores,
+    graph_mode = graph_mode
+  )
+}

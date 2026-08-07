@@ -25,7 +25,7 @@ knitr::opts_chunk$set(
   fig.align = "center",
   fig.width = 8,
   fig.height = 4,
-  fig.retina = 2,
+  fig.retina = if (knitr::is_html_output()) 2 else NULL,
   dpi = 96,
   dev.args = list(bg = "white")
 )
@@ -79,8 +79,6 @@ The public workflow is intentionally small:
 | Accelerate a very large run with an explicit landmark approximation | `landmark_umap()` or `landmark_tsne()` |
 | Place new observations in a fixed t-SNE reference | `transform_tsne()` |
 | Quantify embedding quality | `evaluate_embedding()` |
-| Build a compact clustering graph | `knn_graph()` |
-| Find Louvain, Leiden, or Walktrap communities | `graph_cluster()` |
 
 # A first analysis
 
@@ -107,7 +105,7 @@ fit_umap <- umap(
   n_neighbors = 15,
   graph_mode = "fuzzy",
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -115,7 +113,7 @@ fit_tsne <- opentsne(
   x,
   perplexity = 10,
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -139,8 +137,8 @@ par(old_par)
 The backend recorded in the result is the backend that actually ran:
 
 ```{r result-metadata}
-fit_umap$parameters[c("backend", "nn_backend", "n_threads", "graph_mode")]
-fit_tsne$parameters[c("backend", "nn_backend", "n_threads", "perplexity")]
+fit_umap$parameters[c("backend", "nn_backend", "n.cores", "graph_mode")]
+fit_tsne$parameters[c("backend", "nn_backend", "n.cores", "perplexity")]
 ```
 
 # Choosing between UMAP and openTSNE
@@ -160,31 +158,38 @@ Distances and empty space in either two-dimensional plot should not be treated
 as calibrated biological effect sizes. Compare methods with neighborhood and
 label-aware metrics rather than visual appearance alone.
 
-# Graph clustering
+# Optional downstream graph clustering
+
+Graph clustering is a secondary downstream utility; the primary package
+contribution is native UMAP and openTSNE embedding.
 
 `knn_graph()` builds a compact undirected graph from raw data, an embedding, or
 precomputed neighbors. It uses the existing KNN route selected by `backend`;
 there is no second nearest-neighbor method menu inside the graph API.
 
 ```{r graph-clustering}
-graph <- knn_graph(fit_tsne, k = 20, weight = "snn", n_threads = 2)
+graph <- knn_graph(fit_tsne, k = 20, weight = "snn", n.cores = 2)
 communities <- graph_cluster(graph, method = "leiden", seed = 4)
 table(communities$membership)
 ```
 
-Community detection is native C++ CPU code and is reported as such. Louvain
-and Leiden use sparse graph storage and scale to large KNN graphs. `walktrap`
-is the true Pons-Latapy random-walk agglomeration method; its exact transition
-matrix is intentionally limited to moderate graphs. Neither `igraph`,
-cuGraph, nor an external clustering routine is called at run time.
+Louvain and Leiden have native CPU, CUDA, and Metal backends and use sparse
+graph storage. Select an accelerator explicitly with
+`graph_cluster(..., backend = "cuda")` or `"metal"`; an unavailable backend
+fails rather than falling back to CPU. `walktrap` is the true Pons-Latapy
+random-walk agglomeration method and remains CPU-only because its exact
+transition matrix is intentionally limited to moderate graphs. Neither
+`igraph`, cuGraph, nor an external clustering routine is called at run time.
 
 # PCA and reproducible openTSNE initialization
 
-`pca()` exposes the backend-native truncated PCA used for initialization. Its
-core argument order follows `fastPLS::pca()` (`x`, `ncomp`, `xtest`, `center`,
-`scale`, and `backend`) but deliberately omits an SVD-method menu. Randomized
-SVD is the supported decomposition family. `opentsne_init = FALSE` is the
-default; request it when the t-SNE-ready layout is needed.
+`pca()` exposes the backend-native truncated PCA used for initialization. It
+deliberately omits an SVD-method menu: randomized SVD is the supported
+decomposition family. For `backend = "cpu"`,
+`n.cores` sets the CPU BLAS/OpenMP thread limit for the call.
+`opentsne_init = FALSE` is the default; request it when the t-SNE-ready layout
+is needed. `irlba` is not used by the package implementation and appears only
+as an external benchmark reference.
 
 ```{r pca-initialization}
 pca_fit <- pca(
@@ -193,6 +198,7 @@ pca_fit <- pca(
   center = TRUE,
   scale = FALSE,
   backend = "cpu",
+  n.cores = 2,
   seed = 4,
   opentsne_init = TRUE
 )
@@ -207,7 +213,10 @@ c(
 The ordinary scores remain in `pca_fit$scores`. The added
 `pca_fit$opentsne_init` is centered and rescaled so the largest component
 standard deviation is `1e-4`, the small initialization scale expected by
-t-SNE optimizers. It can be reused across methods, seeds, or backends:
+t-SNE optimizers. CPU fits record the requested and observable thread counts
+in `n.cores_requested` and `n.cores_effective`. A single-threaded BLAS may
+still report one effective thread. The initialization can be reused across
+methods, seeds, or backends:
 
 ```{r reuse-initialization}
 layout_tsne_fixed_init <- opentsne(
@@ -215,12 +224,12 @@ layout_tsne_fixed_init <- opentsne(
   perplexity = 10,
   Y_init = pca_fit$opentsne_init,
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 ```
 
-CPU PCA uses the package's fastPLS-style RSVD path. Metal uses a native
+CPU PCA uses the package-native float32 blocked RSVD path. Metal uses a native
 float32 block-subspace TSVD with Metal Performance Shaders matrix products.
 CUDA uses native RAPIDS RAFT TSVD when that support is compiled. No backend
 calls Python or `reticulate`.
@@ -237,7 +246,7 @@ knn <- precompute_knn(
   k = 15,
   metric = "euclidean",
   backend = "cpu",
-  n_threads = 2
+  n.cores = 2
 )
 knn
 ```
@@ -250,19 +259,19 @@ stores a compact KNN width. Prepared objects are useful for repeated runs.
 prepared_umap <- prepare_umap_knn(
   knn,
   graph_mode = "fuzzy",
-  n_threads = 2
+  n.cores = 2
 )
 prepared_tsne <- prepare_opentsne_knn(knn, perplexity = 10)
 
 layout_umap_reused <- umap_knn(
   prepared_umap,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 layout_tsne_reused <- opentsne_knn(
   prepared_tsne,
   Y_init = pca_fit$opentsne_init,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -282,14 +291,14 @@ umap_initialization <- umap_init(
   prepared_umap,
   backend = "cpu",
   graph_mode = "fuzzy",
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
 layout_from_initialization <- umap_knn(
   umap_initialization,
   backend = "cpu",
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -304,23 +313,23 @@ ordinary one-call GPU embeddings continue to use their resident backend path.
 
 The graph mode is an explicit scientific choice, not a hidden speed setting.
 
-- `graph_mode = "fuzzy"` uses locally scaled fuzzy membership strengths from
-  the standard UMAP graph construction.
+- `graph_mode = "fuzzy"` is the default and uses locally scaled fuzzy
+  membership strengths from the standard UMAP graph construction.
 - `graph_mode = "binary"` symmetrizes unit-weight neighbor edges and then uses
-  the same UMAP optimizer. It is the package default and can produce stronger
-  separation on some datasets.
+  the same UMAP optimizer. It is an explicit sensitivity mode and can produce
+  stronger separation on some datasets.
 
 ```{r graph-modes}
 layout_binary <- umap_knn(
   knn,
   graph_mode = "binary",
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 layout_fuzzy <- umap_knn(
   knn,
   graph_mode = "fuzzy",
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 ```
@@ -349,7 +358,7 @@ if (requireNamespace("float", quietly = TRUE)) {
     n_neighbors = 15,
     graph_mode = "fuzzy",
     standardize = FALSE,
-    n_threads = 2,
+    n.cores = 2,
     seed = 4
   )
   c(
@@ -390,7 +399,7 @@ reference_fit <- opentsne(
   reference_data,
   perplexity = 10,
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -418,7 +427,7 @@ query_layout <- transform_tsne(
   knn = query_knn,
   perplexity = 5,
   n_iter = 100,
-  n_threads = 2,
+  n.cores = 2,
   backend = "cpu",
   seed = 4
 )
@@ -474,7 +483,7 @@ landmark_selection <- select_landmarks(
   x,
   landmarks = 0.5,
   seed = 4,
-  n_threads = 2
+  n.cores = 2
 )
 
 umap_reference <- fit_landmark_model(
@@ -484,7 +493,7 @@ umap_reference <- fit_landmark_model(
   n_neighbors = 15,
   graph_mode = "fuzzy",
   backend = "cpu",
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -492,7 +501,7 @@ umap_projected <- project_landmark_model(
   umap_reference,
   x,
   refinement_epochs = 50,
-  n_threads = 2
+  n.cores = 2
 )
 ```
 
@@ -515,7 +524,7 @@ fit_landmark_umap <- landmark_umap(
   n_neighbors = 15,
   graph_mode = "fuzzy",
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -524,7 +533,7 @@ fit_landmark_tsne <- landmark_tsne(
   landmarks = 0.5,
   perplexity = 10,
   standardize = FALSE,
-  n_threads = 2,
+  n.cores = 2,
   seed = 4
 )
 
@@ -581,7 +590,7 @@ quality_umap <- evaluate_embedding(
   method = "UMAP",
   backend = "cpu",
   dataset = "iris",
-  n_threads = 2
+  n.cores = 2
 )
 
 quality_tsne <- evaluate_embedding(
@@ -597,7 +606,7 @@ quality_tsne <- evaluate_embedding(
   method = "openTSNE",
   backend = "cpu",
   dataset = "iris",
-  n_threads = 2
+  n.cores = 2
 )
 
 quality <- rbind(quality_umap, quality_tsne)

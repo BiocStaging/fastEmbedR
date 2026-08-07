@@ -3,7 +3,7 @@
 \title{Backend-native truncated PCA}
 \usage{
 pca(x, ncomp = 2L, xtest = NULL, center = TRUE, scale = FALSE,
-  backend = c("cpu", "cuda", "metal"), seed = 4L,
+  backend = c("cpu", "cuda", "metal"), n.cores = 1L, seed = 4L,
   opentsne_init = FALSE)
 }
 \arguments{
@@ -22,6 +22,10 @@ deviation before decomposition.}
 
 \item{backend}{PCA backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
 
+\item{n.cores}{Positive integer CPU core limit. It controls the linked
+BLAS/OpenMP numerical kernels when \code{backend = "cpu"} and is ignored by
+Metal and CUDA.}
+
 \item{seed}{Random seed for the Gaussian subspace sketch.}
 
 \item{opentsne_init}{If \code{TRUE}, add \code{opentsne_init} to the
@@ -36,14 +40,26 @@ decomposition metadata. When \code{opentsne_init = TRUE}, the list also
 contains \code{opentsne_init}; when \code{xtest} is supplied, it also contains
 \code{scores_test}. Metal preserves \code{float::float32} scores, loadings,
 initialization, and compatible test projections when the input is float32.
+CPU preserves float32 scores and loadings for float32 input and records
+\code{n.cores_requested},
+\code{n.cores_effective}, and \code{core_control}.
 }
 \description{
 \code{pca()} computes principal component scores with a backend-native truncated
-decomposition. CPU uses the fastPLS-style randomized SVD family. Metal uses a
-package-native float32 block-subspace TSVD whose large matrix products are
-executed with Metal Performance Shaders while data and work buffers remain
-resident in unified GPU memory. With \code{float::float32} input, native Metal
-preprocessing and the returned scores/loadings also remain float32. The API
+decomposition. CPU uses a package-native float32 blocked randomized SVD
+(RSVD). Metal uses a package-native float32 block-subspace TSVD whose large
+matrix products are executed with Metal Performance Shaders while data and
+work buffers remain resident in unified GPU memory. CUDA uses the
+package-native RSVD route. The resident CUDA openTSNE initializer separately
+uses RAFT TSVD so that its scores can remain on-device.
+
+CPU centering/scaling and large matrix products run in C++; Apple builds use
+Accelerate SGEMM and other platforms use package-threaded float32 kernels.
+Set \code{n.cores} to control the CPU core limit. The requested value is
+applied temporarily through standard BLAS/OpenMP environment variables and,
+when installed, \code{RhpcBLASctl}; the prior process settings are restored
+after the call. With \code{float::float32} input, native CPU and Metal
+preprocessing and returned scores/loadings remain float32. The API
 intentionally has no decomposition method menu and does not call Python.
 Explicit unavailable GPU requests fail instead of being reported as GPU work.
 }
@@ -51,6 +67,7 @@ Explicit unavailable GPU requests fail instead of being reported as GPU work.
 fit <- pca(
   as.matrix(iris[, 1:4]),
   ncomp = 2,
+  n.cores = 2,
   seed = 1,
   opentsne_init = TRUE
 )

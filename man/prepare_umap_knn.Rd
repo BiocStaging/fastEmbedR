@@ -6,16 +6,18 @@ prepare_umap_knn(
   indices,
   distances = NULL,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
-  graph_mode = c("binary", "fuzzy")
+  n.cores = NULL,
+  graph_mode = c("fuzzy", "binary")
 )
 }
 \arguments{
 \item{indices}{A KNN object, or an integer KNN index matrix.}
 \item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave \code{NULL} when \code{indices} is a KNN object.}
 \item{backend}{Execution backend used to resolve size-aware defaults: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
-\item{n_threads}{Number of CPU worker threads used during graph construction.}
-\item{graph_mode}{Graph weighting mode. \code{"binary"} uses a symmetric unit-weight graph. \code{"fuzzy"} uses standard UMAP fuzzy graph weights.}
+\item{n.cores}{Number of CPU cores used during graph construction.}
+\item{graph_mode}{Graph weighting mode. \code{"fuzzy"} (the default) uses
+standard UMAP fuzzy graph weights. \code{"binary"} uses a symmetric
+unit-weight sensitivity graph.}
 }
 \value{
 A prepared UMAP object containing normalized KNN data, a CSR graph, graph weights, and \code{epochs_per_sample}. Pass it to \code{umap_knn()} for repeated runs without rebuilding the graph.

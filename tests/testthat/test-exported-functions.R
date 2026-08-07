@@ -26,7 +26,7 @@ test_that("public API is KNN and openTSNE focused", {
     pca_args[seq_len(6L)],
     c("x", "ncomp", "xtest", "center", "scale", "backend")
   )
-  expect_true(all(c("seed", "opentsne_init") %in% pca_args))
+  expect_true(all(c("n.cores", "seed", "opentsne_init") %in% pca_args))
   expect_false("method" %in% pca_args)
   expect_identical(formals(pca)$opentsne_init, FALSE)
   expect_false(any(c(
@@ -39,19 +39,20 @@ test_that("public API is KNN and openTSNE focused", {
 
   expect_identical(
     names(formals(precompute_knn)),
-    c("data", "k", "metric", "backend", "n_threads")
+    c("data", "k", "metric", "backend", "n.cores")
   )
 
-  expect_true("n_threads" %in% names(formals(opentsne)))
-  expect_true("n_threads" %in% names(formals(opentsne_knn)))
-  expect_true("n_threads" %in% names(formals(umap)))
-  expect_true("n_threads" %in% names(formals(umap_knn)))
-  expect_true("n_threads" %in% names(formals(embed_knn)))
-  expect_true("n_threads" %in% names(formals(landmark_tsne)))
-  expect_true("n_threads" %in% names(formals(transform_tsne)))
-  expect_true("n_threads" %in% names(formals(evaluate_embedding)))
-  expect_true("n_threads" %in% names(formals(knn_graph)))
-  expect_false("backend" %in% names(formals(graph_cluster)))
+  expect_true("n.cores" %in% names(formals(opentsne)))
+  expect_true("n.cores" %in% names(formals(opentsne_knn)))
+  expect_true("n.cores" %in% names(formals(opentsne_pca_init)))
+  expect_true("n.cores" %in% names(formals(umap)))
+  expect_true("n.cores" %in% names(formals(umap_knn)))
+  expect_true("n.cores" %in% names(formals(embed_knn)))
+  expect_true("n.cores" %in% names(formals(landmark_tsne)))
+  expect_true("n.cores" %in% names(formals(transform_tsne)))
+  expect_true("n.cores" %in% names(formals(evaluate_embedding)))
+  expect_true("n.cores" %in% names(formals(knn_graph)))
+  expect_true("backend" %in% names(formals(graph_cluster)))
 })
 
 test_that("core exported functions have tiny openTSNE smoke tests", {
@@ -122,11 +123,11 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
 
   fit <- opentsne(x, perplexity = 1,
     early_exaggeration_iter = 2L, n_iter = 3L,
-    n_threads = 2L)
+    n.cores = 2L)
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_embedding(fit$layout, n)
   expect_equal(fit$parameters$method, "opentsne")
-  expect_equal(fit$parameters$n_threads, 2L)
+  expect_equal(fit$parameters$n.cores, 2L)
   expect_null(fit$knn)
   expect_false("n_neighbors" %in% names(formals(opentsne)))
 
@@ -162,7 +163,7 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
     use_cache = FALSE,
     method = "opentsne",
     backend = "gpu",
-    n_threads = 2L,
+    n.cores = 2L,
     dataset = "toy"
   )
   if (isTRUE(fastEmbedR:::cuda_metric_available())) {

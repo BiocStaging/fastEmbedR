@@ -1,8 +1,20 @@
 # fastEmbedR 0.99.0
 
+- Makes the standard fuzzy UMAP graph the default for `umap()`, `umap_knn()`,
+  UMAP initialization, and landmark UMAP. Binary weighting remains available
+  only as the explicit `graph_mode = "binary"` sensitivity mode.
+- Standardizes CPU parallelism controls on the public argument `n.cores`.
+  Low-level `n_threads` names are now private implementation details; existing
+  user scripts should replace `n_threads =` with `n.cores =`.
 - Provides native UMAP and openTSNE-style optimizers for CPU, Apple Metal, and
   optional CUDA builds, with explicit backend reporting and no silent GPU to
   CPU fallback.
+- Adds package-native Louvain and Leiden clustering for CPU, CUDA, and Metal.
+  Accelerator local-moving and refinement phases use float32 compressed sparse
+  row graphs and atomic community updates; package-owned C++ performs label
+  compaction and graph coarsening between levels. No cuGraph source, library,
+  Python module, or runtime symbol is required. Exact Pons-Latapy Walktrap
+  remains CPU-only, and unsupported accelerator requests fail explicitly.
 - Adds package-native float32 CPU HNSW, Apple Metal exact/recall-tuned IVF-Flat,
   direct FAISS GPU exact search, and direct RAPIDS cuVS CUDA IVF-Flat for one-call
   embeddings. CUDA results remain device-resident through graph or affinity
@@ -24,11 +36,16 @@
 - Adds float32 input and output handling. Native graph weights, affinities,
   layouts, gradients, and optimizer buffers use float32; a double layout is
   returned only when the input was double.
-- Replaces the R-orchestrated Metal RSVD initialization with a package-native
-  float32 block-subspace TSVD. MPS matrix products keep the centered input,
-  basis, projected block, loadings, and scores in one resident workspace; only
-  the small projected Gram eigensolve runs on the CPU. CPU retains the
-  fastPLS-style RSVD family and CUDA retains native RAPIDS RAFT TSVD.
+- Replaces the R-orchestrated CPU and Metal RSVD initialization paths with
+  package-native float32 implementations. CPU centers once into contiguous
+  float32 storage, uses blocked SGEMM/subspace products, and retains only skinny
+  QR and projected-SVD work at the ordinary R numerical boundary. Metal keeps
+  the centered input, basis, projected block, loadings, and scores in one
+  resident MPS workspace. Public CUDA `pca()` uses fastEmbedR's native RSVD;
+  resident CUDA openTSNE initialization uses RAPIDS RAFT TSVD.
+- Removes the optional fastPLS PCA delegation and `Enhances` dependency.
+  CPU, Metal, and CUDA PCA ownership is now explicit and invariant to the
+  packages installed in the user's library.
 - Batches four openTSNE iterations per Metal command buffer, reducing command
   submission overhead without changing the optimization objective or schedule.
 - Avoids allocating and uploading the padded `epochs_per_sample` buffer for

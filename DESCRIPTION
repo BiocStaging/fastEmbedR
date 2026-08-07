@@ -1,12 +1,16 @@
 Package: fastEmbedR
 Type: Package
-Title: Fast Native Embeddings and Graph Clustering from KNN Matrices
+Title: Fast Native UMAP and openTSNE Embeddings
 Version: 0.99.0
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),
     person(given = "Martin", family = "Ocharo", role = "aut",
         email = "Martin.Ocharo@icgeb.org"),
+    person(given = "Dalia", family = "Ahmed", role = "aut",
+        email = "Dalia.Ahmed@icgeb.org"),
+    person(given = "Dupe", family = "Ojo", role = "aut",
+        email = "Dupe.Ojo@icgeb.org"),
     person(given = "Alessia", family = "Vignoli", role = "aut",
         email = "vignoli@cerm.unifi.it"),
     person(given = "Leonardo", family = "Tenori", role = "aut",
@@ -17,22 +21,23 @@ Authors@R: c(
     )
 Author: Moussa Kassim [aut],
     Martin Ocharo [aut],
+    Dalia Ahmed [aut],
+    Dupe Ojo [aut],
     Alessia Vignoli [aut],
     Leonardo Tenori [aut],
     Stefano Cacciatore [aut, cre]
 Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
 Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN
     components.
-Description: A compact UMAP and openTSNE-style implementation focused on fast
-    embeddings from data matrices or precomputed nearest-neighbor index and
-    distance matrices, with native KNN graph construction and Louvain, Leiden,
-    and Walktrap community detection. Native float32 CPU HNSW and Apple Metal
-    exact/IVF-Flat search support one-call workflows. Optional package-native
-    CUDA search links directly to FAISS GPU for exact search and to the RAPIDS
-    cuVS C API for IVF-Flat, keeping results on the device for CUDA embedding.
+Description: Native float32 UMAP and openTSNE-style embeddings from data
+    matrices or precomputed nearest-neighbor indices and distances. One-call
+    workflows use package-native CPU HNSW and Apple Metal exact or IVF-Flat
+    search. Optional CUDA support links directly to FAISS GPU and the RAPIDS
+    cuVS C API while retaining nearest-neighbor results on the device.
     Preprocessing, graph or affinity construction, fixed-reference transform,
-    and stochastic layout optimization use native code with explicit CPU,
-    Metal, and CUDA backend reporting.
+    and layout optimization use native code with explicit CPU, Metal, and CUDA
+    backend reporting. Optional graph utilities support downstream Louvain,
+    Leiden, and Walktrap community detection.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
@@ -57,13 +62,12 @@ Suggests:
     igraph,
     jsonlite,
     knitr,
+    RhpcBLASctl,
     rmarkdown,
     Rtsne,
     testthat,
     umap,
     uwot
-Enhances:
-    fastPLS (>= 0.99.3)
 LinkingTo:
     Rcpp
 SystemRequirements: C++17; optional Apple Metal framework on

@@ -23,7 +23,7 @@ landmark_tsne(
   initialization = c("median", "weighted", "random"),
   keep_knn = FALSE,
   verbose = FALSE,
-  n_threads = NULL,
+  n.cores = NULL,
   ...
 )
 }
@@ -75,7 +75,7 @@ is native and experimental for large reference sets.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{n_threads}{Number of CPU worker threads used by CPU KNN and CPU
+\item{n.cores}{Number of CPU cores used by CPU KNN and CPU
 transform optimization. Native GPU stages ignore this argument.}
 
 \item{...}{Additional low-level parameters passed to [opentsne_knn()].}

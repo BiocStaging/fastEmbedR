@@ -7,7 +7,7 @@
 #'
 #' @param data Numeric matrix/data frame, or a list containing KNN `indices`
 #'   and `distances`.
-#' @param n_neighbors Number of non-self neighbours. `NULL` chooses the package
+#' @param n_neighbors Number of non-self neighbors. `NULL` chooses the package
 #'   default for the data size.
 #' @param n_components Output dimensionality.
 #' @param standardize Center and scale columns before KNN when `data` is a
@@ -25,12 +25,12 @@
 #'   stays on the device through graph construction and optimization.
 #'   GPU requests must resolve to a real native backend; the package does not
 #'   relabel CPU work as GPU.
-#' @param n_threads Number of CPU worker threads for KNN and CPU UMAP.
+#' @param n.cores Number of CPU cores for KNN and CPU UMAP.
 #' @param keep_knn Keep KNN matrices in the returned object.
-#' @param graph_mode Graph weighting mode. `"binary"` uses a symmetric
-#'   unit-weight graph as an adjacency-only approximation; it is not standard
-#'   UMAP or necessarily faster. `"fuzzy"` uses standard UMAP fuzzy graph
-#'   weights and should be used for reference-implementation comparisons.
+#' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses the
+#'   standard UMAP fuzzy graph. `"binary"` uses a symmetric unit-weight graph
+#'   as an adjacency-only sensitivity approximation; it is not standard UMAP
+#'   or necessarily faster.
 #' @param verbose Print progress.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
@@ -47,10 +47,11 @@ umap <- function(data,
                  nn = NULL,
                  seed = 4L,
                  backend = c("cpu", "cuda", "metal"),
-                 n_threads = NULL,
+                 n.cores = NULL,
                  keep_knn = FALSE,
-                 graph_mode = c("binary", "fuzzy"),
+                 graph_mode = c("fuzzy", "binary"),
                  verbose = FALSE) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
@@ -237,11 +238,11 @@ umap <- function(data,
 #' @inheritParams umap
 #' @param landmarks `TRUE` for an automatic subset, a fraction such as `0.5`, a
 #'   landmark count, or explicit row indices.
-#' @param transform_k Number of landmark neighbours used to project
+#' @param transform_k Number of landmark neighbors used to project
 #'   non-landmark observations. Defaults to `n_neighbors`.
 #' @param graph_mode Graph weighting mode passed unchanged to the reference
-#'   [umap()] fit. `"binary"` uses a symmetric unit-weight graph and
-#'   `"fuzzy"` uses standard UMAP fuzzy graph weights.
+#'   [umap()] fit. `"fuzzy"` (the default) uses standard UMAP fuzzy graph
+#'   weights; `"binary"` uses a symmetric unit-weight sensitivity graph.
 #' @export
 landmark_umap <- function(data,
                           landmarks = 0.5,
@@ -252,10 +253,11 @@ landmark_umap <- function(data,
                           seed = 4L,
                           backend = c("cpu", "cuda", "metal"),
                           transform_k = NULL,
-                          n_threads = NULL,
+                          n.cores = NULL,
                           keep_knn = FALSE,
-                          graph_mode = c("binary", "fuzzy"),
+                          graph_mode = c("fuzzy", "binary"),
                           verbose = FALSE) {
+  n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
@@ -282,7 +284,7 @@ landmark_umap <- function(data,
     x,
     landmarks,
     seed = seed,
-    n_threads = n_threads
+    n.cores = n_threads
   )
   landmark_indices <- landmark_selection$indices
   if (length(landmark_selection$query_indices) == 0L) {
@@ -294,7 +296,7 @@ landmark_umap <- function(data,
       pca_dims = NULL,
       seed = seed,
       backend = backend,
-      n_threads = n_threads,
+      n.cores = n_threads,
       keep_knn = keep_knn,
       graph_mode = graph_mode,
       verbose = verbose
@@ -328,7 +330,7 @@ landmark_umap <- function(data,
       seed = seed,
       backend = backend,
       nn = reference_knn,
-      n_threads = n_threads,
+      n.cores = n_threads,
       keep_knn = keep_knn,
       graph_mode = graph_mode,
       verbose = verbose
@@ -594,7 +596,7 @@ landmark_umap <- function(data,
       projection_nn_backend = attr(projection_knn, "backend"),
       projection_strategy = projection_strategy,
       backend = reference_fit$parameters$backend %||% backend,
-      n_threads = normalize_nn_threads(n_threads),
+      n.cores = normalize_nn_threads(n_threads),
       landmark = TRUE,
       n_landmarks = n_landmarks,
       landmark_fraction = n_landmarks / n,

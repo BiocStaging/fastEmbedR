@@ -735,6 +735,23 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// pca_rsvd_cpu_cpp
+List pca_rsvd_cpu_cpp(SEXP data, int n_components, bool center, bool scale, NumericMatrix omega, int power, int n_threads);
+RcppExport SEXP _fastEmbedR_pca_rsvd_cpu_cpp(SEXP dataSEXP, SEXP n_componentsSEXP, SEXP centerSEXP, SEXP scaleSEXP, SEXP omegaSEXP, SEXP powerSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< int >::type n_components(n_componentsSEXP);
+    Rcpp::traits::input_parameter< bool >::type center(centerSEXP);
+    Rcpp::traits::input_parameter< bool >::type scale(scaleSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(pca_rsvd_cpu_cpp(data, n_components, center, scale, omega, power, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 // float32_all_finite_cpp
 bool float32_all_finite_cpp(SEXP data, int n_threads);
 RcppExport SEXP _fastEmbedR_float32_all_finite_cpp(SEXP dataSEXP, SEXP n_threadsSEXP) {
@@ -1441,6 +1458,74 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// graph_clustering_cuda_available_cpp
+bool graph_clustering_cuda_available_cpp();
+RcppExport SEXP _fastEmbedR_graph_clustering_cuda_available_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(graph_clustering_cuda_available_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastembedr_graph_cluster_cuda_cpp
+Rcpp::List fastembedr_graph_cluster_cuda_cpp(Rcpp::IntegerVector from, Rcpp::IntegerVector to, Rcpp::NumericVector weight, int n_vertices, std::string method, double resolution, int n_iterations, int n_runs, double seed);
+RcppExport SEXP _fastEmbedR_fastembedr_graph_cluster_cuda_cpp(SEXP fromSEXP, SEXP toSEXP, SEXP weightSEXP, SEXP n_verticesSEXP, SEXP methodSEXP, SEXP resolutionSEXP, SEXP n_iterationsSEXP, SEXP n_runsSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type from(fromSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type to(toSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type weight(weightSEXP);
+    Rcpp::traits::input_parameter< int >::type n_vertices(n_verticesSEXP);
+    Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< double >::type resolution(resolutionSEXP);
+    Rcpp::traits::input_parameter< int >::type n_iterations(n_iterationsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_runs(n_runsSEXP);
+    Rcpp::traits::input_parameter< double >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastembedr_graph_cluster_cuda_cpp(from, to, weight, n_vertices, method, resolution, n_iterations, n_runs, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// graph_clustering_metal_available_cpp
+bool graph_clustering_metal_available_cpp();
+RcppExport SEXP _fastEmbedR_graph_clustering_metal_available_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(graph_clustering_metal_available_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// graph_clustering_metal_error_cpp
+std::string graph_clustering_metal_error_cpp();
+RcppExport SEXP _fastEmbedR_graph_clustering_metal_error_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(graph_clustering_metal_error_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastembedr_graph_cluster_metal_cpp
+Rcpp::List fastembedr_graph_cluster_metal_cpp(Rcpp::IntegerVector from, Rcpp::IntegerVector to, Rcpp::NumericVector weight, int n_vertices, std::string method, double resolution, int n_iterations, int n_runs, double seed);
+RcppExport SEXP _fastEmbedR_fastembedr_graph_cluster_metal_cpp(SEXP fromSEXP, SEXP toSEXP, SEXP weightSEXP, SEXP n_verticesSEXP, SEXP methodSEXP, SEXP resolutionSEXP, SEXP n_iterationsSEXP, SEXP n_runsSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type from(fromSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type to(toSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type weight(weightSEXP);
+    Rcpp::traits::input_parameter< int >::type n_vertices(n_verticesSEXP);
+    Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< double >::type resolution(resolutionSEXP);
+    Rcpp::traits::input_parameter< int >::type n_iterations(n_iterationsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_runs(n_runsSEXP);
+    Rcpp::traits::input_parameter< double >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastembedr_graph_cluster_metal_cpp(from, to, weight, n_vertices, method, resolution, n_iterations, n_runs, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 // native_hnsw_knn_cpp
 Rcpp::List native_hnsw_knn_cpp(SEXP data, int k, int n_threads, std::string metric, double target_recall);
 RcppExport SEXP _fastEmbedR_native_hnsw_knn_cpp(SEXP dataSEXP, SEXP kSEXP, SEXP n_threadsSEXP, SEXP metricSEXP, SEXP target_recallSEXP) {
@@ -1593,40 +1678,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// knn_tsne_opentsne_cpp
-List knn_tsne_opentsne_cpp(IntegerMatrix indices, NumericMatrix distances, NumericMatrix y_init, bool init, int n_components, double perplexity, double theta, int early_exaggeration_iter, int n_iter, double early_exaggeration, double exaggeration, double learning_rate, bool learning_rate_auto, double initial_momentum, double final_momentum, double min_gain, double max_step_norm, std::string negative_gradient_method, int n_threads, int seed, bool verbose, bool record_costs, bool auto_config, double auto_iter_end);
-RcppExport SEXP _fastEmbedR_knn_tsne_opentsne_cpp(SEXP indicesSEXP, SEXP distancesSEXP, SEXP y_initSEXP, SEXP initSEXP, SEXP n_componentsSEXP, SEXP perplexitySEXP, SEXP thetaSEXP, SEXP early_exaggeration_iterSEXP, SEXP n_iterSEXP, SEXP early_exaggerationSEXP, SEXP exaggerationSEXP, SEXP learning_rateSEXP, SEXP learning_rate_autoSEXP, SEXP initial_momentumSEXP, SEXP final_momentumSEXP, SEXP min_gainSEXP, SEXP max_step_normSEXP, SEXP negative_gradient_methodSEXP, SEXP n_threadsSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP record_costsSEXP, SEXP auto_configSEXP, SEXP auto_iter_endSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< IntegerMatrix >::type indices(indicesSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type distances(distancesSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type y_init(y_initSEXP);
-    Rcpp::traits::input_parameter< bool >::type init(initSEXP);
-    Rcpp::traits::input_parameter< int >::type n_components(n_componentsSEXP);
-    Rcpp::traits::input_parameter< double >::type perplexity(perplexitySEXP);
-    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
-    Rcpp::traits::input_parameter< int >::type early_exaggeration_iter(early_exaggeration_iterSEXP);
-    Rcpp::traits::input_parameter< int >::type n_iter(n_iterSEXP);
-    Rcpp::traits::input_parameter< double >::type early_exaggeration(early_exaggerationSEXP);
-    Rcpp::traits::input_parameter< double >::type exaggeration(exaggerationSEXP);
-    Rcpp::traits::input_parameter< double >::type learning_rate(learning_rateSEXP);
-    Rcpp::traits::input_parameter< bool >::type learning_rate_auto(learning_rate_autoSEXP);
-    Rcpp::traits::input_parameter< double >::type initial_momentum(initial_momentumSEXP);
-    Rcpp::traits::input_parameter< double >::type final_momentum(final_momentumSEXP);
-    Rcpp::traits::input_parameter< double >::type min_gain(min_gainSEXP);
-    Rcpp::traits::input_parameter< double >::type max_step_norm(max_step_normSEXP);
-    Rcpp::traits::input_parameter< std::string >::type negative_gradient_method(negative_gradient_methodSEXP);
-    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    Rcpp::traits::input_parameter< bool >::type verbose(verboseSEXP);
-    Rcpp::traits::input_parameter< bool >::type record_costs(record_costsSEXP);
-    Rcpp::traits::input_parameter< bool >::type auto_config(auto_configSEXP);
-    Rcpp::traits::input_parameter< double >::type auto_iter_end(auto_iter_endSEXP);
-    rcpp_result_gen = Rcpp::wrap(knn_tsne_opentsne_cpp(indices, distances, y_init, init, n_components, perplexity, theta, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, n_threads, seed, verbose, record_costs, auto_config, auto_iter_end));
-    return rcpp_result_gen;
-END_RCPP
-}
 // knn_tsne_opentsne_float_cpp
 List knn_tsne_opentsne_float_cpp(IntegerMatrix indices, SEXP distances, NumericMatrix y_init, bool init, int n_components, double perplexity, double theta, int early_exaggeration_iter, int n_iter, double early_exaggeration, double exaggeration, double learning_rate, bool learning_rate_auto, double initial_momentum, double final_momentum, double min_gain, double max_step_norm, std::string negative_gradient_method, int n_threads, int seed, bool verbose, bool record_costs, bool auto_config, double auto_iter_end);
 RcppExport SEXP _fastEmbedR_knn_tsne_opentsne_float_cpp(SEXP indicesSEXP, SEXP distancesSEXP, SEXP y_initSEXP, SEXP initSEXP, SEXP n_componentsSEXP, SEXP perplexitySEXP, SEXP thetaSEXP, SEXP early_exaggeration_iterSEXP, SEXP n_iterSEXP, SEXP early_exaggerationSEXP, SEXP exaggerationSEXP, SEXP learning_rateSEXP, SEXP learning_rate_autoSEXP, SEXP initial_momentumSEXP, SEXP final_momentumSEXP, SEXP min_gainSEXP, SEXP max_step_normSEXP, SEXP negative_gradient_methodSEXP, SEXP n_threadsSEXP, SEXP seedSEXP, SEXP verboseSEXP, SEXP record_costsSEXP, SEXP auto_configSEXP, SEXP auto_iter_endSEXP) {
@@ -1749,6 +1800,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_pca_tsvd_metal_cpp", (DL_FUNC) &_fastEmbedR_pca_tsvd_metal_cpp, 5},
     {"_fastEmbedR_transform_tsne_metal_cpp", (DL_FUNC) &_fastEmbedR_transform_tsne_metal_cpp, 19},
     {"_fastEmbedR_knn_tsne_opentsne_metal_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_metal_cpp, 21},
+    {"_fastEmbedR_pca_rsvd_cpu_cpp", (DL_FUNC) &_fastEmbedR_pca_rsvd_cpu_cpp, 7},
     {"_fastEmbedR_float32_all_finite_cpp", (DL_FUNC) &_fastEmbedR_float32_all_finite_cpp, 2},
     {"_fastEmbedR_standardize_cpu_cpp", (DL_FUNC) &_fastEmbedR_standardize_cpu_cpp, 1},
     {"_fastEmbedR_standardize_float32_cpp", (DL_FUNC) &_fastEmbedR_standardize_float32_cpp, 2},
@@ -1792,6 +1844,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_fastembedr_graph_from_knn_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_graph_from_knn_cpp, 6},
     {"_fastEmbedR_fastembedr_graph_cluster_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_graph_cluster_cpp, 9},
     {"_fastEmbedR_fastembedr_graph_modularity_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_graph_modularity_cpp, 6},
+    {"_fastEmbedR_graph_clustering_cuda_available_cpp", (DL_FUNC) &_fastEmbedR_graph_clustering_cuda_available_cpp, 0},
+    {"_fastEmbedR_fastembedr_graph_cluster_cuda_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_graph_cluster_cuda_cpp, 9},
+    {"_fastEmbedR_graph_clustering_metal_available_cpp", (DL_FUNC) &_fastEmbedR_graph_clustering_metal_available_cpp, 0},
+    {"_fastEmbedR_graph_clustering_metal_error_cpp", (DL_FUNC) &_fastEmbedR_graph_clustering_metal_error_cpp, 0},
+    {"_fastEmbedR_fastembedr_graph_cluster_metal_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_graph_cluster_metal_cpp, 9},
     {"_fastEmbedR_native_hnsw_knn_cpp", (DL_FUNC) &_fastEmbedR_native_hnsw_knn_cpp, 5},
     {"_fastEmbedR_native_hnsw_query_cpp", (DL_FUNC) &_fastEmbedR_native_hnsw_query_cpp, 6},
     {"_fastEmbedR_native_metal_knn_available_cpp", (DL_FUNC) &_fastEmbedR_native_metal_knn_available_cpp, 0},
@@ -1803,7 +1860,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_native_cuda_query_knn_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_query_knn_cpp, 7},
     {"_fastEmbedR_native_cuda_knn_to_host_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_to_host_cpp, 1},
     {"_fastEmbedR_tsne_auto_parameters_cpp", (DL_FUNC) &_fastEmbedR_tsne_auto_parameters_cpp, 6},
-    {"_fastEmbedR_knn_tsne_opentsne_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_cpp, 24},
     {"_fastEmbedR_knn_tsne_opentsne_float_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_float_cpp, 24},
     {"_fastEmbedR_transform_tsne_cpp", (DL_FUNC) &_fastEmbedR_transform_tsne_cpp, 21},
     {"_fastEmbedR_fastembedr_walktrap_cpp", (DL_FUNC) &_fastEmbedR_fastembedr_walktrap_cpp, 5},

@@ -1,6 +1,6 @@
 # Third-party source licenses
 
-fastEmbedR is distributed under the MIT license. The native nearest-neighbour
+fastEmbedR is distributed under the MIT license. The native nearest-neighbor
 implementation contains permissively licensed derivative work with the
 following provenance:
 

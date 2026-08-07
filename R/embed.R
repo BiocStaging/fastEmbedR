@@ -133,7 +133,7 @@ prepare_embedding_data <- function(data,
     }
     rank <- min(pca_dims, nrow(x) - 1L, ncol(x))
     if (rank >= 1L && rank < ncol(x)) {
-      pca <- fastpls_rsvd_pca_scores(
+      pca <- fastembedr_rsvd_pca_scores(
         x,
         rank = rank,
         seed = seed,
@@ -341,17 +341,171 @@ finalize_pca_fit <- function(fit, xtest, opentsne_init) {
   attach_opentsne_pca_init(fit, opentsne_init)
 }
 
+normalize_pca_threads <- function(n.cores) {
+  n.cores <- suppressWarnings(as.integer(n.cores))
+  if (length(n.cores) != 1L || is.na(n.cores) ||
+      !is.finite(n.cores) || n.cores < 1L) {
+    stop("`n.cores` must be a positive integer.", call. = FALSE)
+  }
+  n.cores
+}
+
+with_pca_cpu_threads <- function(n_threads, code) {
+  n_threads <- normalize_pca_threads(n_threads)
+  thread_vars <- c(
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "RCPP_PARALLEL_NUM_THREADS"
+  )
+  previous_env <- Sys.getenv(thread_vars, unset = NA_character_)
+  on.exit({
+    for (name in thread_vars) {
+      previous <- previous_env[[name]]
+      if (is.na(previous)) {
+        Sys.unsetenv(name)
+      } else {
+        do.call(Sys.setenv, stats::setNames(list(previous), name))
+      }
+    }
+  }, add = TRUE)
+  do.call(
+    Sys.setenv,
+    stats::setNames(rep(list(as.character(n_threads)), length(thread_vars)), thread_vars)
+  )
+
+  control <- "environment"
+  effective <- NA_integer_
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    previous_blas <- tryCatch(
+      RhpcBLASctl::blas_get_num_procs(),
+      error = function(e) NA_integer_
+    )
+    previous_omp <- tryCatch(
+      RhpcBLASctl::omp_get_max_threads(),
+      error = function(e) NA_integer_
+    )
+    on.exit({
+      if (length(previous_blas) == 1L && !is.na(previous_blas)) {
+        try(RhpcBLASctl::blas_set_num_threads(previous_blas), silent = TRUE)
+      }
+      if (length(previous_omp) == 1L && !is.na(previous_omp)) {
+        try(RhpcBLASctl::omp_set_num_threads(previous_omp), silent = TRUE)
+      }
+    }, add = TRUE)
+    try(RhpcBLASctl::blas_set_num_threads(n_threads), silent = TRUE)
+    try(RhpcBLASctl::omp_set_num_threads(n_threads), silent = TRUE)
+    effective <- tryCatch(
+      as.integer(RhpcBLASctl::blas_get_num_procs()),
+      error = function(e) NA_integer_
+    )
+    control <- "RhpcBLASctl+environment"
+  }
+
+  list(
+    value = force(code),
+    control = control,
+    effective = effective
+  )
+}
+
+fastembedr_cpu_rsvd_pca <- function(data,
+                                    ncomp,
+                                    center = TRUE,
+                                    scale = FALSE,
+                                    seed = 4L,
+                                    n.cores = 1L) {
+  x <- if (is_float32_matrix(data)) {
+    data
+  } else {
+    x <- as.matrix(data)
+    if (!is.numeric(x) && !is.integer(x)) {
+      storage.mode(x) <- "double"
+    }
+    x
+  }
+  dimensions <- dim(x)
+  if (length(dimensions) != 2L || dimensions[[1L]] < 2L ||
+      dimensions[[2L]] < 1L) {
+    stop("`data` must have at least two rows and one column.", call. = FALSE)
+  }
+  rank <- min(
+    as.integer(ncomp),
+    as.integer(dimensions[[1L]] - 1L),
+    as.integer(dimensions[[2L]])
+  )
+  if (rank < 1L) stop("`data` has no usable PCA rank.", call. = FALSE)
+  tuning <- fastembedr_rsvd_tuning(
+    dimensions[[1L]],
+    dimensions[[2L]],
+    rank,
+    "cpu"
+  )
+  sketch_rank <- min(
+    as.integer(min(dimensions)),
+    rank + tuning$oversample
+  )
+  power <- if (sketch_rank >= min(dimensions)) 0L else tuning$power
+  restore_seed <- set_local_seed(seed)
+  on.exit(restore_seed(), add = TRUE)
+  omega <- matrix(
+    stats::rnorm(dimensions[[2L]] * sketch_rank),
+    nrow = dimensions[[2L]],
+    ncol = sketch_rank
+  )
+  fit <- pca_rsvd_cpu_cpp(
+    x,
+    rank,
+    isTRUE(center),
+    isTRUE(scale),
+    omega,
+    power,
+    normalize_pca_threads(n.cores)
+  )
+  colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
+  colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
+  out <- list(
+    scores = fit$scores,
+    loadings = fit$loadings,
+    singular_values = fit$singular_values,
+    center = fit$center,
+    scale = fit$scale,
+    ncomp = as.integer(ncol(fit$scores)),
+    method = "rsvd",
+    backend = "cpu_rsvd",
+    backend_reason = NA_character_,
+    engine = "native_cpu_float32",
+    precision = "float32",
+    oversample = as.integer(fit$oversample),
+    power = as.integer(fit$power),
+    seed = as.integer(seed),
+    timing = fit$timing
+  )
+  class(out) <- "fastEmbedR_pca"
+  out
+}
+
 #' Backend-native truncated PCA
 #'
 #' `pca()` computes principal component scores with a backend-native truncated
-#' decomposition. CPU uses the fastPLS-style randomized SVD family. Metal uses
-#' a package-native float32 block-subspace TSVD whose large matrix products are
-#' executed with Metal Performance Shaders while data and work buffers remain
-#' resident in unified GPU memory. With `float::float32` input, native Metal
-#' preprocessing and the returned scores/loadings also remain float32. The API
-#' intentionally has no decomposition method menu and does not call Python.
-#' Explicit unavailable GPU requests fail instead of being reported as GPU
-#' work.
+#' decomposition. CPU uses a package-native float32 blocked randomized SVD
+#' (RSVD). Metal uses a package-native float32 block-subspace TSVD whose large
+#' matrix products are executed with Metal Performance Shaders while data and
+#' work buffers remain resident in unified GPU memory. CUDA uses the
+#' package-native RSVD route. The resident CUDA openTSNE initializer separately
+#' uses RAFT TSVD so that its scores can remain on-device.
+#'
+#' CPU matrix products and factorizations use the BLAS/LAPACK linked to R.
+#' Set `n.cores` to control their CPU core limit. The requested value is
+#' applied temporarily through standard BLAS/OpenMP environment variables and,
+#' when installed, `RhpcBLASctl`; the prior process settings are restored after
+#' the call. A single-threaded BLAS can still report one effective thread. With
+#' `float::float32` input, native Metal preprocessing and the returned
+#' scores/loadings also remain float32. The API intentionally has no
+#' decomposition method menu and does not call Python. Explicit unavailable GPU
+#' requests fail instead of being reported as GPU work.
 #'
 #' @param x Numeric matrix/data frame or `float::float32` matrix with
 #'   observations in rows.
@@ -362,6 +516,9 @@ finalize_pca_fit <- function(fit, xtest, opentsne_init) {
 #' @param scale If `TRUE`, scale centered columns to unit sample standard
 #'   deviation before decomposition.
 #' @param backend PCA backend: `"cpu"`, `"cuda"`, or `"metal"`.
+#' @param n.cores Positive integer CPU core limit. It controls the linked
+#'   BLAS/OpenMP numerical kernels when `backend = "cpu"` and is ignored by
+#'   Metal and CUDA.
 #' @param seed Random seed for the Gaussian subspace sketch.
 #' @param opentsne_init If `TRUE`, add `opentsne_init` to the returned PCA
 #'   object. This matrix is centered and rescaled so its largest component
@@ -373,11 +530,13 @@ finalize_pca_fit <- function(fit, xtest, opentsne_init) {
 #'   contains `opentsne_init`; when `xtest` is supplied, it also contains
 #'   `scores_test`. Metal preserves `float::float32` scores, loadings,
 #'   initialization, and compatible test projections when the input is
-#'   float32.
+#'   float32. CPU results also record `n.cores_requested`,
+#'   `n.cores_effective`, and `core_control`.
 #' @examples
 #' fit <- pca(
 #'   as.matrix(iris[, 1:4]),
 #'   ncomp = 2,
+#'   n.cores = 2,
 #'   seed = 1,
 #'   opentsne_init = TRUE
 #' )
@@ -390,6 +549,7 @@ pca <- function(x,
                 center = TRUE,
                 scale = FALSE,
                 backend = c("cpu", "cuda", "metal"),
+                n.cores = 1L,
                 seed = 4L,
                 opentsne_init = FALSE) {
   backend <- validate_pca_backend(match.arg(backend))
@@ -401,121 +561,78 @@ pca <- function(x,
   if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) || ncomp < 1L) {
     stop("`ncomp` must be a positive integer.", call. = FALSE)
   }
-  if (identical(backend, "metal")) {
-    fit <- fastembedr_metal_tsvd_pca(
-      x,
-      ncomp = ncomp,
-      center = center,
-      scale = scale,
-      seed = seed
-    )
-    return(finalize_pca_fit(fit, xtest, opentsne_init))
-  }
-  fastpls_fit <- fastembedr_fastpls_pca(
-    x,
-    ncomp = ncomp,
-    center = center,
-    scale = scale,
-    backend = backend,
-    seed = seed
-  )
-  if (!is.null(fastpls_fit)) {
-    return(finalize_pca_fit(fastpls_fit, xtest, opentsne_init))
-  }
+  n_threads <- normalize_pca_threads(n.cores)
 
-  prepared <- prepare_pca_matrix(x, center = center, scale = scale)
-  rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
-  if (rank < 1L) {
-    stop("`data` has no usable PCA rank.", call. = FALSE)
-  }
-  fit <- fastpls_rsvd_pca_scores(
-    prepared$data,
-    rank = rank,
-    seed = seed,
-    backend = backend
-  )
-  if (!identical(backend, "cpu") &&
-      !startsWith(as.character(fit$backend), paste0(backend, "_"))) {
-    reason <- fit$backend_reason
-    if (is.null(reason) || length(reason) != 1L || is.na(reason)) {
-      reason <- paste0(backend, " RSVD backend is unavailable")
+  run_pca <- function() {
+    if (identical(backend, "cpu")) {
+      fit <- fastembedr_cpu_rsvd_pca(
+        x,
+        ncomp = ncomp,
+        center = center,
+        scale = scale,
+        seed = seed,
+        n.cores = n_threads
+      )
+      return(finalize_pca_fit(fit, xtest, opentsne_init))
     }
-    stop(reason, call. = FALSE)
-  }
-  out <- list(
-    scores = fit$scores,
-    loadings = fit$loadings,
-    singular_values = fit$singular_values,
-    center = prepared$center,
-    scale = prepared$scale,
-    ncomp = as.integer(ncol(fit$scores)),
-    method = "rsvd",
-    backend = fit$backend,
-    backend_reason = fit$backend_reason,
-    oversample = fit$oversample,
-    power = fit$power,
-    seed = as.integer(seed)
-  )
-  class(out) <- "fastEmbedR_pca"
-  finalize_pca_fit(out, xtest, opentsne_init)
-}
-
-fastembedr_fastpls_pca <- function(data,
-                                   ncomp,
-                                   center,
-                                   scale,
-                                   backend,
-                                   seed) {
-  package <- "fastPLS"
-  if (!fastembedr_optional_namespace_available(package)) return(NULL)
-  installed_version <- utils::packageVersion(package)
-  if (installed_version < numeric_version("0.99.3")) return(NULL)
-  pca_fun <- tryCatch(
-    fastembedr_optional_export(package, "pca"),
-    error = function(e) NULL
-  )
-  if (is.null(pca_fun)) return(NULL)
-
-  fit <- tryCatch(
-    pca_fun(
-      data,
-      ncomp = as.integer(ncomp),
-      center = isTRUE(center),
-      scale = isTRUE(scale),
-      backend = backend,
+    if (identical(backend, "metal")) {
+      fit <- fastembedr_metal_tsvd_pca(
+        x,
+        ncomp = ncomp,
+        center = center,
+        scale = scale,
+        seed = seed
+      )
+      return(finalize_pca_fit(fit, xtest, opentsne_init))
+    }
+    prepared <- prepare_pca_matrix(x, center = center, scale = scale)
+    rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
+    if (rank < 1L) {
+      stop("`data` has no usable PCA rank.", call. = FALSE)
+    }
+    fit <- fastembedr_rsvd_pca_scores(
+      prepared$data,
+      rank = rank,
+      seed = seed,
+      backend = backend
+    )
+    if (!identical(backend, "cpu") &&
+        !startsWith(as.character(fit$backend), paste0(backend, "_"))) {
+      reason <- fit$backend_reason
+      if (is.null(reason) || length(reason) != 1L || is.na(reason)) {
+        reason <- paste0(backend, " RSVD backend is unavailable")
+      }
+      stop(reason, call. = FALSE)
+    }
+    out <- list(
+      scores = fit$scores,
+      loadings = fit$loadings,
+      singular_values = fit$singular_values,
+      center = prepared$center,
+      scale = prepared$scale,
+      ncomp = as.integer(ncol(fit$scores)),
       method = "rsvd",
+      backend = fit$backend,
+      backend_reason = fit$backend_reason,
+      oversample = fit$oversample,
+      power = fit$power,
       seed = as.integer(seed)
-    ),
-    error = function(e) NULL
-  )
-  if (is.null(fit) || is.null(fit$scores) || is.null(fit$loadings)) return(NULL)
+    )
+    class(out) <- "fastEmbedR_pca"
+    finalize_pca_fit(out, xtest, opentsne_init)
+  }
 
-  singular_values <- fit$svd$d %||% NULL
-  resolved_backend <- fit$svd.method %||% fit$svd$svd.method %||%
-    paste0(backend, "_rsvd")
-  out <- list(
-    scores = fit$scores,
-    loadings = fit$loadings,
-    singular_values = singular_values,
-    center = fit$center,
-    scale = fit$scale,
-    ncomp = as.integer(ncol(fit$scores)),
-    method = "rsvd",
-    backend = as.character(resolved_backend),
-    backend_reason = NA_character_,
-    engine = "fastPLS",
-    engine_version = as.character(installed_version),
-    precision = fit$precision %||%
-      if (is_float32_matrix(fit$scores)) "float32" else "double",
-    oversample = fit$svd$oversample %||% NA_integer_,
-    power = fit$svd$power %||% NA_integer_,
-    seed = as.integer(seed)
-  )
-  class(out) <- "fastEmbedR_pca"
-  out
+  if (!identical(backend, "cpu")) return(run_pca())
+
+  threaded <- with_pca_cpu_threads(n_threads, run_pca())
+  fit <- threaded$value
+  fit$n.cores_requested <- n_threads
+  fit$n.cores_effective <- threaded$effective
+  fit$core_control <- threaded$control
+  fit
 }
 
-fastpls_rsvd_tuning <- function(n, p, rank, backend) {
+fastembedr_rsvd_tuning <- function(n, p, rank, backend) {
   backend <- if (is.null(backend)) "cpu" else backend
   if (identical(backend, "cuda")) {
     oversample <- if (n * p >= 5e6) 16L else 10L
@@ -524,8 +641,8 @@ fastpls_rsvd_tuning <- function(n, p, rank, backend) {
     oversample <- if (n * p >= 5e6) 16L else 10L
     power <- if (rank <= 30L) 1L else 0L
   } else {
-    oversample <- if (rank <= 10L) 10L else min(20L, max(10L, ceiling(rank / 2)))
-    power <- if (rank <= 30L) 1L else 0L
+    oversample <- 20L
+    power <- if (rank <= 20L) 1L else 2L
   }
   list(
     oversample = as.integer(max(0L, oversample)),
@@ -533,10 +650,10 @@ fastpls_rsvd_tuning <- function(n, p, rank, backend) {
   )
 }
 
-fastpls_rsvd_pca_scores <- function(x,
-                                    rank,
-                                    seed,
-                                    backend = "cpu") {
+fastembedr_rsvd_pca_scores <- function(x,
+                                       rank,
+                                       seed,
+                                       backend = "cpu") {
   x <- as.matrix(x)
   storage.mode(x) <- "double"
   n <- nrow(x)
@@ -550,11 +667,11 @@ fastpls_rsvd_pca_scores <- function(x,
   } else {
     backend
   }
-  tuning <- fastpls_rsvd_tuning(n, p, rank, backend_requested)
+  tuning <- fastembedr_rsvd_tuning(n, p, rank, backend_requested)
   sketch_rank <- min(max_rank, rank + tuning$oversample)
 
   run_backend <- function(selected_backend) {
-    fastpls_rsvd_pca_scores_backend(
+    fastembedr_rsvd_pca_scores_backend(
       x,
       rank = rank,
       sketch_rank = sketch_rank,
@@ -589,12 +706,12 @@ fastpls_rsvd_pca_scores <- function(x,
   cpu
 }
 
-fastpls_rsvd_pca_scores_backend <- function(x,
-                                            rank,
-                                            sketch_rank,
-                                            seed,
-                                            power,
-                                            backend) {
+fastembedr_rsvd_pca_scores_backend <- function(x,
+                                               rank,
+                                               sketch_rank,
+                                               seed,
+                                               power,
+                                               backend) {
   restore_seed <- set_local_seed(seed)
   on.exit(restore_seed(), add = TRUE)
   omega <- matrix(stats::rnorm(ncol(x) * sketch_rank), nrow = ncol(x), ncol = sketch_rank)

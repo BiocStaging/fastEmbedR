@@ -47,7 +47,7 @@ fi
 
 os_name=$(uname -s 2>/dev/null || echo unknown)
 
-metal_objects="embedding_metal_bridge.o embedding_metal_stub.o native_knn_metal_stub.o"
+metal_objects="embedding_metal_bridge.o embedding_metal_stub.o native_knn_metal_stub.o graph_clustering_metal_stub.o"
 cppflags=""
 libs="-pthread"
 objcxxflags=""
@@ -58,18 +58,22 @@ enable_cuvs=0
 
 if [ "$os_name" = "Darwin" ]; then
   metal_enabled=1
-  metal_objects="embedding_metal_bridge.o embedding_metal_impl.o native_knn_metal_impl.o"
+  metal_objects="embedding_metal_bridge.o embedding_metal_impl.o native_knn_metal_impl.o graph_clustering_metal_impl.o"
   cppflags="-DHAVE_METAL=1"
   objcxxflags='$(CXXFLAGS) -pthread'
-  libs="-pthread -framework Foundation -framework Metal -framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph"
+  libs="-pthread -framework Foundation -framework Accelerate -framework Metal -framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph"
 fi
 
 cuda_objects="embedding_cuda_stub.o"
 native_cuda_knn_object="native_knn_cuda_stub.o"
+graph_cuda_object="graph_clustering_cuda_stub.o"
 cuda_rule=""
 if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   cuda_enabled=1
   cuda_include_flags="-I$cuda_home/include"
+  r_home=${R_HOME:-$(R RHOME)}
+  rcpp_include=$(Rscript -e 'cat(system.file("include", package = "Rcpp"))')
+  cuda_include_flags="$cuda_include_flags -I$r_home/include -I$rcpp_include"
   cuda_lib_flags="-L$cuda_home/lib64 -L$cuda_home/lib"
   if [ -d "$cuda_home/targets/x86_64-linux/include" ]; then
     cuda_include_flags="$cuda_include_flags -I$cuda_home/targets/x86_64-linux/include"
@@ -107,6 +111,7 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   fi
   cuda_extra_flags=${FASTEMBEDR_CUDA_FLAGS:-}
   cuda_objects="embedding_cuda_impl.o embedding_cuda_kernels.o"
+  graph_cuda_object="graph_clustering_cuda_kernels.o"
   cppflags="$cppflags -DFASTEMBEDR_HAS_CUDA $cuda_include_flags"
   libs="$libs $cuda_lib_flags -lcudart -lcufft -lcublas -lcusolver"
   faiss_home=${FAISS_HOME:-${RAPIDS_HOME:-${CUVS_HOME:-}}}
@@ -298,6 +303,9 @@ CUDA_NVCCFLAGS = -std=c++17 -x cu --extended-lambda --expt-relaxed-constexpr -Xc
 
 embedding_cuda_kernels.o: embedding_cuda_kernels.cpp
 	\$(NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
+
+graph_clustering_cuda_kernels.o: graph_clustering_cuda_kernels.cu
+	\$(NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@
 "
 fi
 
@@ -315,7 +323,7 @@ fi
     echo "NVCC = $nvcc"
     printf "%s" "$cuda_rule"
   fi
-  echo "OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o graph_clustering.o walktrap.o native_knn_bridge.o native_knn_hnsw.o $native_cuda_knn_object $metal_objects embedding_cuda_bridge.o $cuda_objects"
+  echo "OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o graph_clustering.o graph_clustering_cuda_bridge.o graph_clustering_metal_bridge.o walktrap.o native_knn_bridge.o native_knn_hnsw.o $native_cuda_knn_object $graph_cuda_object $metal_objects embedding_cuda_bridge.o $cuda_objects"
 } > src/Makevars
 
 echo "fastEmbedR configuration:"

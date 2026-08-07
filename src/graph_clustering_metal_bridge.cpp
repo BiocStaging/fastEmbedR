@@ -1,0 +1,37 @@
+#include <Rcpp.h>
+
+#include "graph_clustering_accel_common.h"
+#include "graph_clustering_metal_api.h"
+
+// [[Rcpp::export]]
+bool graph_clustering_metal_available_cpp() {
+  return graph_clustering_metal_available_impl();
+}
+
+// [[Rcpp::export]]
+std::string graph_clustering_metal_error_cpp() {
+  return graph_clustering_metal_error_impl();
+}
+
+// [[Rcpp::export]]
+Rcpp::List fastembedr_graph_cluster_metal_cpp(
+    Rcpp::IntegerVector from,
+    Rcpp::IntegerVector to,
+    Rcpp::NumericVector weight,
+    int n_vertices,
+    std::string method = "leiden",
+    double resolution = 1.0,
+    int n_iterations = 10,
+    int n_runs = 1,
+    double seed = 1) {
+  if (!graph_clustering_metal_available_impl()) {
+    Rcpp::stop(
+      "Metal graph clustering is unavailable: " +
+      graph_clustering_metal_error_impl()
+    );
+  }
+  return fastembedr_graph_accel::cluster(
+    from, to, weight, n_vertices, method, resolution, n_iterations, n_runs,
+    seed, "metal", graph_local_move_metal_impl
+  );
+}

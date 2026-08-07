@@ -18,7 +18,7 @@ opentsne(
   backend = c("cpu", "cuda", "metal"),
   keep_knn = FALSE,
   verbose = FALSE,
-  n_threads = NULL,
+  n.cores = NULL,
   learning_rate = "auto",
   early_exaggeration_iter = NULL,
   early_exaggeration = "auto",
@@ -73,7 +73,7 @@ Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{n_threads}{Number of CPU worker threads used by CPU KNN and CPU
+\item{n.cores}{Number of CPU cores used by CPU KNN and CPU
 openTSNE optimization. Native GPU optimizers ignore this argument.}
 
 \item{learning_rate}{Positive number or `"auto"`. With `"auto"`, the native
@@ -124,7 +124,7 @@ matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
 "openTSNE-style" describes the published sparse-affinity,
 interpolation-based t-SNE workflow, not Python API, object, default, or
-coordinate compatibility. No Python \code{openTSNE} code is called.
+coordinate compatibility. No Python `openTSNE` code is called.
 }
 \examples{
 fit <- opentsne(

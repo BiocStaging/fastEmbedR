@@ -4,7 +4,7 @@
 \alias{select_landmarks}
 \title{Select representative landmark observations}
 \usage{
-select_landmarks(data, landmarks = TRUE, seed = 4L, n_threads = NULL)
+select_landmarks(data, landmarks = TRUE, seed = 4L, n.cores = NULL)
 }
 \arguments{
 \item{data}{Numeric matrix, data frame, or `float::float32` matrix.}
@@ -14,7 +14,7 @@ landmark count, or explicit row indices.}
 
 \item{seed}{Random seed used by projection-based landmark selection.}
 
-\item{n_threads}{Number of CPU threads used for float32 selection features.}
+\item{n.cores}{Number of CPU cores used for float32 selection features.}
 }
 \value{
 A `fastEmbedR_landmark_selection` object containing `indices` and

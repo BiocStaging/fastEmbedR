@@ -4,19 +4,17 @@
 \name{fastEmbedR-package}
 \alias{fastEmbedR}
 \alias{fastEmbedR-package}
-\title{fastEmbedR: native embeddings and graph clustering from KNN}
+\title{fastEmbedR: native UMAP and openTSNE embeddings}
 \description{
-fastEmbedR combines native CPU/Metal nearest-neighbor search with native
-UMAP/openTSNE-style embeddings and native graph clustering from data or
-precomputed KNN matrices. Use
-[umap()] or [opentsne()] for one-call workflows, [precompute_knn()] to run
-the package-native CPU, Metal, or CUDA search separately, or pass a reusable
-list of KNN `indices` and `distances` to [umap_knn()] or [opentsne_knn()].
+fastEmbedR provides native float32 UMAP and openTSNE-style embeddings from
+data or precomputed nearest-neighbor matrices. Use [umap()] or [opentsne()]
+for one-call workflows, [precompute_knn()] to run the package-native CPU,
+Metal, or CUDA search separately, or pass reusable KNN `indices` and
+`distances` to [umap_knn()] or [opentsne_knn()].
 Use [pca()] for reusable backend-native PCA and request
 `opentsne_init = TRUE` when an openTSNE-ready initialization is needed.
-Build a clustering graph with [knn_graph()] and apply native Louvain,
-Leiden, or Walktrap with [graph_cluster()]. Score embeddings with
-[evaluate_embedding()].
+Score embeddings with [evaluate_embedding()]. Optional downstream graph
+utilities are available through [knn_graph()] and [graph_cluster()].
 }
 \details{
 The package intentionally does not export the earlier legacy t-SNE,
@@ -38,6 +36,8 @@ Authors:
   \item Stefano Cacciatore \email{tkcaccia@gmail.com}
   \item Moussa Kassim \email{Moussa.Kassim@icgeb.org}
   \item Martin Ocharo \email{Martin.Ocharo@icgeb.org}
+  \item Dalia Ahmed \email{Dalia.Ahmed@icgeb.org}
+  \item Dupe Ojo \email{Dupe.Ojo@icgeb.org}
   \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
   \item Leonardo Tenori \email{tenori@cerm.unifi.it}
 }

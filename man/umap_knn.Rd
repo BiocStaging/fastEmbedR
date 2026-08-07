@@ -9,8 +9,8 @@ umap_knn(
   seed = 42L,
   verbose = FALSE,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
-  graph_mode = c("binary", "fuzzy")
+  n.cores = NULL,
+  graph_mode = c("fuzzy", "binary")
 )
 }
 \arguments{
@@ -30,10 +30,11 @@ index matrix. A self-neighbor first column is removed automatically.}
 \code{"metal"}. GPU requests must resolve to a real native backend; the
 package does not label CPU work as GPU.}
 
-\item{n_threads}{Number of CPU worker threads for CPU UMAP.}
+\item{n.cores}{Number of CPU cores for CPU UMAP.}
 
-\item{graph_mode}{Graph weighting mode. \code{"binary"} uses a symmetric
-unit-weight graph. \code{"fuzzy"} uses standard UMAP fuzzy graph weights.}
+\item{graph_mode}{Graph weighting mode. \code{"fuzzy"} (the default) uses
+standard UMAP fuzzy graph weights. \code{"binary"} uses a symmetric
+unit-weight sensitivity graph.}
 
 }
 \value{

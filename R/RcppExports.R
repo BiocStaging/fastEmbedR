@@ -161,6 +161,10 @@ knn_tsne_opentsne_metal_cpp <- function(indices, distances, y_init, init, n_comp
     .Call(`_fastEmbedR_knn_tsne_opentsne_metal_cpp`, indices, distances, y_init, init, n_components, perplexity, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, seed, record_costs, auto_config, auto_iter_end)
 }
 
+pca_rsvd_cpu_cpp <- function(data, n_components, center, scale, omega, power, n_threads = 1L) {
+    .Call(`_fastEmbedR_pca_rsvd_cpu_cpp`, data, n_components, center, scale, omega, power, n_threads)
+}
+
 float32_all_finite_cpp <- function(data, n_threads = 0L) {
     .Call(`_fastEmbedR_float32_all_finite_cpp`, data, n_threads)
 }
@@ -333,6 +337,26 @@ fastembedr_graph_modularity_cpp <- function(from, to, weight, n_vertices, member
     .Call(`_fastEmbedR_fastembedr_graph_modularity_cpp`, from, to, weight, n_vertices, membership, resolution)
 }
 
+graph_clustering_cuda_available_cpp <- function() {
+    .Call(`_fastEmbedR_graph_clustering_cuda_available_cpp`)
+}
+
+fastembedr_graph_cluster_cuda_cpp <- function(from, to, weight, n_vertices, method = "leiden", resolution = 1.0, n_iterations = 10L, n_runs = 1L, seed = 1) {
+    .Call(`_fastEmbedR_fastembedr_graph_cluster_cuda_cpp`, from, to, weight, n_vertices, method, resolution, n_iterations, n_runs, seed)
+}
+
+graph_clustering_metal_available_cpp <- function() {
+    .Call(`_fastEmbedR_graph_clustering_metal_available_cpp`)
+}
+
+graph_clustering_metal_error_cpp <- function() {
+    .Call(`_fastEmbedR_graph_clustering_metal_error_cpp`)
+}
+
+fastembedr_graph_cluster_metal_cpp <- function(from, to, weight, n_vertices, method = "leiden", resolution = 1.0, n_iterations = 10L, n_runs = 1L, seed = 1) {
+    .Call(`_fastEmbedR_fastembedr_graph_cluster_metal_cpp`, from, to, weight, n_vertices, method, resolution, n_iterations, n_runs, seed)
+}
+
 native_hnsw_knn_cpp <- function(data, k, n_threads = 1L, metric = "euclidean", target_recall = 0.99) {
     .Call(`_fastEmbedR_native_hnsw_knn_cpp`, data, k, n_threads, metric, target_recall)
 }
@@ -375,10 +399,6 @@ native_cuda_knn_to_host_cpp <- function(knn) {
 
 tsne_auto_parameters_cpp <- function(n, k, perplexity, perplexity_missing, backend, negative_gradient_method) {
     .Call(`_fastEmbedR_tsne_auto_parameters_cpp`, n, k, perplexity, perplexity_missing, backend, negative_gradient_method)
-}
-
-knn_tsne_opentsne_cpp <- function(indices, distances, y_init, init, n_components, perplexity, theta, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, n_threads, seed, verbose, record_costs, auto_config, auto_iter_end) {
-    .Call(`_fastEmbedR_knn_tsne_opentsne_cpp`, indices, distances, y_init, init, n_components, perplexity, theta, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, n_threads, seed, verbose, record_costs, auto_config, auto_iter_end)
 }
 
 knn_tsne_opentsne_float_cpp <- function(indices, distances, y_init, init, n_components, perplexity, theta, early_exaggeration_iter, n_iter, early_exaggeration, exaggeration, learning_rate, learning_rate_auto, initial_momentum, final_momentum, min_gain, max_step_norm, negative_gradient_method, n_threads, seed, verbose, record_costs, auto_config, auto_iter_end) {

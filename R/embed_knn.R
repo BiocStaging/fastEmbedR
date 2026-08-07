@@ -10,7 +10,7 @@
 #' @param seed Random seed.
 #' @param verbose Print native optimizer progress.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param n_threads Number of CPU worker threads used by the CPU optimizer.
+#' @param n.cores Number of CPU cores used by the CPU optimizer.
 #'   Native GPU optimizers ignore this argument.
 #' @param ... Additional openTSNE-specific parameters such as `perplexity`,
 #'   iteration controls, `Y_init`, learning-rate controls, and exaggeration
@@ -36,8 +36,9 @@ embed_knn <- function(indices,
                       seed = 4L,
                       verbose = FALSE,
                       backend = c("cpu", "cuda", "metal"),
-                      n_threads = NULL,
+                      n.cores = NULL,
                       ...) {
+  n_threads <- n.cores
   method <- match.arg(method, c("umap", "opentsne"))
   backend <- resolve_embedding_backend(backend)
   n_components <- validate_n_components(n_components)

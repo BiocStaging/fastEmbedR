@@ -1,12 +1,20 @@
 #include <Rcpp.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#ifdef __APPLE__
+#define ACCELERATE_NEW_LAPACK
+#define COMPLEX FASTEMBEDR_ACCELERATE_COMPLEX
+#include <Accelerate/Accelerate.h>
+#undef COMPLEX
+#endif
 
 #include "native_knn_common.h"
 
@@ -164,7 +172,460 @@ void parallel_for_rows(const int n, const int n_threads, Function fn) {
   for (auto& worker : workers) worker.join();
 }
 
+struct PcaFloatMatrix {
+  std::vector<float> values;
+  int nrow = 0;
+  int ncol = 0;
+  bool input_float32 = false;
+};
+
+PcaFloatMatrix pca_center_scale_float(SEXP data,
+                                      const bool center,
+                                      const bool scale,
+                                      const int n_threads,
+                                      NumericVector& center_values,
+                                      NumericVector& scale_values) {
+  PcaFloatMatrix result;
+  result.input_float32 = fastembedr::is_float32_matrix(data);
+
+  const int* float_source = nullptr;
+  const double* double_source = nullptr;
+  const int* integer_source = nullptr;
+  if (result.input_float32) {
+    Rcpp::S4 object(data);
+    SEXP payload_sexp = object.slot("Data");
+    if (TYPEOF(payload_sexp) != INTSXP || !Rf_isMatrix(payload_sexp)) {
+      Rcpp::stop("Invalid float::float32 PCA matrix payload.");
+    }
+    IntegerMatrix payload(payload_sexp);
+    result.nrow = payload.nrow();
+    result.ncol = payload.ncol();
+    float_source = INTEGER(payload);
+  } else {
+    SEXP dims = Rf_getAttrib(data, R_DimSymbol);
+    if (TYPEOF(dims) != INTSXP || Rf_length(dims) != 2) {
+      Rcpp::stop("`data` must be an integer, numeric, or float::float32 matrix.");
+    }
+    result.nrow = INTEGER(dims)[0];
+    result.ncol = INTEGER(dims)[1];
+    if (TYPEOF(data) == REALSXP) {
+      double_source = REAL(data);
+    } else if (TYPEOF(data) == INTSXP) {
+      integer_source = INTEGER(data);
+    } else {
+      Rcpp::stop("`data` must be an integer, numeric, or float::float32 matrix.");
+    }
+  }
+  if (result.nrow < 2 || result.ncol < 1) {
+    Rcpp::stop("`data` must have at least two rows and one column.");
+  }
+
+  const std::size_t size =
+    static_cast<std::size_t>(result.nrow) * result.ncol;
+  result.values.resize(size);
+  center_values = NumericVector(result.ncol);
+  scale_values = NumericVector(result.ncol, 1.0);
+  double* center_ptr = REAL(center_values);
+  double* scale_ptr = REAL(scale_values);
+  std::atomic<bool> finite(true);
+  const double scale_denom = static_cast<double>(std::max(1, result.nrow - 1));
+
+  auto input_value = [&](const std::size_t index) -> double {
+    if (float_source != nullptr) {
+      return static_cast<double>(fastembedr::int_bits_to_float(float_source[index]));
+    }
+    if (double_source != nullptr) return double_source[index];
+    return static_cast<double>(integer_source[index]);
+  };
+
+  parallel_for_rows(result.ncol, n_threads, [&](const int begin, const int end, const int) {
+    for (int col = begin; col < end; ++col) {
+      const std::size_t offset = static_cast<std::size_t>(col) * result.nrow;
+      double sum = 0.0;
+      for (int row = 0; row < result.nrow; ++row) {
+        const double value = input_value(offset + row);
+        if (!std::isfinite(value)) {
+          finite.store(false, std::memory_order_relaxed);
+          break;
+        }
+        sum += value;
+      }
+      if (!finite.load(std::memory_order_relaxed)) continue;
+
+      const double mean = center ? sum / static_cast<double>(result.nrow) : 0.0;
+      center_ptr[col] = mean;
+      double sd = 1.0;
+      if (scale) {
+        double sum_squares = 0.0;
+        for (int row = 0; row < result.nrow; ++row) {
+          const double value = input_value(offset + row) - mean;
+          sum_squares += value * value;
+        }
+        sd = std::sqrt(sum_squares / scale_denom);
+        if (!std::isfinite(sd) || sd == 0.0) sd = 1.0;
+      }
+      scale_ptr[col] = sd;
+      const double inverse_sd = 1.0 / sd;
+      for (int row = 0; row < result.nrow; ++row) {
+        result.values[offset + row] = static_cast<float>(
+          (input_value(offset + row) - mean) * inverse_sd
+        );
+      }
+    }
+  });
+  if (!finite.load(std::memory_order_relaxed)) {
+    Rcpp::stop("`data` must contain only finite values.");
+  }
+  return result;
+}
+
+void pca_gemm_nn(const float* left,
+                 const float* right,
+                 float* output,
+                 const int nrow,
+                 const int shared,
+                 const int ncol,
+                 const int n_threads) {
+#ifdef __APPLE__
+  cblas_sgemm(
+    CblasColMajor,
+    CblasNoTrans,
+    CblasNoTrans,
+    nrow,
+    ncol,
+    shared,
+    1.0f,
+    left,
+    nrow,
+    right,
+    shared,
+    0.0f,
+    output,
+    nrow
+  );
+#else
+  parallel_for_rows(ncol, n_threads, [&](const int begin, const int end, const int) {
+    for (int col = begin; col < end; ++col) {
+      float* destination = output + static_cast<std::size_t>(col) * nrow;
+      std::fill(destination, destination + nrow, 0.0f);
+      for (int inner = 0; inner < shared; ++inner) {
+        const float coefficient = right[inner + static_cast<std::size_t>(col) * shared];
+        const float* source = left + static_cast<std::size_t>(inner) * nrow;
+        for (int row = 0; row < nrow; ++row) {
+          destination[row] += source[row] * coefficient;
+        }
+      }
+    }
+  });
+#endif
+}
+
+void pca_gemm_tn(const float* left,
+                 const float* right,
+                 float* output,
+                 const int shared,
+                 const int left_cols,
+                 const int right_cols,
+                 const int n_threads) {
+#ifdef __APPLE__
+  cblas_sgemm(
+    CblasColMajor,
+    CblasTrans,
+    CblasNoTrans,
+    left_cols,
+    right_cols,
+    shared,
+    1.0f,
+    left,
+    shared,
+    right,
+    shared,
+    0.0f,
+    output,
+    left_cols
+  );
+#else
+  const int total = left_cols * right_cols;
+  parallel_for_rows(total, n_threads, [&](const int begin, const int end, const int) {
+    for (int index = begin; index < end; ++index) {
+      const int left_col = index % left_cols;
+      const int right_col = index / left_cols;
+      const float* left_data = left + static_cast<std::size_t>(left_col) * shared;
+      const float* right_data = right + static_cast<std::size_t>(right_col) * shared;
+      double value = 0.0;
+      for (int row = 0; row < shared; ++row) {
+        value += static_cast<double>(left_data[row]) * right_data[row];
+      }
+      output[left_col + static_cast<std::size_t>(right_col) * left_cols] =
+        static_cast<float>(value);
+    }
+  });
+#endif
+}
+
+NumericMatrix pca_float_to_numeric(const std::vector<float>& values,
+                                   const int nrow,
+                                   const int ncol) {
+  NumericMatrix output(nrow, ncol);
+  double* destination = REAL(output);
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    destination[i] = static_cast<double>(values[i]);
+  }
+  return output;
+}
+
+std::vector<float> pca_numeric_to_float(const NumericMatrix& values) {
+  const std::size_t size =
+    static_cast<std::size_t>(values.nrow()) * values.ncol();
+  std::vector<float> output(size);
+  const double* source = REAL(values);
+  for (std::size_t i = 0; i < size; ++i) {
+    output[i] = static_cast<float>(source[i]);
+  }
+  return output;
+}
+
+SEXP pca_output_matrix(const std::vector<float>& values,
+                       const int nrow,
+                       const int ncol,
+                       const bool float32_output) {
+  if (!float32_output) return pca_float_to_numeric(values, nrow, ncol);
+  IntegerMatrix payload(nrow, ncol);
+  int* destination = INTEGER(payload);
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    destination[i] = float_to_int_bits(values[i]);
+  }
+  Rcpp::S4 output("float32");
+  output.slot("Data") = payload;
+  return output;
+}
+
 } // namespace
+
+// [[Rcpp::export]]
+List pca_rsvd_cpu_cpp(SEXP data,
+                      int n_components,
+                      bool center,
+                      bool scale,
+                      NumericMatrix omega,
+                      int power,
+                      int n_threads = 1) {
+  using Clock = std::chrono::steady_clock;
+  const auto started = Clock::now();
+  n_threads = std::max(1, n_threads);
+  if (n_components < 1) {
+    Rcpp::stop("`n_components` must be positive.");
+  }
+
+  NumericVector center_values;
+  NumericVector scale_values;
+  PcaFloatMatrix x = pca_center_scale_float(
+    data,
+    center,
+    scale,
+    n_threads,
+    center_values,
+    scale_values
+  );
+  const int max_rank = std::min(x.nrow, x.ncol);
+  const int rank = std::min(n_components, max_rank);
+  if (rank < 1) Rcpp::stop("PCA input has no usable rank.");
+  if (omega.nrow() != x.ncol || omega.ncol() < rank ||
+      omega.ncol() > max_rank) {
+    Rcpp::stop("The RSVD sketch matrix has incompatible dimensions.");
+  }
+  const int sketch_rank = omega.ncol();
+  const auto converted = Clock::now();
+
+  std::vector<float> omega_float = pca_numeric_to_float(omega);
+  std::vector<float> y(
+    static_cast<std::size_t>(x.nrow) * sketch_rank
+  );
+  pca_gemm_nn(
+    x.values.data(),
+    omega_float.data(),
+    y.data(),
+    x.nrow,
+    x.ncol,
+    sketch_rank,
+    n_threads
+  );
+
+  power = std::max(0, power);
+  Rcpp::Environment base = Rcpp::Environment::base_env();
+  Rcpp::Function qr_function = base["qr"];
+  Rcpp::Function qr_q_function = base["qr.Q"];
+  auto qr_basis = [&](const std::vector<float>& values,
+                      const int nrow,
+                      const int ncol) -> NumericMatrix {
+    NumericMatrix matrix = pca_float_to_numeric(values, nrow, ncol);
+    List decomposition = qr_function(
+      matrix,
+      Rcpp::Named("LAPACK") = true
+    );
+    return Rcpp::as<NumericMatrix>(
+      qr_q_function(
+        decomposition,
+        Rcpp::Named("complete") = false
+      )
+    );
+  };
+
+  for (int iteration = 0; iteration < power; ++iteration) {
+    std::vector<float> z(
+      static_cast<std::size_t>(x.ncol) * sketch_rank
+    );
+    pca_gemm_tn(
+      x.values.data(),
+      y.data(),
+      z.data(),
+      x.nrow,
+      x.ncol,
+      sketch_rank,
+      n_threads
+    );
+    if (power > 1) {
+      NumericMatrix qz = qr_basis(z, x.ncol, sketch_rank);
+      z = pca_numeric_to_float(qz);
+    }
+    pca_gemm_nn(
+      x.values.data(),
+      z.data(),
+      y.data(),
+      x.nrow,
+      x.ncol,
+      sketch_rank,
+      n_threads
+    );
+    Rcpp::checkUserInterrupt();
+  }
+  const auto sketched = Clock::now();
+
+  NumericMatrix q = qr_basis(y, x.nrow, sketch_rank);
+  std::vector<float> q_float = pca_numeric_to_float(q);
+  std::vector<float> b(
+    static_cast<std::size_t>(sketch_rank) * x.ncol
+  );
+  pca_gemm_tn(
+    q_float.data(),
+    x.values.data(),
+    b.data(),
+    x.nrow,
+    sketch_rank,
+    x.ncol,
+    n_threads
+  );
+  const auto projected = Clock::now();
+
+  Rcpp::Function svd_function = base["svd"];
+  List small = svd_function(
+    pca_float_to_numeric(b, sketch_rank, x.ncol),
+    Rcpp::Named("nu") = rank,
+    Rcpp::Named("nv") = rank
+  );
+  NumericVector singular_values = small["d"];
+  NumericMatrix left_vectors = small["u"];
+  NumericMatrix right_vectors = small["v"];
+  const int usable = std::min(
+    rank,
+    std::min(
+      static_cast<int>(singular_values.size()),
+      std::min(left_vectors.ncol(), right_vectors.ncol())
+    )
+  );
+  if (usable < 1) {
+    Rcpp::stop("RSVD PCA produced no usable singular vectors.");
+  }
+
+  std::vector<float> score_coefficients(
+    static_cast<std::size_t>(sketch_rank) * usable
+  );
+  for (int component = 0; component < usable; ++component) {
+    const float singular = static_cast<float>(singular_values[component]);
+    for (int row = 0; row < sketch_rank; ++row) {
+      score_coefficients[row + static_cast<std::size_t>(component) * sketch_rank] =
+        static_cast<float>(left_vectors(row, component)) * singular;
+    }
+  }
+  std::vector<float> scores(
+    static_cast<std::size_t>(x.nrow) * usable
+  );
+  pca_gemm_nn(
+    q_float.data(),
+    score_coefficients.data(),
+    scores.data(),
+    x.nrow,
+    sketch_rank,
+    usable,
+    n_threads
+  );
+
+  std::vector<float> loadings(
+    static_cast<std::size_t>(x.ncol) * usable
+  );
+  for (int component = 0; component < usable; ++component) {
+    for (int row = 0; row < x.ncol; ++row) {
+      loadings[row + static_cast<std::size_t>(component) * x.ncol] =
+        static_cast<float>(right_vectors(row, component));
+    }
+  }
+  for (int component = 0; component < usable; ++component) {
+    int pivot = 0;
+    float maximum = 0.0f;
+    for (int row = 0; row < x.ncol; ++row) {
+      const float magnitude = std::abs(
+        loadings[row + static_cast<std::size_t>(component) * x.ncol]
+      );
+      if (magnitude > maximum) {
+        maximum = magnitude;
+        pivot = row;
+      }
+    }
+    if (loadings[pivot + static_cast<std::size_t>(component) * x.ncol] < 0.0f) {
+      for (int row = 0; row < x.ncol; ++row) {
+        loadings[row + static_cast<std::size_t>(component) * x.ncol] *= -1.0f;
+      }
+      for (int row = 0; row < x.nrow; ++row) {
+        scores[row + static_cast<std::size_t>(component) * x.nrow] *= -1.0f;
+      }
+    }
+  }
+  const auto completed = Clock::now();
+
+  NumericVector retained_singular_values(usable);
+  for (int component = 0; component < usable; ++component) {
+    retained_singular_values[component] = singular_values[component];
+  }
+  const bool return_float32 = x.input_float32;
+  return List::create(
+    Rcpp::Named("scores") = pca_output_matrix(
+      scores, x.nrow, usable, return_float32
+    ),
+    Rcpp::Named("loadings") = pca_output_matrix(
+      loadings, x.ncol, usable, return_float32
+    ),
+    Rcpp::Named("singular_values") = retained_singular_values,
+    Rcpp::Named("center") = center_values,
+    Rcpp::Named("scale") = scale_values,
+    Rcpp::Named("precision") = "float32",
+    Rcpp::Named("input_float32") = x.input_float32,
+    Rcpp::Named("oversample") = sketch_rank - rank,
+    Rcpp::Named("power") = power,
+    Rcpp::Named("n_threads") = n_threads,
+    Rcpp::Named("timing") = List::create(
+      Rcpp::Named("prepare") =
+        std::chrono::duration<double>(converted - started).count(),
+      Rcpp::Named("sketch") =
+        std::chrono::duration<double>(sketched - converted).count(),
+      Rcpp::Named("project") =
+        std::chrono::duration<double>(projected - sketched).count(),
+      Rcpp::Named("small_svd_and_scores") =
+        std::chrono::duration<double>(completed - projected).count(),
+      Rcpp::Named("total") =
+        std::chrono::duration<double>(completed - started).count()
+    )
+  );
+}
 
 // [[Rcpp::export]]
 bool float32_all_finite_cpp(SEXP data, int n_threads = 0) {

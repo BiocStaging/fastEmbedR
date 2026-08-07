@@ -12,9 +12,9 @@ landmark_umap(
   seed = 4L,
   backend = c("cpu", "cuda", "metal"),
   transform_k = NULL,
-  n_threads = NULL,
+  n.cores = NULL,
   keep_knn = FALSE,
-  graph_mode = c("binary", "fuzzy"),
+  graph_mode = c("fuzzy", "binary"),
   verbose = FALSE
 )
 }
@@ -38,11 +38,12 @@ CUDA requests package-native RAPIDS cuVS KNN with \code{target_recall = 0.99}. G
 real native backend and are not silently relabelled as CPU.}
 \item{transform_k}{Number of landmark neighbors used to project
 non-landmark observations. Defaults to \code{n_neighbors}.}
-\item{n_threads}{Number of CPU worker threads.}
+\item{n.cores}{Number of CPU cores.}
 \item{keep_knn}{Keep projection KNN matrices in the returned object.}
 \item{graph_mode}{Graph weighting mode passed unchanged to the reference
-\code{\link{umap}} fit. \code{"binary"} uses a symmetric unit-weight graph
-and \code{"fuzzy"} uses standard UMAP fuzzy graph weights.}
+\code{\link{umap}} fit. \code{"fuzzy"} (the default) uses standard UMAP fuzzy
+graph weights; \code{"binary"} uses a symmetric unit-weight sensitivity
+graph.}
 \item{verbose}{Print progress.}
 }
 \value{

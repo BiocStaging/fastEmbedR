@@ -6,6 +6,7 @@
 graph_cluster(
   graph,
   method = c("leiden", "louvain", "walktrap"),
+  backend = c("cpu", "cuda", "metal"),
   resolution = 1,
   n_iterations = 10L,
   n_runs = 1L,
@@ -16,6 +17,9 @@ graph_cluster(
 \arguments{
 \item{graph}{A \code{fastEmbedR_graph} or compatible weighted edge list.}
 \item{method}{Native Leiden, Louvain, or exact Walktrap.}
+\item{backend}{Execution backend. CUDA and Metal are supported for Louvain
+and Leiden and fail explicitly when unavailable. Walktrap is CPU-only.
+Accelerator requests never fall back silently to CPU.}
 \item{resolution}{Positive modularity resolution for Leiden and Louvain.}
 \item{n_iterations}{Maximum local-moving and Leiden iterations.}
 \item{n_runs}{Independent Louvain or Leiden runs.}
@@ -27,9 +31,12 @@ A \code{fastEmbedR_graph_cluster} list with one-based membership, modularity,
 implementation metadata, and timing.
 }
 \description{
-Runs native C++ graph clustering without calling Python, igraph, cuGraph, or an
-external clustering routine. Walktrap is the Pons-Latapy random-walk method and
-is memory-guarded because its exact transition matrix is quadratic.
+Runs package-native graph clustering without calling Python, igraph, cuGraph,
+or an external clustering routine. CPU clustering uses native C++. CUDA and
+Metal use float32 CSR graph storage, accelerator-resident parallel community
+moves, and package-owned C++ graph compaction and coarsening. Walktrap is the
+Pons-Latapy random-walk method and is memory-guarded because its exact
+transition matrix is quadratic.
 }
 \references{
 Blondel VD, Guillaume JL, Lambiotte R, Lefebvre E. Fast unfolding of

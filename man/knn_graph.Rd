@@ -11,7 +11,7 @@ knn_graph(
   weight = c("snn", "distance", "binary"),
   mutual = FALSE,
   prune = 0,
-  n_threads = 1L
+  n.cores = 1L
 )
 }
 \arguments{
@@ -23,7 +23,7 @@ or an existing \code{fastEmbedR_graph}.}
 \item{weight}{SNN/Jaccard, inverse-distance, or binary edge weights.}
 \item{mutual}{Whether to retain only reciprocal KNN edges.}
 \item{prune}{Non-negative edge-weight pruning threshold.}
-\item{n_threads}{CPU threads for search and graph construction.}
+\item{n.cores}{CPU cores for search and graph construction.}
 }
 \value{A compact \code{fastEmbedR_graph} edge-list object.}
 \description{

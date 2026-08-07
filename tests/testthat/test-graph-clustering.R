@@ -39,14 +39,14 @@ test_that("knn_graph builds a compact native graph", {
     matrix(rnorm(80, 0, 0.2), ncol = 4),
     matrix(rnorm(80, 3, 0.2), ncol = 4)
   )
-  graph <- knn_graph(x, k = 8L, weight = "snn", n_threads = 2L)
+  graph <- knn_graph(x, k = 8L, weight = "snn", n.cores = 2L)
   expect_s3_class(graph, "fastEmbedR_graph")
   expect_identical(graph$n_vertices, nrow(x))
   expect_equal(length(graph$from), graph$n_edges)
   expect_true(all(graph$from < graph$to))
   expect_true(all(graph$weight > 0 & graph$weight <= 1))
   expect_identical(graph$parameters$weight, "snn")
-  expect_identical(graph$parameters$n_threads, 2L)
+  expect_identical(graph$parameters$n.cores, 2L)
 })
 
 test_that("native graph methods recover canonical communities", {
@@ -67,6 +67,155 @@ test_that("native graph methods recover canonical communities", {
     expect_gt(result$modularity, 0.6)
     if (identical(method, "leiden")) {
       expect_true(result$connected_communities)
+    }
+  }
+})
+
+test_that("accelerator clustering never falls back silently", {
+  graph <- three_clique_graph()
+  expect_error(
+    graph_cluster(graph, method = "walktrap", backend = "metal"),
+    "supported only.*cpu"
+  )
+  expect_error(
+    graph_cluster(graph, method = "walktrap", backend = "cuda"),
+    "supported only.*cpu"
+  )
+
+  if (!fastEmbedR:::graph_clustering_cuda_available_cpp()) {
+    expect_error(
+      graph_cluster(graph, method = "louvain", backend = "cuda"),
+      "CUDA graph clustering is unavailable"
+    )
+  }
+  if (!fastEmbedR:::graph_clustering_metal_available_cpp()) {
+    expect_error(
+      graph_cluster(graph, method = "leiden", backend = "metal"),
+      "Metal graph clustering is unavailable"
+    )
+  }
+})
+
+available_clustering_accelerators <- function() {
+  candidates <- c(
+    metal = isTRUE(fastEmbedR:::graph_clustering_metal_available_cpp()),
+    cuda = isTRUE(fastEmbedR:::graph_clustering_cuda_available_cpp())
+  )
+  names(candidates)[candidates]
+}
+
+test_that("accelerated Louvain and Leiden preserve the CPU graph objective", {
+  backends <- available_clustering_accelerators()
+  skip_if(!length(backends))
+  graph <- three_clique_graph()
+  truth <- rep(seq_len(3L), each = 6L)
+  for (method in c("louvain", "leiden")) {
+    for (backend in backends) {
+      accelerated <- graph_cluster(
+        graph,
+        method = method,
+        backend = backend,
+        n_iterations = 20L,
+        n_runs = 2L,
+        seed = 3L
+      )
+      expect_identical(accelerated$backend_requested, backend)
+      expect_identical(accelerated$backend, backend)
+      expect_identical(accelerated$n_communities, 3L)
+      expect_equal(adjusted_rand_index(accelerated$membership, truth), 1)
+      expect_gt(accelerated$modularity, 0.6)
+      expect_identical(accelerated$graph_storage, "float32_csr")
+      expect_identical(accelerated$coarsening_backend, "native_cpp")
+      if (identical(method, "leiden")) {
+        expect_true(accelerated$connected_communities)
+      }
+    }
+  }
+})
+
+test_that("accelerated Leiden splits disconnected communities", {
+  backends <- available_clustering_accelerators()
+  skip_if(!length(backends))
+  graph <- structure(
+    list(
+      from = c(1L, 2L, 4L, 5L),
+      to = c(2L, 3L, 5L, 6L),
+      weight = rep(1, 4L),
+      n_vertices = 6L,
+      n_edges = 4L
+    ),
+    class = c("fastEmbedR_graph", "list")
+  )
+  for (backend in backends) {
+    result <- graph_cluster(
+      graph,
+      method = "leiden",
+      backend = backend,
+      n_iterations = 20L,
+      seed = 19L
+    )
+    expect_true(result$connected_communities)
+    expect_gte(result$n_communities, 2L)
+  }
+})
+
+test_that("resolution and isolated vertices are handled consistently", {
+  graph <- three_clique_graph()
+  graph$n_vertices <- 20L
+  low <- graph_cluster(graph, "louvain", resolution = 0.5, seed = 8L)
+  high <- graph_cluster(graph, "louvain", resolution = 2, seed = 8L)
+  expect_gte(high$n_communities, low$n_communities)
+  expect_length(low$membership, 20L)
+  expect_false(anyNA(low$membership))
+
+  for (backend in available_clustering_accelerators()) {
+    accelerated <- graph_cluster(
+      graph, "louvain", backend = backend, resolution = 1, seed = 8L
+    )
+    expect_length(accelerated$membership, 20L)
+    expect_false(anyNA(accelerated$membership))
+    expect_true(accelerated$connected_communities)
+  }
+})
+
+test_that("accelerators handle vertices with more than 64 candidate communities", {
+  backends <- available_clustering_accelerators()
+  skip_if(!length(backends))
+
+  n_leaves <- 96L
+  graph <- structure(
+    list(
+      from = rep.int(1L, n_leaves),
+      to = seq.int(2L, n_leaves + 1L),
+      weight = seq(0.25, 1.25, length.out = n_leaves),
+      n_vertices = n_leaves + 1L,
+      n_edges = n_leaves
+    ),
+    class = c("fastEmbedR_graph", "list")
+  )
+
+  for (method in c("louvain", "leiden")) {
+    cpu <- graph_cluster(
+      graph,
+      method = method,
+      backend = "cpu",
+      n_iterations = 20L,
+      n_runs = 2L,
+      seed = 31L
+    )
+    for (backend in backends) {
+      accelerated <- graph_cluster(
+        graph,
+        method = method,
+        backend = backend,
+        n_iterations = 20L,
+        n_runs = 2L,
+        seed = 31L
+      )
+      expect_false(anyNA(accelerated$membership))
+      expect_true(is.finite(accelerated$modularity))
+      expect_gte(accelerated$modularity, cpu$modularity - 1e-5)
+      expect_true(accelerated$connected_communities)
     }
   }
 })
@@ -148,6 +297,31 @@ test_that("Louvain and Leiden remain competitive with igraph", {
   )
   expect_true(native_leiden$connected_communities)
   expect_gte(native_leiden$modularity, reference_modularity - 0.03)
+
+  for (backend in available_clustering_accelerators()) {
+    accelerated_louvain <- graph_cluster(
+      graph,
+      "louvain",
+      backend = backend,
+      n_iterations = 20L,
+      n_runs = 3L,
+      seed = 7L
+    )
+    accelerated_leiden <- graph_cluster(
+      graph,
+      "leiden",
+      backend = backend,
+      n_iterations = 10L,
+      n_runs = 3L,
+      seed = 7L
+    )
+    expect_gte(
+      accelerated_louvain$modularity,
+      igraph::modularity(reference_louvain) - 0.03
+    )
+    expect_gte(accelerated_leiden$modularity, reference_modularity - 0.03)
+    expect_true(accelerated_leiden$connected_communities)
+  }
 })
 
 test_that("Walktrap fails before unsafe dense allocation", {

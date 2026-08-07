@@ -20,7 +20,7 @@ evaluate_embedding(
   seed = NA_integer_,
   method = NA_character_,
   backend = NA_character_,
-  n_threads = NULL,
+  n.cores = NULL,
   dataset = NA_character_
 )
 }
@@ -62,7 +62,7 @@ quality metrics.}
 
 \item{backend}{Backend name recorded in the output.}
 
-\item{n_threads}{Number of CPU worker threads used when quality metrics need
+\item{n.cores}{Number of CPU cores used when quality metrics need
 nearest-neighbor searches. Ignored by native GPU metric backends.}
 
 \item{dataset}{Dataset name recorded in the output.}

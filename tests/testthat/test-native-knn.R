@@ -44,7 +44,7 @@ test_that("precompute_knn exposes the native CPU policy without self neighbors",
   x <- matrix(rnorm(240 * 10), nrow = 240)
   truth <- exact_knn_reference(x, 12L)
   observed <- precompute_knn(
-    x, k = 12L, metric = "euclidean", backend = "cpu", n_threads = 2L
+    x, k = 12L, metric = "euclidean", backend = "cpu", n.cores = 2L
   )
 
   expect_s3_class(observed, "fastEmbedR_knn")
@@ -68,7 +68,7 @@ test_that("precompute_knn exposes the native CPU policy without self neighbors",
     perplexity = 5,
     init_data = x,
     backend = "cpu",
-    n_threads = 2L,
+    n.cores = 2L,
     early_exaggeration_iter = 2L,
     n_iter = 3L
   )
@@ -80,7 +80,7 @@ test_that("precompute_knn preserves the float32 host path", {
   skip_if_not_installed("float")
   set.seed(25)
   x <- float::fl(matrix(rnorm(180 * 7), nrow = 180))
-  observed <- precompute_knn(x, k = 9L, backend = "cpu", n_threads = 2L)
+  observed <- precompute_knn(x, k = 9L, backend = "cpu", n.cores = 2L)
 
   expect_s3_class(observed, "fastEmbedR_knn")
   expect_true(inherits(observed$distances, "float32"))
@@ -90,7 +90,7 @@ test_that("precompute_knn preserves the float32 host path", {
 test_that("precompute_knn exposes no search-algorithm selector", {
   expect_identical(
     names(formals(precompute_knn)),
-    c("data", "k", "metric", "backend", "n_threads")
+    c("data", "k", "metric", "backend", "n.cores")
   )
   expect_error(
     precompute_knn(matrix(rnorm(40), nrow = 10), k = 10L),

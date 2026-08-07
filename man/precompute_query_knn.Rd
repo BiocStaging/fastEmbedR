@@ -10,7 +10,7 @@ precompute_query_knn(
   k = 30L,
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL
+  n.cores = NULL
 )
 }
 \arguments{
@@ -27,7 +27,7 @@ in CUDA builds that support it.}
 
 \item{backend}{Search backend: `"cpu"`, `"cuda"`, or `"metal"`.}
 
-\item{n_threads}{Number of CPU worker threads. Native GPU backends ignore
+\item{n.cores}{Number of CPU cores. Native GPU backends ignore
 this argument.}
 }
 \value{

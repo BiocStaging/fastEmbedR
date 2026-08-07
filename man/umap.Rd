@@ -12,9 +12,9 @@ umap(
   nn = NULL,
   seed = 4L,
   backend = c("cpu", "cuda", "metal"),
-  n_threads = NULL,
+  n.cores = NULL,
   keep_knn = FALSE,
-  graph_mode = c("binary", "fuzzy"),
+  graph_mode = c("fuzzy", "binary"),
   verbose = FALSE
 )
 }
@@ -41,14 +41,14 @@ from the supplied matrix.}
 
 \item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. CPU KNN uses package-native HNSW. Metal uses package-native exact or recall-tuned IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct RAPIDS cuVS IVF-Flat above that threshold; the KNN result stays on the device through graph construction and optimization. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
 
-\item{n_threads}{Number of CPU worker threads for KNN and CPU UMAP.}
+\item{n.cores}{Number of CPU cores for KNN and CPU UMAP.}
 
 \item{keep_knn}{If \code{TRUE}, retain KNN matrices in the returned object.}
 
-\item{graph_mode}{Graph weighting mode. \code{"binary"} uses a symmetric
-unit-weight graph as an adjacency-only approximation; it is not standard UMAP
-or necessarily faster. \code{"fuzzy"} uses standard UMAP fuzzy graph weights
-and should be used for reference-implementation comparisons.}
+\item{graph_mode}{Graph weighting mode. \code{"fuzzy"} (the default) uses the
+standard UMAP fuzzy graph. \code{"binary"} uses a symmetric unit-weight graph
+as an adjacency-only sensitivity approximation; it is not standard UMAP or
+necessarily faster.}
 
 \item{verbose}{Print progress.}
 }
