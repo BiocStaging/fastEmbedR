@@ -8,27 +8,28 @@
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
 **Reproducibility** |
-[References](references.md)
+[References](references.md) |
+[Benchmark repository](https://github.com/tkcaccia/fastEmbedR-benchmark)
 
 This page records the reproducibility contract for the manuscript benchmarks.
 It is intentionally explicit because fastEmbedR benchmarks may involve R
 packages, native C++ code, optional Metal kernels, optional CUDA kernels, FAISS,
-and RAPIDS cuVS linked directly by optional CUDA builds.
+and RAPIDS cuVS linked directly by optional CUDA builds. Benchmark code and
+dataset instructions are versioned independently at
+[`tkcaccia/fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark).
+Reproducible reports must record both the package commit and benchmark commit.
 
-## Manuscript Snapshot
+## Release Snapshot
 
-The current working manuscript was generated from repository HEAD:
-
-```text
-57db7ea0527d8143e0ed6cd9906247f40c1208d4
-```
-
-At the time of this documentation update, the working tree also contained
-manuscript-response edits. Before journal submission, create and archive a
-clean release tag, for example:
+Before a publication or release benchmark, create and archive clean tags for
+both repositories, for example:
 
 ```bash
 git tag -a v0.99.0-manuscript -m "fastEmbedR manuscript benchmark snapshot"
+git push origin v0.99.0-manuscript
+
+cd ../fastEmbedR-benchmark
+git tag -a v0.99.0-manuscript -m "fastEmbedR benchmark snapshot"
 git push origin v0.99.0-manuscript
 ```
 
@@ -48,6 +49,8 @@ directory. Do not invent a DOI before the archive exists.
 Run:
 
 ```bash
+git clone https://github.com/tkcaccia/fastEmbedR-benchmark.git
+cd fastEmbedR-benchmark
 Rscript tools/write_manuscript_reproducibility.R \
   --out-dir=results/manuscript_reproducibility_current \
   --seed=4 \
@@ -85,9 +88,15 @@ The manifest records:
 - paths to the benchmark driver and wrapper scripts.
 
 The publication benchmark driver
-[`tools/hpc_embeddings/benchmark_embeddings_float32_publication.R`](../tools/hpc_embeddings/benchmark_embeddings_float32_publication.R)
+[`tools/hpc_embeddings/benchmark_embeddings_float32_publication.R`](https://github.com/tkcaccia/fastEmbedR-benchmark/blob/main/tools/hpc_embeddings/benchmark_embeddings_float32_publication.R)
 also writes this bundle automatically into every HPC benchmark output
 directory.
+
+GPU-specific test evidence follows the
+[real-hardware backend validation contract](backend-validation.md). The
+release commands fail when Metal or CUDA is unavailable, when a result records
+a backend different from the one requested, or when a backend-specific test
+fails.
 
 ## Benchmark Commands
 

@@ -14,7 +14,7 @@
 `fastEmbedR` implements two nonlinear embedding families: UMAP and an
 openTSNE-style t-SNE. UMAP follows the fuzzy simplicial-set graph formulation
 introduced by McInnes and colleagues [7,13]. The t-SNE path follows the
-probabilistic neighbour-embedding objective of van der Maaten and Hinton [1],
+probabilistic neighbor-embedding objective of van der Maaten and Hinton [1],
 with modern openTSNE/FIt-SNE-style optimization and interpolation ideas [3-4].
 The package is intentionally KNN-first. fastEmbedR implements its CPU HNSW and
 Apple Metal exact/IVF-Flat one-call KNN paths natively. CUDA builds link
@@ -30,10 +30,11 @@ The public package surface is deliberately small:
 - `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
 - `opentsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
   then call the corresponding KNN entry point.
-- `pca()` computes backend-native truncated PCA scores and loadings, including
-  a resident float32 Metal/MPS TSVD path.
+- `pca()` computes backend-native truncated PCA scores and loadings. CPU and
+  CUDA use fastEmbedR's native RSVD implementation; Metal uses a resident
+  float32 MPS TSVD path. Resident CUDA openTSNE initialization uses RAFT TSVD.
 - `knn_graph()` builds one compact undirected graph from data, an embedding,
-  or supplied neighbours; `graph_cluster()` applies native Louvain, Leiden,
+  or supplied neighbors; `graph_cluster()` applies native Louvain, Leiden,
   or Walktrap community detection.
 - `backend` is limited to `"cpu"`, `"metal"`, and `"cuda"`.
 - GPU requests fail clearly if native GPU code is unavailable. CPU fallback is
@@ -75,13 +76,13 @@ CUDA/NVCC versions, and relevant environment flags.
 Because fastEmbedR implements the embedding path natively rather than calling
 Python openTSNE, the package includes a small reference-validation workflow.
 The script
-[`tools/validate_reference_implementations.R`](../tools/validate_reference_implementations.R)
+[`tools/validate_reference_implementations.R`](https://github.com/tkcaccia/fastEmbedR-benchmark/blob/main/tools/validate_reference_implementations.R)
 uses exact KNN on iris, fixes the random seed, and compares package-native
 outputs with established R references.
 
 For t-SNE, the validation compares `opentsne_knn()` with
 `Rtsne::Rtsne_neighbors()` from the same exact KNN matrix and PCA
-initialization. It records trustworthiness, nearest-neighbour preservation,
+initialization. It records trustworthiness, nearest-neighbor preservation,
 embedding-space KNN label accuracy, the final KL/cost value where exposed, and
 Procrustes-aligned similarity between the two embeddings [1-4,11]. On a small
 dataset the script uses the exact negative-gradient diagnostic path rather
@@ -97,10 +98,10 @@ stochastic optimizers, spectral initialization details, and parallel floating
 point reductions can legitimately rotate, reflect, scale, or slightly deform
 the final layout.
 
-## Nearest-Neighbour Layer
+## Nearest-Neighbor Layer
 
 `fastEmbedR` exports a focused precomputation boundary rather than a general
-nearest-neighbour algorithm menu. `precompute_knn()` exposes `k`, metric,
+nearest-neighbor algorithm menu. `precompute_knn()` exposes `k`, metric,
 backend, and CPU thread count; it applies the same internally selected search
 policy as the one-call embedding functions. The KNN-input functions also
 accept a plain host list of indices and distances from another implementation.
@@ -108,7 +109,7 @@ accept a plain host list of indices and distances from another implementation.
 The CPU implementation distils the HNSW organization in FAISS 1.14.3 [8]:
 exponentially sampled hierarchy levels, greedy descent through upper layers,
 bounded `efConstruction` expansion at each insertion layer, diversity-aware
-neighbour pruning, reciprocal graph links, and independent parallel queries.
+neighbor pruning, reciprocal graph links, and independent parallel queries.
 All vectors, graph distances, and search buffers are float32; indices are
 int32. A large/high-dimensional target-0.99 policy uses `M = 10`,
 `efConstruction = 40`, and `efSearch = 40`, selected only after comparison
@@ -139,7 +140,7 @@ vectors, in bounded query batches. Four deterministic 64-row pilot strata
 spread across the dataset jointly select shortlist size and `nprobe`. If no
 shortlist reaches the requested recall tier plus a generalization margin, the
 same Metal backend uses direct exact reranking of selected lists. Candidate
-routing is approximate; every returned neighbour and distance is based on
+routing is approximate; every returned neighbor and distance is based on
 full-dimensional exact reranking. This fused list-scan/top-k organization was
 informed by FAISS [8] and MLXPorts/Faiss-mlx. Their exact commits and
 permissive licenses are retained under `inst/LICENSES/`.
@@ -153,18 +154,18 @@ and a small/large data policy:
   and recall-tuned cuVS IVF-Flat at or above 100,000 samples. Exact float32
   Euclidean/IP input is uploaded in its existing R column-major layout because
   FAISS accepts column-major vectors; this removes a full host transpose and
-  its temporary buffer without changing distances or neighbours. IVF starts from a
+  its temporary buffer without changing distances or neighbors. IVF starts from a
   deterministic shape rule, compares evenly spaced pilot queries against a
   cuVS exact oracle, and expands `nprobe` until it reaches the requested recall
   tier with a small safety margin. It records pilot recall, `nlist`, `nprobe`,
   and the number of tuning attempts.
 - FAISS/cuVS write int64 row-major search output on the device. One package CUDA
-  kernel removes self-neighbours, converts indices to int32/one-based form,
+  kernel removes self-neighbors, converts indices to int32/one-based form,
   transforms squared distances, and packs the result directly into the
   column-major device layout consumed by UMAP and openTSNE. No KNN matrix is
   materialized in R during a one-call CUDA embedding.
 - KNN-input functions accept the index and distance matrices as already
-  measured data and do not repeat neighbour search.
+  measured data and do not repeat neighbor search.
 
 This separation makes benchmark timing interpretable: KNN time, affinity/graph
 construction time, embedding time, and projection/transform time can be
@@ -172,17 +173,17 @@ reported separately.
 
 ## KNN Graphs And Community Detection
 
-`knn_graph()` deliberately reuses the package's existing nearest-neighbour
-boundary. It accepts raw data, a `fastEmbedR_embedding`, or supplied neighbour
+`knn_graph()` deliberately reuses the package's existing nearest-neighbor
+boundary. It accepts raw data, a `fastEmbedR_embedding`, or supplied neighbor
 indices and distances; it does not expose another KNN algorithm selector.
 Graph construction is package-native C++ and produces one compact undirected
-edge list. The supported weights are Jaccard shared-neighbour similarity on
+edge list. The supported weights are Jaccard shared-neighbor similarity on
 observed KNN edges, inverse distance, and binary adjacency. Reciprocal-edge
 filtering and a final weight threshold are optional. Directed duplicates are
-collapsed once, so clustering does not repeat neighbour search or retain a
+collapsed once, so clustering does not repeat neighbor search or retain a
 dense adjacency matrix.
 
-`graph_cluster()` provides three CPU algorithms:
+`graph_cluster()` provides three package-native algorithms:
 
 - multilevel Louvain local moving and graph aggregation [14];
 - Leiden local moving, within-community refinement, and aggregation [15];
@@ -190,16 +191,31 @@ dense adjacency matrix.
   agglomeration [16].
 
 The Leiden phase organization is informed by the MIT-licensed NetworKit
-implementation [17], but fastEmbedR uses its own compact graph representation
-and does not link to NetworKit. Walktrap is the published random-walk method,
-not a sampled proximity approximation. Its exact transition storage is
-quadratic, so the implementation stops before an unsafe allocation and directs
-large graphs to Louvain or Leiden. `igraph` is used only as a guarded test
-oracle. External clustering implementations are neither linked nor called.
+implementation [17]. The accelerator design is also informed by the parallel
+graph-processing principles used by RAPIDS cuGraph, but no cuGraph source is
+copied and no cuGraph library, Python module, or runtime symbol is linked.
+fastEmbedR owns its graph representation and implementation.
 
-The clustering backend is reported as CPU. CUDA or Metal can accelerate the
-KNN stage when `knn_graph()` starts from data, but fastEmbedR does not label
-that as GPU community detection.
+CPU clustering uses the package's double-precision sequential multilevel
+optimizer. CUDA and Metal convert the canonical undirected graph once to
+float32 compressed sparse row (CSR) storage. Community volumes, counts,
+memberships, and move proposals remain on the accelerator during each
+local-moving or Leiden-refinement phase. Vertices are processed in seeded
+color batches; proposals and updates are separate kernels, and atomic
+float32 volume updates maintain the modularity objective. Empty labels are
+compacted and the coarse graph is assembled by package-owned C++ between
+levels. Leiden communities are checked and disconnected components are split
+before aggregation. This shared host orchestration keeps CPU, CUDA, and Metal
+semantics aligned without imposing a cuGraph dependency.
+
+Walktrap is the published random-walk method, not a sampled proximity
+approximation. Its exact transition storage is quadratic, so the
+implementation stops before an unsafe allocation and directs large graphs to
+Louvain or Leiden. Walktrap remains CPU-only. A request for CUDA or Metal
+Walktrap fails explicitly; it is never reported as GPU work after running on
+CPU. `igraph` is used only as a guarded test and benchmark oracle. Fixed seeds
+control scheduling, but floating-point atomic update order means GPU results
+are not guaranteed to be bitwise identical across devices.
 
 ## PCA And Truncated-SVD Initialization
 
@@ -212,7 +228,7 @@ hardware-appropriate execution:
 
 | Backend | PCA implementation |
 | --- | --- |
-| CPU | Native R/C++ RSVD matrix products using BLAS-backed `%*%`/`crossprod`. |
+| CPU | Package-native float32 blocked RSVD. Centering/scaling and large matrix products run in C++; Apple builds use Accelerate SGEMM and other platforms use a threaded float32 kernel. `n.cores` controls the temporary numerical-library/thread limit. |
 | Metal | Package-native float32 block-subspace TSVD using MPS matrix multiplication and a resident unified-memory workspace. |
 | CUDA | Native C++/CUDA initialization through RAPIDS RAFT TSVD compiled into the CUDA backend. |
 
@@ -226,12 +242,29 @@ once on Metal. The input, projected block, basis, Gram matrix, loadings, and
 scores remain allocated for the complete call, eliminating the repeated
 full-matrix uploads and R intermediate matrices of the earlier Metal RSVD.
 
+The CPU route similarly avoids materializing repeated double-precision
+intermediates. Input is centered and optionally scaled once into contiguous
+float32 storage. The seeded range sketch, subspace products, projected matrix,
+scores, and loadings remain float32; only the skinny QR and small SVD cross the
+ordinary R numeric boundary. The default uses 20 oversampling vectors, one
+subspace iteration through rank 20, and two above rank 20. If the sketch spans
+the complete available feature space, the redundant power iteration is
+omitted.
+
 For openTSNE initialization, the input is mean-centered before decomposition
 and the resulting scores are centered and scaled to the small t-SNE
 initialization scale. CUDA acceleration for this step is native C++/CUDA
 through RAPIDS RAFT TSVD compiled in the package CUDA translation unit. If
 RAFT TSVD support is not compiled in, CUDA PCA initialization fails loudly
 rather than falling back to a different implementation.
+
+The public CPU API exposes `n.cores` directly. fastEmbedR applies the
+requested limit for the duration of the PCA call through standard numerical
+library environment variables and, when installed, `RhpcBLASctl`, then
+restores the previous process settings. The returned fit records the requested
+and observable thread counts. A single-threaded BLAS remains single-threaded.
+`irlba` is retained only as an external benchmark comparator and is not part of
+the package implementation.
 
 Set `opentsne_init = TRUE` in `pca()` to retain the ordinary PCA fit and add an
 `opentsne_init` matrix derived from those same scores. The added matrix is
@@ -246,7 +279,7 @@ cache. Either result can be passed as `Y_init` to `opentsne_knn()` or
 
 UMAP is implemented as a sparse graph optimization from a supplied KNN matrix.
 The implementation follows the UMAP fuzzy simplicial-set formulation [7,13]:
-local bandwidths are estimated per observation, neighbour distances are
+local bandwidths are estimated per observation, neighbor distances are
 converted to directed membership strengths, the graph is symmetrized, and a
 low-dimensional layout is optimized with attractive edge updates and sampled
 repulsive updates.
@@ -281,7 +314,7 @@ UMAP exposes two graph modes:
 | Mode | Meaning | Intended use |
 | --- | --- | --- |
 | `"fuzzy"` | Standard UMAP fuzzy graph weights. | Scientific comparison with the original UMAP model and `uwot`. |
-| `"binary"` | Unit weights on the symmetric KNN union, with the same low-dimensional optimizer. | Adjacency-only sensitivity analysis when neighbour identity is trusted more than distance calibration. It is not standard UMAP or a guaranteed acceleration. |
+| `"binary"` | Unit weights on the symmetric KNN union, with the same low-dimensional optimizer. | Adjacency-only sensitivity analysis when neighbor identity is trusted more than distance calibration. It is not standard UMAP or a guaranteed acceleration. |
 
 Binary graph preparation omits smooth-KNN bandwidth estimation, but all unit
 edges receive the maximum sampling frequency. Fuzzy UMAP samples weak edges
@@ -401,7 +434,7 @@ The API asks for few parameters, but selected defaults are saved in the output.
 For openTSNE-style t-SNE, the native helper follows opt-SNE-inspired rules for
 learning rate and iteration defaults [6]. For UMAP, the code uses the supplied
 KNN and data size to choose internal initialization effort and optimizer
-defaults without silently changing the supplied neighbour graph [7,13].
+defaults without silently changing the supplied neighbor graph [7,13].
 
 ## License Boundary
 

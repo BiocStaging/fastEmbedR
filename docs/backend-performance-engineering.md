@@ -210,10 +210,11 @@ to demonstrate that the openTSNE changes did not regress UMAP.
 ## PCA Initialization
 
 `opentsne()` uses a small PCA initialization unless an explicit `Y_init` is
-supplied. The decomposition follows the randomized-SVD family used by
-`fastPLS` rather than IRLBA:
+supplied. The decomposition uses fastEmbedR's package-native randomized-SVD
+implementation rather than IRLBA:
 
-- CPU uses BLAS-backed randomized subspace products;
+- CPU uses blocked float32 randomized subspace products, with Accelerate SGEMM
+  on Apple builds and threaded package kernels elsewhere;
 - Metal uses a resident float32 block-subspace iteration with MPS matrix
   multiplication and a small CPU eigensolve of the projected Gram matrix.
   Float32 input is copied directly into unified Metal storage; a native Metal
@@ -231,16 +232,16 @@ no feature scaling, seed 4, and three repetitions:
 
 | Backend | Median PCA time, s | Precision | Engine |
 | --- | ---: | --- | --- |
-| CPU | 1.578 | float32 | Native RSVD |
-| Metal, previous path | 0.429 | float32 | MPS TSVD with CPU preprocessing |
-| Metal, current warm path | 0.104 | float32 | Resident preprocessing plus MPS TSVD |
+| CPU, 1 core, current warm path | 0.213 | float32 | Native blocked RSVD |
+| CPU, 4 cores, current warm path | 0.161 | float32 | Native blocked RSVD |
+| Metal, current warm path | 0.096 | float32 | Resident preprocessing plus MPS TSVD |
 
-The current warm Metal path is 4.1 times faster than the previous Metal path
-and 15.2 times faster than the measured CPU path. Its first invocation also
-compiles the Metal pipeline; the observed cold time was 0.774 seconds, so cold
-and warm timings are reported separately. Moving preprocessing to Metal
-reduced the conversion/centering stage from approximately 0.37 seconds to
-0.039-0.043 seconds. The retained implementation returns actual
+The current warm Metal path is 2.22 times faster than the one-core CPU path and
+1.68 times faster than the four-core CPU path in this float32 MNIST test. Its
+first invocation also compiles the Metal pipeline; cold and warm timings must
+therefore be reported separately. Moving preprocessing to Metal reduced host
+work, while the optimized CPU route now also centers and sketches once in
+contiguous float32 storage. Both implementations return actual
 `float::float32` score and loading matrices for float32 input instead of
 constructing double R matrices and attaching float metadata. The 70,000 by 2
 score object occupies approximately 0.56 MB rather than the approximately
@@ -397,9 +398,13 @@ The following work is proposed, not yet claimed:
 
 ## Reproducing The Measurements
 
-The reusable MNIST benchmark command is:
+The reusable scripts below are maintained in
+[`fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark).
+Clone that repository and run the MNIST benchmark command from its root:
 
 ```bash
+git clone https://github.com/tkcaccia/fastEmbedR-benchmark.git
+cd fastEmbedR-benchmark
 Rscript tools/benchmark_mnist70k_embedding_only_scaling.R \
   --data=/Users/stefano/Documents/fastEmbedR/Data/MNIST/MNIST.RData \
   --cache-dir=results/mnist70k_embedding_only_scaling_cache \

@@ -40,6 +40,8 @@ venv/
 
 # Downloaded data and generated outputs
 data/
+tools/
+examples/
 cache/
 results/
 backups/

@@ -248,9 +248,11 @@ t <- opentsne(x, perplexity = 15, backend = "cuda")
 stopifnot(nrow(u$layout) == 5000L, nrow(t$layout) == 5000L)
 ```
 
-Also run the smoke script supplied with the repository:
+Also run the smoke script supplied with the separate benchmark repository:
 
 ```sh
+git clone https://github.com/tkcaccia/fastEmbedR-benchmark.git
+cd fastEmbedR-benchmark
 bash tools/run_cuda_smoke_test.sh
 ```
 
@@ -274,5 +276,7 @@ For a manuscript or release benchmark, archive:
 - FAISS, cuVS, RAFT, RMM, CCCL, cuFFT, and cuBLAS versions;
 - `sessionInfo()`, Git commit, seed, and thread environment.
 
-Run `tools/write_manuscript_reproducibility.R` to capture these fields in the
+Run
+[`tools/write_manuscript_reproducibility.R`](https://github.com/tkcaccia/fastEmbedR-benchmark/blob/main/tools/write_manuscript_reproducibility.R)
+from the separate benchmark repository to capture these fields in the
 benchmark output directory.

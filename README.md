@@ -9,7 +9,8 @@
 [Benchmarks](docs/benchmarks.md) |
 [API](docs/usage-api.md) |
 [Reproducibility](docs/reproducibility.md) |
-[References](docs/references.md)
+[References](docs/references.md) |
+[Benchmark repository](https://github.com/tkcaccia/fastEmbedR-benchmark)
 
 `fastEmbedR` is a native R/C++ package for fast dimensionality reduction from
 nearest-neighbor graphs. Its primary contributions are:
@@ -28,6 +29,12 @@ and fixed-reference transformation. It does not mean that fastEmbedR wraps,
 ports, or is API-compatible with the Python `openTSNE` package. fastEmbedR
 defines its own R API, defaults, objects, float32 storage, and native
 CPU/Metal/CUDA kernels.
+
+Publication benchmark scripts, dataset manifests, HPC launchers, and data
+acquisition instructions are maintained separately in
+[`tkcaccia/fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark).
+The package repository does not distribute benchmark datasets or manuscript
+files.
 
 The intended workflow is:
 

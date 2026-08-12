@@ -8,7 +8,16 @@
 **Benchmarks** |
 [API](usage-api.md) |
 [Reproducibility](reproducibility.md) |
-[References](references.md)
+[References](references.md) |
+[Benchmark repository](https://github.com/tkcaccia/fastEmbedR-benchmark)
+
+The complete publication benchmark is maintained in the separate
+[`fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark)
+repository. It contains scripts, manifests, preprocessing instructions,
+environment recipes, Slurm launchers, and validation code, but no raw
+benchmark data. Provider-controlled or restricted datasets must be obtained
+independently under their original terms; missing data are recorded as
+unavailable rather than silently replaced.
 
 The GitHub documentation keeps one small sanity-check dataset (`iris`) and one
 large benchmark dataset (`MNIST70k`). This avoids mixing current package
@@ -36,7 +45,7 @@ performance claim. Each successful benchmark row includes:
 - runtime in seconds;
 - peak RSS memory when `/usr/bin/time -v` is available;
 - trustworthiness;
-- nearest-neighbour preservation at k = 15, 30, and 50;
+- nearest-neighbor preservation at k = 15, 30, and 50;
 - silhouette score when labels are available;
 - embedding-space KNN label accuracy when labels are available.
 
@@ -61,7 +70,7 @@ support the Results section claim that speed improvements do not come from a
 material loss of embedding quality.
 
 `MetRef` is the metabolomics dataset in the publication embedding benchmark.
-Simulated matrices are reserved for nearest-neighbour stress testing and are
+Simulated matrices are reserved for nearest-neighbor stress testing and are
 not used as evidence for UMAP/t-SNE embedding quality in the manuscript.
 
 The parameter table records the settings needed to interpret benchmark
@@ -79,7 +88,7 @@ and benchmark command lines recorded with each run.
 ## Reference Implementation Validation
 
 The validation script
-[`tools/validate_reference_implementations.R`](../tools/validate_reference_implementations.R)
+[`tools/validate_reference_implementations.R`](https://github.com/tkcaccia/fastEmbedR-benchmark/blob/main/tools/validate_reference_implementations.R)
 checks the native implementation on a small deterministic problem. It is a
 correctness-oriented validation, not a performance benchmark.
 
@@ -87,6 +96,8 @@ The default run uses iris with exact Euclidean KNN, a fixed seed, and a fixed
 PCA initialization for t-SNE:
 
 ```bash
+git clone https://github.com/tkcaccia/fastEmbedR-benchmark.git
+cd fastEmbedR-benchmark
 Rscript tools/validate_reference_implementations.R \
   --out-dir=results/reference_validation_current \
   --threads=2 \
@@ -112,7 +123,7 @@ The validation compares:
 - the fastEmbedR UMAP sparse graph from `prepare_umap_knn()` against
   `uwot::similarity_graph()`.
 
-The reported checks include trustworthiness, nearest-neighbour preservation,
+The reported checks include trustworthiness, nearest-neighbor preservation,
 embedding-space KNN label accuracy, t-SNE KL/cost traces where available,
 Procrustes-aligned embedding similarity, UMAP graph edge overlap, and UMAP
 common-edge weight correlation. The goal is not bitwise identity. Parallel
