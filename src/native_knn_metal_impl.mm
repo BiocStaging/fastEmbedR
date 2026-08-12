@@ -941,7 +941,13 @@ struct MetalKnnState {
 
 MTLCompileOptions* metal_knn_compile_options() {
   MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+  if (@available(macOS 15.0, *)) {
+    options.mathMode = MTLMathModeFast;
+  }
+#else
   options.fastMathEnabled = YES;
+#endif
 #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
   if (@available(macOS 14.0, *)) {
     options.languageVersion = MTLLanguageVersion3_1;
