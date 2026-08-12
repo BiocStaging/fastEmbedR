@@ -13,5 +13,8 @@ fastEmbedR_backend(backend = NULL)
 The active backend. Setting returns the previous option invisibly.
 }
 \description{
-Configure the default fastEmbedR execution backend
+An explicit function argument takes precedence over
+\code{options(backend = ...)}, then \code{BACKEND}; CPU is the final default.
+The former fastEmbedR-specific option and environment variable remain
+compatibility fallbacks.
 }

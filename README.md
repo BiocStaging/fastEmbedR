@@ -53,6 +53,10 @@ cuVS IVF-Flat above that threshold, then passes package-owned device pointers
 into UMAP or openTSNE. It does not call another R package for KNN. No
 unavailable GPU backend is silently relabelled as CPU.
 
+Set the session default shared by fastEmbedR, KODAMA, fastPLS, and faissR with
+`options(backend = "cuda")`, or use `Sys.setenv(BACKEND = "cuda")`. An explicit
+function argument always takes precedence.
+
 ## Quick Start
 
 ```r

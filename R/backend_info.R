@@ -43,14 +43,18 @@ backend_info <- function() {
 
 #' Configure the default fastEmbedR execution backend
 #'
+#' An explicit function argument takes precedence over
+#' `options(backend = ...)`, then `BACKEND`; CPU is the final default.
+#' Package-specific settings remain supported as compatibility fallbacks.
+#'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @return The active backend. Setting returns the previous option invisibly.
 #' @export
 fastEmbedR_backend <- function(backend = NULL) {
   if (is.null(backend)) return(resolve_embedding_backend(NULL))
   backend <- validate_environment_backend(backend, "backend")
-  old <- getOption("fastEmbedR.backend", NULL)
-  options(fastEmbedR.backend = backend)
+  old <- getOption("backend", NULL)
+  options(backend = backend)
   invisible(old)
 }
 
@@ -129,10 +133,14 @@ resolve_embedding_backend <- function(backend) {
   if (!is.null(backend) && length(backend) == 1L) {
     return(validate_environment_backend(backend))
   }
-  option <- getOption("fastEmbedR.backend", NULL)
-  if (!is.null(option)) return(validate_environment_backend(option, "option fastEmbedR.backend"))
-  environment <- Sys.getenv("FASTEMBEDR_BACKEND", unset = "")
-  if (nzchar(environment)) return(validate_environment_backend(environment, "FASTEMBEDR_BACKEND"))
+  option <- getOption("backend", NULL)
+  if (!is.null(option)) return(validate_environment_backend(option, "option backend"))
+  legacy_option <- getOption("fastEmbedR.backend", NULL)
+  if (!is.null(legacy_option)) return(validate_environment_backend(legacy_option, "option fastEmbedR.backend"))
+  environment <- Sys.getenv("BACKEND", unset = "")
+  if (nzchar(environment)) return(validate_environment_backend(environment, "BACKEND"))
+  legacy_environment <- Sys.getenv("FASTEMBEDR_BACKEND", unset = "")
+  if (nzchar(legacy_environment)) return(validate_environment_backend(legacy_environment, "FASTEMBEDR_BACKEND"))
   "cpu"
 }
 
