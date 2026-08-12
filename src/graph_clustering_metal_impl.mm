@@ -243,6 +243,31 @@ kernel void graph_apply(
 )METAL";
 }
 
+MTLCompileOptions* metal_graph_compile_options() {
+  MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+  options.fastMathEnabled = YES;
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
+  if (@available(macOS 14.0, *)) {
+    options.languageVersion = MTLLanguageVersion3_1;
+    return options;
+  }
+#endif
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 130000
+  if (@available(macOS 13.0, *)) {
+    options.languageVersion = MTLLanguageVersion3_0;
+    return options;
+  }
+#endif
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+  if (@available(macOS 12.0, *)) {
+    options.languageVersion = MTLLanguageVersion2_4;
+    return options;
+  }
+#endif
+  options.languageVersion = MTLLanguageVersion2_3;
+  return options;
+}
+
 void initialize_state() {
   std::lock_guard<std::mutex> lock(state_mutex());
   MetalGraphState& current = state();
@@ -259,12 +284,12 @@ void initialize_state() {
     return;
   }
   NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
-  options.fastMathEnabled = YES;
+  MTLCompileOptions* options = metal_graph_compile_options();
   current.library = [current.device
     newLibraryWithSource:[NSString stringWithUTF8String:metal_source()]
     options:options
     error:&error];
+  [options release];
   if (current.library == nil) {
     current.error = error == nil ? "Metal source compilation failed." :
       std::string([[error localizedDescription] UTF8String]);

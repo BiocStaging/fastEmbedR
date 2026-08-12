@@ -1,2 +1,3 @@
 CXX_STD = CXX17
+SHLIB_LIBADD =
 OBJECTS = RcppExports.o tsne_neighbors.o embedding_utils.o fast_knn_umap.o graph_clustering.o graph_clustering_cuda_bridge.o graph_clustering_metal_bridge.o walktrap.o native_knn_bridge.o native_knn_hnsw.o native_knn_cuda_stub.o graph_clustering_cuda_stub.o embedding_metal_bridge.o embedding_metal_stub.o native_knn_metal_stub.o graph_clustering_metal_stub.o embedding_cuda_bridge.o embedding_cuda_stub.o

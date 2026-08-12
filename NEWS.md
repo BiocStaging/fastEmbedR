@@ -1,3 +1,10 @@
+# fastEmbedR 0.99.3
+
+- Request Metal Shading Language 3.x explicitly for native KNN and graph
+  clustering kernels that use floating-point atomics.
+- Prevent non-Metal Windows builds from inheriting an Objective-C runtime link
+  dependency from packaged Objective-C++ sources.
+
 # fastEmbedR 0.99.2
 
 - Standardizes backend selection across public backend-capable functions.

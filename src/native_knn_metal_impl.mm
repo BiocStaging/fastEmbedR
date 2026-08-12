@@ -939,6 +939,31 @@ struct MetalKnnState {
   id<MTLComputePipelineState> rerank_pipeline = nil;
 };
 
+MTLCompileOptions* metal_knn_compile_options() {
+  MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+  options.fastMathEnabled = YES;
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
+  if (@available(macOS 14.0, *)) {
+    options.languageVersion = MTLLanguageVersion3_1;
+    return options;
+  }
+#endif
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 130000
+  if (@available(macOS 13.0, *)) {
+    options.languageVersion = MTLLanguageVersion3_0;
+    return options;
+  }
+#endif
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+  if (@available(macOS 12.0, *)) {
+    options.languageVersion = MTLLanguageVersion2_4;
+    return options;
+  }
+#endif
+  options.languageVersion = MTLLanguageVersion2_3;
+  return options;
+}
+
 MetalKnnState& metal_knn_state() {
   static MetalKnnState state;
   if (state.device != nil && state.queue != nil && state.library != nil &&
@@ -957,8 +982,7 @@ MetalKnnState& metal_knn_state() {
   state.device = MTLCreateSystemDefaultDevice();
   if (state.device == nil) Rcpp::stop("No Metal device is available.");
   state.queue = [state.device newCommandQueue];
-  MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
-  options.fastMathEnabled = YES;
+  MTLCompileOptions* options = metal_knn_compile_options();
   NSError* error = nil;
   state.library = [state.device
     newLibraryWithSource:[NSString stringWithUTF8String:kMetalSource]
