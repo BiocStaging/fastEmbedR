@@ -40,6 +40,7 @@ Description: Native float32 UMAP and openTSNE-style embeddings from data
     Leiden, and Walktrap community detection.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR,
+    https://tkcaccia.github.io/fastEmbedR/,
     https://github.com/tkcaccia/fastEmbedR-benchmark
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
 biocViews:

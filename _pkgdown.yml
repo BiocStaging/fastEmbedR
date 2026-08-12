@@ -1,4 +1,5 @@
 url: https://tkcaccia.github.io/fastEmbedR/
+destination: _site
 
 template:
   bootstrap: 5
@@ -17,6 +18,7 @@ articles:
     navbar: ~
     contents:
       - getting-started
+      - algorithmic-design
 
 reference:
   - title: openTSNE Embeddings
@@ -36,6 +38,29 @@ reference:
       - umap_knn
       - prepare_umap_knn
       - landmark_umap
+  - title: Backend Configuration and Initialization
+    desc: Select execution backends and construct package-native initializations.
+    contents:
+      - fastEmbedR_backend
+      - pca
+      - opentsne_pca_init
+      - umap_init
+  - title: Nearest-Neighbor Precomputation
+    desc: Build reusable reference and query neighbor structures.
+    contents:
+      - precompute_knn
+      - precompute_query_knn
+  - title: Landmark Models
+    desc: Select landmarks, fit reference embeddings, and project new samples.
+    contents:
+      - select_landmarks
+      - fit_landmark_model
+      - project_landmark_model
+  - title: Graph Utilities
+    desc: Construct and cluster graphs derived from data or embeddings.
+    contents:
+      - knn_graph
+      - graph_cluster
   - title: Quality Metrics
     desc: Score local preservation, labels, and global structure.
     contents:

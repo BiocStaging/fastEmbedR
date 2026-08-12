@@ -40,6 +40,7 @@ venv/
 
 # Downloaded data and generated outputs
 data/
+_site/
 tools/
 examples/
 cache/
