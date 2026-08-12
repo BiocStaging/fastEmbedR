@@ -15,6 +15,14 @@ manuscript/**/*.fls
 manuscript/**/*.log
 manuscript/**/*.out
 
+# Manuscript and journal-submission material live outside the package repository
+manuscript/
+docs/manuscript-improvement-strategy.md
+fastEmbedR_*JMLR*.docx
+fastEmbedR_*MLOSS*.docx
+fastEmbedR_*MLOSS*.pdf
+cleanup_manifest_*.txt
+
 # Local R/session files
 .Rhistory
 .RData
