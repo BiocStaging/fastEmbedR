@@ -268,6 +268,6 @@ test_that("opentsne rejects low-level KNN backend names", {
       n_iter = 3L,
       backend = "cuda_cuvs_bruteforce"
     ),
-    "should be one of"
+    "must be one of"
   )
 })

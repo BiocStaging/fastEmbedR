@@ -1,12 +1,18 @@
 # fastEmbedR 0.99.2
 
-- Adds a session-wide backend selector through `fastEmbedR_backend()`,
-  `options(backend = ...)`, and `BACKEND`. Explicit
-  function arguments retain precedence and CPU remains the default. Legacy
-  fastEmbedR-specific selectors remain compatibility fallbacks.
+- Standardizes backend selection across public backend-capable functions.
+  Omitted `backend` arguments consult `options(fastEmbedR.backend)`, then
+  `FASTEMBEDR_BACKEND`, before defaulting to CPU. Explicit function arguments
+  always take precedence, and unavailable GPU backends fail without fallback.
+- Adds `fastEmbedR_backend()` as the package-specific session backend
+  setter/getter and applies the same configuration contract to
+  `transform_tsne()`.
 
 # fastEmbedR 0.99.1
 
+- Adds a session-wide backend selector through `fastEmbedR_backend()`,
+  `options(fastEmbedR.backend = ...)`, and `FASTEMBEDR_BACKEND`. Explicit
+  function arguments retain precedence and CPU remains the default.
 - Moves publication benchmark and validation workflows to the separate
   `fastEmbedR-benchmark` repository, together with dataset acquisition and
   restricted-data instructions. Raw benchmark data and manuscript files are

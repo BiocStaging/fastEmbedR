@@ -57,7 +57,7 @@ Backend-capable functions use CPU unless a backend is selected for the R
 session:
 
 ```r
-options(backend = "metal")
+options(fastEmbedR.backend = "metal")
 # Equivalent: fastEmbedR_backend("metal")
 
 u <- umap(x)                         # Metal
@@ -65,7 +65,7 @@ t <- opentsne(x)                     # Metal
 u.cpu <- umap(x, backend = "cpu")   # explicit override
 ```
 
-For batch jobs, `BACKEND=cpu|cuda|metal` is used when the R option
+For batch jobs, `FASTEMBEDR_BACKEND=cpu|cuda|metal` is used when the R option
 is unset. Precedence is explicit argument, R option, environment variable,
 then CPU. The requested backend is validated normally; unavailable native
 accelerators do not silently replace the selected backend.

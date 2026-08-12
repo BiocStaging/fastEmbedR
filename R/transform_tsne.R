@@ -75,14 +75,14 @@ transform_tsne <- function(reference_layout,
                            exact_repulsion_threshold = 4096L,
                            n.cores = NULL,
                            seed = 4L,
-                           backend = "auto",
+                           backend = NULL,
                            verbose = FALSE) {
   n_threads <- n.cores
   if (inherits(reference_layout, "fastEmbedR_embedding")) {
     reference_layout <- reference_layout$layout
   }
   initialization <- match.arg(initialization)
-  backend <- as.character(backend)[1L]
+  backend <- resolve_embedding_backend(backend)
   optimizer_backend <- resolve_tsne_transform_backend(backend)
   reference_layout <- transform_embedding_matrix(
     reference_layout,
@@ -320,11 +320,8 @@ transform_tsne <- function(reference_layout,
 }
 
 resolve_tsne_transform_backend <- function(backend) {
-  backend <- as.character(backend)[1L]
-  if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
-    backend <- "auto"
-  }
-  if (backend %in% c("auto", "cpu")) {
+  backend <- resolve_embedding_backend(backend)
+  if (identical(backend, "cpu")) {
     return("cpu")
   }
   if (identical(backend, "metal")) {
@@ -333,25 +330,13 @@ resolve_tsne_transform_backend <- function(backend) {
     }
     return("metal")
   }
-  if (identical(backend, "gpu")) {
-    if (metal_metric_available()) {
-      return("metal")
-    }
-    if (cuda_metric_available()) {
-      return("cuda")
-    }
-    stop(
-      "No native GPU t-SNE transform backend is available.",
-      call. = FALSE
-    )
-  }
   if (identical(backend, "cuda")) {
     if (!cuda_metric_available()) {
       stop("CUDA t-SNE transform backend is not available on this system.", call. = FALSE)
     }
     return("cuda")
   }
-  "cpu"
+  stop("Unsupported t-SNE transform backend: ", backend, ".", call. = FALSE)
 }
 
 landmark_projection_mode <- function() {

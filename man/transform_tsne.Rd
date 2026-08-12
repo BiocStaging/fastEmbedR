@@ -26,7 +26,7 @@ transform_tsne(
   exact_repulsion_threshold = 4096L,
   n.cores = NULL,
   seed = 4L,
-  backend = "auto",
+  backend = NULL,
   verbose = FALSE
 )
 }
