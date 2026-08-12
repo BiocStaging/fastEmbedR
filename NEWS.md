@@ -1,3 +1,14 @@
+# fastEmbedR 0.99.1
+
+- Moves publication benchmark and validation workflows to the separate
+  `fastEmbedR-benchmark` repository, together with dataset acquisition and
+  restricted-data instructions. Raw benchmark data and manuscript files are
+  not distributed in either GitHub repository.
+- Reduces the vignette-enabled source archive to approximately 1 MB by
+  excluding benchmark, manuscript, container, and generated-result artifacts.
+- Updates GitHub Pages and checkout workflows to Node 24-compatible action
+  releases.
+
 # fastEmbedR 0.99.0
 
 - Makes the standard fuzzy UMAP graph the default for `umap()`, `umap_knn()`,
