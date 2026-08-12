@@ -1,3 +1,8 @@
+# fastEmbedR 0.99.4
+
+- Clear R's automatically injected Objective-C runtime library on Windows,
+  where fastEmbedR compiles only the portable Metal stub sources.
+
 # fastEmbedR 0.99.3
 
 - Request Metal Shading Language 3.x explicitly for native KNN and graph
