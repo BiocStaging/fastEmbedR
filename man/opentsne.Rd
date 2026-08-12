@@ -15,7 +15,7 @@ opentsne(
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   nn = NULL,
   seed = 4L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   keep_knn = FALSE,
   verbose = FALSE,
   n.cores = NULL,

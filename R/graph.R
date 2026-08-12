@@ -30,7 +30,7 @@
 #' @export
 knn_graph <- function(x,
                       k = 30L,
-                      backend = c("cpu", "cuda", "metal"),
+                      backend = NULL,
                       metric = c("euclidean", "cosine", "correlation"),
                       weight = c("snn", "distance", "binary"),
                       mutual = FALSE,
@@ -38,7 +38,7 @@ knn_graph <- function(x,
                       n.cores = 1L) {
   n_threads <- n.cores
   if (inherits(x, "fastEmbedR_graph")) return(validate_fastembedr_graph(x))
-  backend <- match.arg(backend)
+  backend <- resolve_embedding_backend(backend)
   metric <- match.arg(metric)
   weight <- match.arg(weight)
   k <- graph_positive_integer(k, "k")
@@ -166,14 +166,14 @@ knn_graph <- function(x,
 #' @export
 graph_cluster <- function(graph,
                           method = c("leiden", "louvain", "walktrap"),
-                          backend = c("cpu", "cuda", "metal"),
+                          backend = NULL,
                           resolution = 1,
                           n_iterations = 10L,
                           n_runs = 1L,
                           steps = 4L,
                           seed = 1L) {
   method <- match.arg(method)
-  backend <- match.arg(backend)
+  backend <- resolve_embedding_backend(backend)
   graph <- validate_fastembedr_graph(graph)
   resolution <- as.numeric(resolution)
   if (length(resolution) != 1L || !is.finite(resolution) || resolution <= 0) {

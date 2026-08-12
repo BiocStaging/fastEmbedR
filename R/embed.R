@@ -548,11 +548,11 @@ pca <- function(x,
                 xtest = NULL,
                 center = TRUE,
                 scale = FALSE,
-                backend = c("cpu", "cuda", "metal"),
+                backend = NULL,
                 n.cores = 1L,
                 seed = 4L,
                 opentsne_init = FALSE) {
-  backend <- validate_pca_backend(match.arg(backend))
+  backend <- validate_pca_backend(resolve_embedding_backend(backend))
   if (!is.logical(opentsne_init) || length(opentsne_init) != 1L ||
       is.na(opentsne_init)) {
     stop("`opentsne_init` must be TRUE or FALSE.", call. = FALSE)

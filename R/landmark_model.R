@@ -143,7 +143,7 @@ fit_landmark_model <- function(data,
                                  "inner_product"
                                ),
                                seed = 4L,
-                               backend = c("cpu", "cuda", "metal"),
+                               backend = NULL,
                                n.cores = NULL,
                                graph_mode = c("fuzzy", "binary"),
                                keep_knn = FALSE,

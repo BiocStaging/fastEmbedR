@@ -1,5 +1,8 @@
 # fastEmbedR 0.99.1
 
+- Adds a session-wide backend selector through `fastEmbedR_backend()`,
+  `options(fastEmbedR.backend = ...)`, and `FASTEMBEDR_BACKEND`. Explicit
+  function arguments retain precedence and CPU remains the default.
 - Moves publication benchmark and validation workflows to the separate
   `fastEmbedR-benchmark` repository, together with dataset acquisition and
   restricted-data instructions. Raw benchmark data and manuscript files are

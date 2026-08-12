@@ -6,7 +6,7 @@
 knn_graph(
   x,
   k = 30L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   metric = c("euclidean", "cosine", "correlation"),
   weight = c("snn", "distance", "binary"),
   mutual = FALSE,

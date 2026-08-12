@@ -147,11 +147,11 @@ make_opentsne_pca_init <- function(x,
 opentsne_pca_init <- function(data,
                               n_components = 2L,
                               seed = 4L,
-                              backend = c("cpu", "metal", "cuda"),
+                              backend = NULL,
                               n.cores = 1L,
                               cache_file = NULL,
                               force_recompute = FALSE) {
-  backend <- match.arg(backend)
+  backend <- resolve_embedding_backend(backend)
   n_components <- as.integer(n_components)
   if (length(n_components) != 1L || is.na(n_components) || n_components < 1L) {
     stop("`n_components` must be a positive integer.", call. = FALSE)

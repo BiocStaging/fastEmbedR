@@ -13,7 +13,7 @@ fit_landmark_model(
   n_components = 2L,
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   seed = 4L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   graph_mode = c("fuzzy", "binary"),
   keep_knn = FALSE,

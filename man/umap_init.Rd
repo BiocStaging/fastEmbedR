@@ -8,7 +8,7 @@ umap_init(
   n_neighbors = NULL,
   n_components = 2L,
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   seed = 4L,
   n.cores = NULL,
   graph_mode = c("fuzzy", "binary")

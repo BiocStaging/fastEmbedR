@@ -24,7 +24,7 @@ fast_knn_umap <- function(indices,
                           n_components = 2L,
                           seed = 42L,
                           verbose = FALSE,
-                          backend = c("cpu", "cuda", "metal"),
+                          backend = NULL,
                           n_threads = NULL,
                           graph_mode = c("fuzzy", "binary")) {
   fast_knn_umap_core(
@@ -44,7 +44,7 @@ fast_knn_umap_core <- function(indices,
                                n_components = 2L,
                                seed = 42L,
                                verbose = FALSE,
-                               backend = c("cpu", "cuda", "metal"),
+                               backend = NULL,
                                n_threads = NULL,
                                n_epochs = NULL,
                                config_override = NULL,
@@ -670,7 +670,7 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
 #' @export
 prepare_umap_knn <- function(indices,
                              distances = NULL,
-                             backend = c("cpu", "cuda", "metal"),
+                             backend = NULL,
                              n.cores = NULL,
                              graph_mode = c("fuzzy", "binary")) {
   n_threads <- n.cores
@@ -770,7 +770,7 @@ fast_knn_umap_prepared_core <- function(prepared,
                                         n_components = 2L,
                                         seed = 42L,
                                         verbose = FALSE,
-                                        backend = c("cpu", "cuda", "metal"),
+                                        backend = NULL,
                                         n_threads = NULL,
                                         n_epochs = NULL) {
   backend <- resolve_embedding_backend(backend)
@@ -1546,7 +1546,7 @@ umap_knn <- function(indices,
                      n_components = 2L,
                      seed = 42L,
                      verbose = FALSE,
-                     backend = c("cpu", "cuda", "metal"),
+                     backend = NULL,
                      n.cores = NULL,
                      graph_mode = c("fuzzy", "binary")) {
   fast_knn_umap(

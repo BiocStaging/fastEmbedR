@@ -41,6 +41,28 @@ backend_info <- function() {
   )
 }
 
+#' Configure the default fastEmbedR execution backend
+#'
+#' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
+#' @return The active backend. Setting returns the previous option invisibly.
+#' @export
+fastEmbedR_backend <- function(backend = NULL) {
+  if (is.null(backend)) return(resolve_embedding_backend(NULL))
+  backend <- validate_environment_backend(backend, "backend")
+  old <- getOption("fastEmbedR.backend", NULL)
+  options(fastEmbedR.backend = backend)
+  invisible(old)
+}
+
+validate_environment_backend <- function(backend, label = "backend") {
+  backend <- tolower(as.character(backend))
+  if (length(backend) != 1L || is.na(backend) || !nzchar(backend) ||
+      !backend %in% embedding_backend_choices()) {
+    stop("`", label, "` must be one of \"cpu\", \"cuda\", or \"metal\".", call. = FALSE)
+  }
+  backend
+}
+
 backend_flag <- function(fn) {
   tryCatch(isTRUE(fn()), error = function(e) FALSE)
 }
@@ -104,8 +126,14 @@ embedding_backend_choices <- function() {
 }
 
 resolve_embedding_backend <- function(backend) {
-  backend <- match.arg(backend, embedding_backend_choices())
-  backend
+  if (!is.null(backend) && length(backend) == 1L) {
+    return(validate_environment_backend(backend))
+  }
+  option <- getOption("fastEmbedR.backend", NULL)
+  if (!is.null(option)) return(validate_environment_backend(option, "option fastEmbedR.backend"))
+  environment <- Sys.getenv("FASTEMBEDR_BACKEND", unset = "")
+  if (nzchar(environment)) return(validate_environment_backend(environment, "FASTEMBEDR_BACKEND"))
+  "cpu"
 }
 
 embedding_knn_backend <- function(backend) {

@@ -240,7 +240,7 @@ precompute_knn <- function(data,
                              "euclidean", "cosine", "correlation",
                              "inner_product"
                            ),
-                           backend = c("cpu", "cuda", "metal"),
+                           backend = NULL,
                            n.cores = NULL) {
   n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
@@ -337,7 +337,7 @@ precompute_query_knn <- function(reference,
                                    "euclidean", "cosine", "correlation",
                                    "inner_product"
                                  ),
-                                 backend = c("cpu", "cuda", "metal"),
+                                 backend = NULL,
                                  n.cores = NULL) {
   n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)

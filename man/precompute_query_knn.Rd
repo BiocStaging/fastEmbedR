@@ -9,7 +9,7 @@ precompute_query_knn(
   query,
   k = 30L,
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL
 )
 }

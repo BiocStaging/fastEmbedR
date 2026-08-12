@@ -3,7 +3,7 @@
 \title{Backend-native truncated PCA}
 \usage{
 pca(x, ncomp = 2L, xtest = NULL, center = TRUE, scale = FALSE,
-  backend = c("cpu", "cuda", "metal"), n.cores = 1L, seed = 4L,
+  backend = NULL, n.cores = 1L, seed = 4L,
   opentsne_init = FALSE)
 }
 \arguments{

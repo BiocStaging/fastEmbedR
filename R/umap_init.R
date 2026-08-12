@@ -53,7 +53,7 @@ umap_init <- function(x,
                       metric = c(
                         "euclidean", "cosine", "correlation", "inner_product"
                       ),
-                      backend = c("cpu", "cuda", "metal"),
+                      backend = NULL,
                       seed = 4L,
                       n.cores = NULL,
                       graph_mode = c("fuzzy", "binary")) {

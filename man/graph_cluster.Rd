@@ -6,7 +6,7 @@
 graph_cluster(
   graph,
   method = c("leiden", "louvain", "walktrap"),
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   resolution = 1,
   n_iterations = 10L,
   n_runs = 1L,

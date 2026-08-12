@@ -14,7 +14,7 @@ opentsne_knn(
   Y_init = NULL,
   seed = 4L,
   verbose = FALSE,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   learning_rate = "auto",
   early_exaggeration_iter = NULL,

@@ -14,7 +14,7 @@ landmark_tsne(
   standardize = TRUE,
   pca_dims = NULL,
   seed = 4L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   transform_k = NULL,
   transform_perplexity = 5,
   transform_iter = 250L,

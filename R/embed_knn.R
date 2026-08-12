@@ -35,7 +35,7 @@ embed_knn <- function(indices,
                       n_components = 2L,
                       seed = 4L,
                       verbose = FALSE,
-                      backend = c("cpu", "cuda", "metal"),
+                      backend = NULL,
                       n.cores = NULL,
                       ...) {
   n_threads <- n.cores

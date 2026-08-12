@@ -8,7 +8,7 @@ opentsne_pca_init(
   data,
   n_components = 2L,
   seed = 4L,
-  backend = c("cpu", "metal", "cuda"),
+  backend = NULL,
   n.cores = 1L,
   cache_file = NULL,
   force_recompute = FALSE

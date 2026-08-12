@@ -11,7 +11,7 @@ umap(
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   nn = NULL,
   seed = 4L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   keep_knn = FALSE,
   graph_mode = c("fuzzy", "binary"),

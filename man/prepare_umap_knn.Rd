@@ -5,7 +5,7 @@
 prepare_umap_knn(
   indices,
   distances = NULL,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   graph_mode = c("fuzzy", "binary")
 )

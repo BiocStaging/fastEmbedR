@@ -11,7 +11,7 @@ embed_knn(
   n_components = 2L,
   seed = 4L,
   verbose = FALSE,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   ...
 )

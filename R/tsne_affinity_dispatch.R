@@ -54,7 +54,7 @@ fast_knn_opentsne_materialized <- function(indices,
                                            n_threads = NULL,
                                            seed = 42L,
                                            verbose = FALSE,
-                                           backend = c("cpu", "cuda", "metal"),
+                                           backend = NULL,
                                            auto_config = TRUE,
                                            input_had_self = FALSE,
                                            input_backend = NA_character_,
@@ -415,7 +415,7 @@ fast_knn_opentsne_core <- function(indices,
                                    n_threads = NULL,
                                    seed = 42L,
                                    verbose = FALSE,
-                                   backend = c("cpu", "cuda", "metal"),
+                                   backend = NULL,
                                    auto_config = TRUE) {
   backend <- resolve_embedding_backend(backend)
   if (inherits(indices, "fastEmbedR_opentsne_prepared")) {

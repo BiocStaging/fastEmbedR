@@ -8,7 +8,7 @@ umap_knn(
   n_components = 2L,
   seed = 42L,
   verbose = FALSE,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   n.cores = NULL,
   graph_mode = c("fuzzy", "binary")
 )

@@ -10,7 +10,7 @@ landmark_umap(
   standardize = TRUE,
   pca_dims = NULL,
   seed = 4L,
-  backend = c("cpu", "cuda", "metal"),
+  backend = NULL,
   transform_k = NULL,
   n.cores = NULL,
   keep_knn = FALSE,
