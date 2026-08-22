@@ -185,8 +185,8 @@ test_that("Metal preprocessing, projection, interpolation, and scoring match CPU
     backend = "metal"
   )
   expect_equal(dim(metal_pca$data), c(60L, 4L))
-  expect_equal(metal_pca$preprocess$pca_backend, "metal_rsvd")
-  expect_equal(metal_pca$preprocess$pca_method, "rsvd")
+  expect_equal(metal_pca$preprocess$pca_backend, "metal_mps_tsvd")
+  expect_equal(metal_pca$preprocess$pca_method, "metal_mps_tsvd")
 
   reference_layout <- cbind(rnorm(8L), rnorm(8L))
   projection_indices <- matrix(

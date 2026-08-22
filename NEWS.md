@@ -1,3 +1,22 @@
+# fastEmbedR 0.99.6
+
+- Add commit-bound real-hardware CI for CPU, Metal, and CUDA. The self-hosted
+  accelerator jobs reject backend fallback, run the installed-package test
+  suite and native smoke benchmarks, and archive hardware metadata plus
+  SHA-256 identities for source, binary, layouts, and logs.
+- Export `fastEmbedR_capabilities()` as the stable public interface for native
+  KNN, embedding, and clustering capability diagnostics. Public documentation
+  no longer recommends the internal `backend_info()` helper.
+- Route public CUDA PCA and embedding `pca_dims` preprocessing through native
+  RAPIDS RAFT TSVD. Float32 input no longer materializes an intermediate R
+  double matrix, scores and loadings preserve float32 storage, and unavailable
+  CUDA PCA now fails explicitly instead of falling back to CPU.
+
+# fastEmbedR 0.99.5
+
+- Update native Metal compile options for compatibility with current macOS and
+  Xcode toolchains.
+
 # fastEmbedR 0.99.4
 
 - Clear R's automatically injected Objective-C runtime library on Windows,

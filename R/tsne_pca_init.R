@@ -45,7 +45,7 @@ make_opentsne_pca_init <- function(x,
   }
   cuda_init_reason <- NA_character_
   if (identical(backend, "cuda")) {
-    if (!exists("cuml_tsvd_init_cuda_cpp", mode = "function")) {
+    if (!exists("pca_tsvd_cuda_cpp", mode = "function")) {
       stop(
         "CUDA PCA initialization requires native RAPIDS RAFT/cuML TSVD support, ",
         "but the package was not built with that backend.",
@@ -53,25 +53,22 @@ make_opentsne_pca_init <- function(x,
       )
     }
     native_cuda <- tryCatch(
-      cuml_tsvd_init_cuda_cpp(opentsne_dense_numeric_matrix(x), n_components),
+      fastembedr_cuda_tsvd_pca(
+        x,
+        ncomp = n_components,
+        center = TRUE,
+        scale = FALSE,
+        seed = seed
+      ),
       error = function(e) {
         cuda_init_reason <<- conditionMessage(e)
         NULL
       }
     )
     if (!is.null(native_cuda)) {
-      pca <- list(
-        scores = native_cuda,
-        loadings = NULL,
-        singular_values = NULL,
-        backend = "cuda_raft_tsvd",
-        method = "cuda_raft_tsvd_pca",
-        oversample = NA_integer_,
-        power = NA_integer_,
-        backend_reason = NA_character_,
-        package = "RAPIDS RAFT TSVD",
-        package_version = NA_character_
-      )
+      pca <- native_cuda
+      pca$package <- "RAPIDS RAFT TSVD"
+      pca$package_version <- NA_character_
       init <- normalize_opentsne_pca_scores(pca$scores, n_components)
       attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
       attr(init, "fastEmbedR_init_backend") <- pca$backend

@@ -17,7 +17,7 @@ test_that("public API is KNN and openTSNE focused", {
     "evaluate_embedding", "transform_tsne", "landmark_tsne",
     "umap_init", "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn",
     "precompute_query_knn", "select_landmarks", "fit_landmark_model",
-    "project_landmark_model", "pca",
+    "project_landmark_model", "pca", "fastEmbedR_capabilities",
     "knn_graph", "graph_cluster"
   ) %in% exports))
 
@@ -66,11 +66,12 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
   expect_length(fastEmbedR:::embedding_metal_available_cpp(), 1L)
   expect_type(fastEmbedR:::embedding_cuda_available_cpp(), "logical")
   expect_length(fastEmbedR:::embedding_cuda_available_cpp(), 1L)
-  info <- fastEmbedR:::backend_info()
+  info <- fastEmbedR_capabilities()
   expect_s3_class(info, "data.frame")
   expect_true(all(c("backend", "available", "knn_available", "embedding_available") %in% names(info)))
   expect_true(all(c("cpu", "cuvs", "cuda", "metal") %in% info$backend))
   expect_true(isTRUE(info$available[info$backend == "cpu"]))
+  expect_identical(info, fastEmbedR:::backend_info())
 
   knn <- test_exact_knn(x, backend = "cpu")
   expect_type(knn, "list")

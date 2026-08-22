@@ -119,7 +119,7 @@ Verify the compiled symbols:
 
 ```r
 library(fastEmbedR)
-info <- fastEmbedR:::backend_info()
+info <- fastEmbedR_capabilities()
 print(info)
 stopifnot(info$knn_available[info$backend == "metal"])
 stopifnot(info$embedding_available[info$backend == "metal"])
@@ -233,7 +233,7 @@ CUDA releases have been mixed.
 ```r
 library(fastEmbedR)
 
-info <- fastEmbedR:::backend_info()
+info <- fastEmbedR_capabilities()
 print(info)
 stopifnot(info$knn_available[info$backend == "cuda"])
 stopifnot(info$embedding_available[info$backend == "cuda"])
@@ -263,7 +263,7 @@ in-place directory:
 
 ```sh
 R CMD build .
-R CMD check --as-cran fastEmbedR_0.99.0.tar.gz
+R CMD check --as-cran fastEmbedR_0.99.6.tar.gz
 ```
 
 For a manuscript or release benchmark, archive:

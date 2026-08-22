@@ -271,6 +271,13 @@ NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix,
   Rcpp::stop("native cuML TruncatedSVD initialization is available only when the package is built with CUDA and cuML support.");
 }
 
+List pca_tsvd_cuda_impl(SEXP,
+                        int,
+                        bool,
+                        bool) {
+  Rcpp::stop("native RAPIDS RAFT TSVD PCA is available only when the package is built with CUDA and RAFT support.");
+}
+
 NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix,
                                       int) {
   Rcpp::stop("native cuML PCA initialization is available only when the package is built with CUDA and cuML support.");

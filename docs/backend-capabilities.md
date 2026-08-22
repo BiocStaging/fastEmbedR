@@ -4,6 +4,17 @@ This page states what each backend does and what it does not do. The central
 rule is simple: if a function is requested with `backend = "metal"` or
 `backend = "cuda"`, it must run a real native GPU path or fail clearly.
 
+Inspect the capabilities of the installed build through the stable public API:
+
+```r
+capabilities <- fastEmbedR_capabilities()
+capabilities[, c("backend", "knn_available", "embedding_available",
+                 "clustering_available")]
+```
+
+The `cuvs` row describes the CUDA nearest-neighbor component; public backend
+arguments continue to accept only `"cpu"`, `"cuda"`, or `"metal"`.
+
 ## Capability Matrix
 
 | Function | CPU | Metal | CUDA | Notes |
@@ -14,7 +25,7 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | `umap()` | native HNSW, then `umap_knn()` | native exact/IVF-Flat, then native Metal UMAP | native FAISS/cuVS device KNN, then native CUDA UMAP | CUDA KNN is not copied through R. Metal IVF exact-reranks candidates in the original dimensions and records its pilot recall. |
 | `opentsne_knn()` | native C++ FFT-grid optimizer | native Metal FFT-grid optimizer | native CUDA FFT-grid optimizer using cuFFT | Use `Y_init` or `init_data` for explicit PCA initialization. |
 | `opentsne()` | native HNSW, then `opentsne_knn()` | native exact/IVF-Flat, then Metal openTSNE | native FAISS/cuVS device KNN, then CUDA openTSNE | The package does not call Python openTSNE in public functions. |
-| `pca()` / openTSNE PCA init | fastPLS-style RSVD | native float32 MPS block-subspace TSVD | native RAPIDS RAFT TSVD when compiled | GPU requests do not route through Python or silently fall back to CPU. |
+| `pca()` / openTSNE PCA init | native float32 blocked RSVD | native float32 MPS block-subspace TSVD | native RAPIDS RAFT TSVD when compiled | GPU requests do not route through Python or silently fall back to CPU. |
 | `transform_tsne()` | native fixed-reference transform | native Metal projection/transform kernels where available | native CUDA projection/transform kernels where built | Used by openTSNE landmarking. |
 | `select_landmarks()` | native selection | shared selection | shared selection | Selection is independent of the embedding method and can be reused. |
 | `fit_landmark_model()` | ordinary CPU UMAP/openTSNE reference fit | ordinary Metal UMAP/openTSNE reference fit | ordinary CUDA UMAP/openTSNE reference fit | UMAP graph mode and optimizer parameters are preserved explicitly. |
@@ -22,8 +33,8 @@ rule is simple: if a function is requested with `backend = "metal"` or
 | `project_landmark_model()` | native projection/transform/refinement | native Metal projection/transform/refinement | native CUDA resident projection/transform/refinement | Projects held-out or genuinely new observations while reference coordinates remain fixed. |
 | `landmark_umap()` | one-call landmark embed/project/refine | one-call Metal path | one-call CUDA path | Convenience wrapper; landmarking remains an explicit approximation. |
 | `landmark_tsne()` | one-call landmark embed plus transform | one-call Metal path | one-call CUDA path | Convenience wrapper; projection quality is tracked separately. |
-| `knn_graph()` | native C++ graph construction | Metal KNN followed by native CPU graph construction | CUDA KNN followed by native CPU graph construction | A GPU label applies to neighbour search only; graph conversion is never reported as GPU work. |
-| `graph_cluster()` | native Louvain, Leiden, and Pons-Latapy Walktrap | not supported | not supported | Community optimization is CPU-only and has no silent GPU label. |
+| `knn_graph()` | native C++ graph construction | Metal KNN followed by native CPU graph construction | CUDA KNN followed by native CPU graph construction | A GPU label applies to neighbor search only; graph conversion is never reported as GPU work. |
+| `graph_cluster()` | native C++ Louvain, Leiden, and Pons-Latapy Walktrap | native Metal Louvain and Leiden | native CUDA Louvain and Leiden | GPU local moving/refinement uses float32 CSR; graph compaction/coarsening is package-owned C++. Walktrap is CPU-only. Unsupported requests fail without fallback. |
 | `evaluate_embedding()` | native/R quality metrics | CPU metrics after final layout transfer | CPU metrics after final layout transfer | Metrics are not labelled as GPU work. |
 
 ## Distance Metrics
@@ -49,7 +60,7 @@ The package avoids ambiguous GPU reporting:
 
 ## CPU
 
-CPU paths are native C++ and use `n_threads` where the operation is safe to
+CPU paths are native C++ and use `n.cores` where the operation is safe to
 parallelize. Current CPU priorities are:
 
 - reuse KNN graphs instead of recomputing them;

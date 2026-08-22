@@ -26,7 +26,9 @@ deviation before decomposition.}
 BLAS/OpenMP numerical kernels when \code{backend = "cpu"} and is ignored by
 Metal and CUDA.}
 
-\item{seed}{Random seed for the Gaussian subspace sketch.}
+\item{seed}{Random seed for backends that use a Gaussian subspace sketch.
+The native RAFT covariance-eigensolver route records this value for
+provenance but does not consume random numbers.}
 
 \item{opentsne_init}{If \code{TRUE}, add \code{opentsne_init} to the
 returned PCA object. This matrix is centered and rescaled so its largest
@@ -38,9 +40,9 @@ A \code{fastEmbedR_pca} list with \code{scores}, \code{loadings},
 \code{singular_values}, centering/scaling vectors, backend metadata, and
 decomposition metadata. When \code{opentsne_init = TRUE}, the list also
 contains \code{opentsne_init}; when \code{xtest} is supplied, it also contains
-\code{scores_test}. Metal preserves \code{float::float32} scores, loadings,
-initialization, and compatible test projections when the input is float32.
-CPU preserves float32 scores and loadings for float32 input and records
+\code{scores_test}. Metal and CUDA preserve \code{float::float32} scores,
+loadings, initialization, and compatible test projections when the input is
+float32. CPU preserves float32 scores and loadings for float32 input and records
 \code{n.cores_requested},
 \code{n.cores_effective}, and \code{core_control}.
 }
@@ -49,16 +51,17 @@ CPU preserves float32 scores and loadings for float32 input and records
 decomposition. CPU uses a package-native float32 blocked randomized SVD
 (RSVD). Metal uses a package-native float32 block-subspace TSVD whose large
 matrix products are executed with Metal Performance Shaders while data and
-work buffers remain resident in unified GPU memory. CUDA uses the
-package-native RSVD route. The resident CUDA openTSNE initializer separately
-uses RAFT TSVD so that its scores can remain on-device.
+work buffers remain resident in unified GPU memory. CUDA uses native RAPIDS
+RAFT TSVD with float32 input, score, and loading buffers. CUDA requests fail
+explicitly when RAFT TSVD support is unavailable; they never fall back to CPU
+PCA.
 
 CPU centering/scaling and large matrix products run in C++; Apple builds use
 Accelerate SGEMM and other platforms use package-threaded float32 kernels.
 Set \code{n.cores} to control the CPU core limit. The requested value is
 applied temporarily through standard BLAS/OpenMP environment variables and,
 when installed, \code{RhpcBLASctl}; the prior process settings are restored
-after the call. With \code{float::float32} input, native CPU and Metal
+after the call. With \code{float::float32} input, native CPU, Metal, and CUDA
 preprocessing and returned scores/loadings remain float32. The API
 intentionally has no decomposition method menu and does not call Python.
 Explicit unavailable GPU requests fail instead of being reported as GPU work.

@@ -93,6 +93,10 @@ cuml_tsvd_init_cuda_cpp <- function(data, n_components) {
     .Call(`_fastEmbedR_cuml_tsvd_init_cuda_cpp`, data, n_components)
 }
 
+pca_tsvd_cuda_cpp <- function(data, n_components, center, scale) {
+    .Call(`_fastEmbedR_pca_tsvd_cuda_cpp`, data, n_components, center, scale)
+}
+
 embedding_metal_available_cpp <- function() {
     .Call(`_fastEmbedR_embedding_metal_available_cpp`)
 }

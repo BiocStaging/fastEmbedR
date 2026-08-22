@@ -1,0 +1,95 @@
+name: Real hardware validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Native backend to validate
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - cpu
+          - metal
+          - cuda
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-validation-${{ github.ref }}-${{ inputs.backend }}
+  cancel-in-progress: false
+
+jobs:
+  cpu:
+    if: ${{ inputs.backend == 'all' || inputs.backend == 'cpu' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::testthat
+            any::float
+          needs: check
+      - name: Validate CPU implementation
+        run: bash .github/scripts/run-hardware-validation.sh cpu validation-artifacts/cpu
+      - name: Archive CPU evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastEmbedR-hardware-cpu-${{ github.sha }}
+          path: validation-artifacts/cpu
+          if-no-files-found: error
+          retention-days: 90
+
+  metal:
+    if: ${{ inputs.backend == 'all' || inputs.backend == 'metal' }}
+    runs-on: [self-hosted, macOS, ARM64, fastembedr-metal]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check runner prerequisites
+        run: |
+          xcrun --find metal
+          Rscript -e 'stopifnot(requireNamespace("Rcpp"), requireNamespace("testthat"), requireNamespace("withr"))'
+      - name: Validate native Metal implementation
+        run: bash .github/scripts/run-hardware-validation.sh metal validation-artifacts/metal
+      - name: Archive Metal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastEmbedR-hardware-metal-${{ github.sha }}
+          path: validation-artifacts/metal
+          if-no-files-found: error
+          retention-days: 90
+
+  cuda:
+    if: ${{ inputs.backend == 'all' || inputs.backend == 'cuda' }}
+    runs-on: [self-hosted, Linux, X64, fastembedr-cuda]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check runner prerequisites
+        run: |
+          nvidia-smi
+          "${NVCC:-${CUDA_HOME:-/usr/local/cuda}/bin/nvcc}" --version
+          Rscript -e 'stopifnot(requireNamespace("Rcpp"), requireNamespace("testthat"), requireNamespace("withr"))'
+      - name: Validate native CUDA implementation
+        env:
+          FASTEMBEDR_USE_CUDA: "1"
+          FASTEMBEDR_USE_CUVS: "1"
+          FASTEMBEDR_USE_FAISS_GPU: "1"
+          FASTEMBEDR_USE_RAFT: "1"
+        run: bash .github/scripts/run-hardware-validation.sh cuda validation-artifacts/cuda
+      - name: Archive CUDA evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastEmbedR-hardware-cuda-${{ github.sha }}
+          path: validation-artifacts/cuda
+          if-no-files-found: error
+          retention-days: 90

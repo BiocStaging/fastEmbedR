@@ -356,7 +356,7 @@ opentsne_pca_has_nonfinite <- function(x) {
     if (!requireNamespace("float", quietly = TRUE)) {
       stop("The float package is required to use float32 input.", call. = FALSE)
     }
-    return(any(!is.finite(float::dbl(x))))
+    return(!isTRUE(float32_all_finite_cpp(x)))
   }
   any(!is.finite(x))
 }

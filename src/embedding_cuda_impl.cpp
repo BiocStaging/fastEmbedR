@@ -1,5 +1,6 @@
 #include <Rcpp.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -377,6 +378,17 @@ int fastembedr_cuda_raft_tsvd_pca_init(const double* values,
                                        int p,
                                        int n_components,
                                        float* out);
+int fastembedr_cuda_raft_tsvd_pca_fit(const float* values,
+                                      int n,
+                                      int p,
+                                      int n_components,
+                                      int center,
+                                      int scale,
+                                      float* scores,
+                                      float* components,
+                                      float* singular_values,
+                                      float* center_values,
+                                      float* scale_values);
 }
 
 namespace {
@@ -812,6 +824,36 @@ float cuda_int_bits_to_float(const int value) {
   static_assert(sizeof(out) == sizeof(value), "float32 payload must use 32-bit storage");
   std::memcpy(&out, &value, sizeof(float));
   return out;
+}
+
+int cuda_float_to_int_bits(const float value) {
+  int out;
+  static_assert(sizeof(out) == sizeof(value), "float32 payload must use 32-bit storage");
+  std::memcpy(&out, &value, sizeof(float));
+  return out;
+}
+
+SEXP cuda_float32_matrix(const std::vector<float>& values,
+                         const int nrow,
+                         const int ncol) {
+  IntegerMatrix payload(nrow, ncol);
+  int* destination = INTEGER(payload);
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    destination[i] = cuda_float_to_int_bits(values[i]);
+  }
+  Rcpp::S4 output("float32");
+  output.slot("Data") = payload;
+  return output;
+}
+
+SEXP cuda_pca_output_matrix(const std::vector<float>& values,
+                            const int nrow,
+                            const int ncol,
+                            const bool float32_output) {
+  if (float32_output) return cuda_float32_matrix(values, nrow, ncol);
+  NumericMatrix output(nrow, ncol);
+  std::copy(values.begin(), values.end(), output.begin());
+  return output;
 }
 
 std::vector<float> cuda_copy_float32_payload(SEXP distances,
@@ -1428,6 +1470,118 @@ NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
     }
   }
   return out;
+#endif
+}
+
+List pca_tsvd_cuda_impl(SEXP data,
+                        int n_components,
+                        bool center,
+                        bool scale) {
+#ifndef FASTEMBEDR_HAS_RAFT
+  Rcpp::stop("fastEmbedR was not built with native RAPIDS RAFT TSVD support.");
+#else
+  if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
+  const std::pair<int, int> dims = cuda_matrix_dims(data, "data");
+  const int n = dims.first;
+  const int p = dims.second;
+  const int max_rank = std::min(n - 1, p);
+  n_components = std::min(n_components, max_rank);
+  if (n < 2 || p < 2 || n_components < 1) {
+    Rcpp::stop("RAPIDS RAFT TSVD requires at least two rows, two columns, and one usable component.");
+  }
+
+  const bool float32_output = cuda_is_float32_s4(data);
+  std::vector<float> input = cuda_copy_matrix_float(data, n, p, "data");
+  std::vector<float> scores(static_cast<std::size_t>(n) * n_components);
+  std::vector<float> components(static_cast<std::size_t>(n_components) * p);
+  std::vector<float> singular_values(n_components);
+  std::vector<float> center_values(p);
+  std::vector<float> scale_values(p);
+
+  const auto started = std::chrono::steady_clock::now();
+  const int status = fastembedr_cuda_raft_tsvd_pca_fit(
+    input.data(),
+    n,
+    p,
+    n_components,
+    center ? 1 : 0,
+    scale ? 1 : 0,
+    scores.data(),
+    components.data(),
+    singular_values.data(),
+    center_values.data(),
+    scale_values.data()
+  );
+  if (status != 0) {
+    Rcpp::stop("RAPIDS RAFT TSVD PCA failed: %s", cuda_embedding_error_message());
+  }
+
+  std::vector<float> loadings(static_cast<std::size_t>(p) * n_components);
+  for (int component = 0; component < n_components; ++component) {
+    int pivot = 0;
+    float largest = -1.0f;
+    for (int row = 0; row < p; ++row) {
+      const float value = components[
+        static_cast<std::size_t>(component) +
+        static_cast<std::size_t>(row) * n_components
+      ];
+      loadings[
+        static_cast<std::size_t>(row) +
+        static_cast<std::size_t>(component) * p
+      ] = value;
+      const float magnitude = std::abs(value);
+      if (magnitude > largest) {
+        largest = magnitude;
+        pivot = row;
+      }
+    }
+    if (loadings[
+          static_cast<std::size_t>(pivot) +
+          static_cast<std::size_t>(component) * p
+        ] < 0.0f) {
+      for (int row = 0; row < p; ++row) {
+        loadings[
+          static_cast<std::size_t>(row) +
+          static_cast<std::size_t>(component) * p
+        ] *= -1.0f;
+      }
+      for (int row = 0; row < n; ++row) {
+        scores[
+          static_cast<std::size_t>(row) +
+          static_cast<std::size_t>(component) * n
+        ] *= -1.0f;
+      }
+    }
+  }
+  const auto finished = std::chrono::steady_clock::now();
+
+  NumericVector center_out(p);
+  NumericVector scale_out(p);
+  NumericVector singular_out(n_components);
+  std::copy(center_values.begin(), center_values.end(), center_out.begin());
+  std::copy(scale_values.begin(), scale_values.end(), scale_out.begin());
+  std::copy(singular_values.begin(), singular_values.end(), singular_out.begin());
+
+  return List::create(
+    Rcpp::Named("scores") = cuda_pca_output_matrix(
+      scores, n, n_components, float32_output
+    ),
+    Rcpp::Named("loadings") = cuda_pca_output_matrix(
+      loadings, p, n_components, float32_output
+    ),
+    Rcpp::Named("singular_values") = singular_out,
+    Rcpp::Named("center") = center_out,
+    Rcpp::Named("scale") = scale_out,
+    Rcpp::Named("backend") = "cuda_raft_tsvd",
+    Rcpp::Named("method") = "raft_tsvd",
+    Rcpp::Named("precision") = "float32",
+    Rcpp::Named("oversample") = NA_INTEGER,
+    Rcpp::Named("power") = NA_INTEGER,
+    Rcpp::Named("timing") = NumericVector::create(
+      Rcpp::Named("total") =
+        std::chrono::duration<double>(finished - started).count()
+    )
+  );
 #endif
 }
 

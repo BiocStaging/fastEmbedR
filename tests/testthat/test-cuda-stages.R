@@ -31,8 +31,8 @@ test_that("CUDA preprocessing, projection, interpolation, and scoring match CPU"
     backend = "cuda"
   )
   expect_equal(dim(cuda_pca$data), c(60L, 4L))
-  expect_equal(cuda_pca$preprocess$pca_backend, "cuda_rsvd")
-  expect_equal(cuda_pca$preprocess$pca_method, "rsvd")
+  expect_equal(cuda_pca$preprocess$pca_backend, "cuda_raft_tsvd")
+  expect_equal(cuda_pca$preprocess$pca_method, "raft_tsvd")
 
   reference_layout <- cbind(rnorm(8L), rnorm(8L))
   projection_indices <- matrix(
@@ -126,4 +126,40 @@ test_that("CUDA preprocessing, projection, interpolation, and scoring match CPU"
   cpu_sil <- fastEmbedR:::silhouette_score_cpp(layout, as.integer(labels))
   cuda_sil <- fastEmbedR:::silhouette_score_cuda_cpp(layout, as.integer(labels), 3L)
   expect_equal(cuda_sil, cpu_sil, tolerance = 1e-10)
+})
+
+test_that("CUDA PCA preserves float32 input and never falls back", {
+  skip_if_not_installed("float")
+  if (!isTRUE(fastEmbedR:::embedding_cuda_available_cpp())) {
+    skip("CUDA embedding backend is not available in this build.")
+  }
+
+  set.seed(72)
+  x <- float::fl(matrix(rnorm(80L * 12L), nrow = 80L))
+  fit <- fastEmbedR::pca(
+    x,
+    ncomp = 4L,
+    center = TRUE,
+    scale = TRUE,
+    backend = "cuda",
+    seed = 72L
+  )
+
+  expect_equal(fit$backend, "cuda_raft_tsvd")
+  expect_equal(fit$method, "raft_tsvd")
+  expect_equal(fit$precision, "float32")
+  expect_s4_class(fit$scores, "float32")
+  expect_s4_class(fit$loadings, "float32")
+  expect_equal(dim(fit$scores), c(80L, 4L))
+  expect_equal(dim(fit$loadings), c(12L, 4L))
+
+  prepared <- fastEmbedR:::prepare_embedding_data(
+    x,
+    standardize = FALSE,
+    pca_dims = 4L,
+    seed = 72L,
+    backend = "cuda"
+  )
+  expect_equal(prepared$preprocess$pca_backend, "cuda_raft_tsvd")
+  expect_s4_class(prepared$data, "float32")
 })

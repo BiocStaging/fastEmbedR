@@ -24,6 +24,7 @@ InfoTSNE, PaCMAP, TriMap, or LocalMAP reducers.
 Useful links:
 \itemize{
   \item \url{https://github.com/tkcaccia/fastEmbedR}
+  \item \url{https://tkcaccia.github.io/fastEmbedR/}
   \item \url{https://github.com/tkcaccia/fastEmbedR-benchmark}
   \item Report bugs at \url{https://github.com/tkcaccia/fastEmbedR/issues}
 }
@@ -41,6 +42,8 @@ Authors:
   \item Dupe Ojo \email{Dupe.Ojo@icgeb.org}
   \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
   \item Leonardo Tenori \email{tenori@cerm.unifi.it}
+  \item Dinesh Gupta
+  \item Silvano Piazza
 }
 
 }

@@ -2,11 +2,24 @@
 
 GPU tests are skipped during ordinary CPU-only package checks. A release must
 therefore archive separate evidence from machines that actually expose Apple
-Metal and NVIDIA CUDA.
+Metal and NVIDIA CUDA. A macOS build alone is not accepted as Metal evidence:
+the runtime capability checks and native kernels must execute successfully.
 
-The hardware-validation driver is maintained in the separate
+The package repository provides the manually dispatched **Real hardware
+validation** GitHub Actions workflow. CPU uses a hosted Linux runner. Metal and
+CUDA use explicitly labelled self-hosted runners:
+
+- `[self-hosted, macOS, ARM64, fastembedr-metal]`;
+- `[self-hosted, Linux, X64, fastembedr-cuda]`.
+
+The project-owned labels ensure that accelerator jobs are not scheduled on a
+machine without the requested hardware. Larger scientific benchmarks remain
+in the separate
 [`fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark)
 repository.
+
+Runner registration and custom labels follow GitHub's
+[self-hosted runner guidance](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow).
 
 ## Evidence Contract
 
@@ -14,26 +27,26 @@ Each hardware run records:
 
 - the exact Git commit;
 - UTC timestamp and backend requested;
-- `backend_info()` and `sessionInfo()`;
+- `fastEmbedR_capabilities()` and `sessionInfo()`;
 - whether the requested backend was available;
-- the backend actually recorded by one-call UMAP and openTSNE results;
-- elapsed smoke-test times; and
-- the backend-specific `testthat` results.
+- the backend actually recorded by PCA, KNN, one-call UMAP, openTSNE, and
+  Leiden results;
+- elapsed smoke-test times;
+- the complete installed-package `testthat` results; and
+- SHA-256 identities for the Git archive, source package, installed shared
+  library, benchmark results, session information, hardware report, and logs.
 
-Run from an installed copy of the candidate package:
+From the GitHub Actions page, select **Real hardware validation**, choose
+`all`, and dispatch the workflow. Each successful job uploads a commit-named
+artifact such as `fastEmbedR-hardware-cuda-<commit>`. The same validation can
+be run directly on a prepared hardware runner:
 
 ```sh
-git clone https://github.com/tkcaccia/fastEmbedR-benchmark.git
-cd fastEmbedR-benchmark
-Rscript tools/run_backend_hardware_validation.R \
-  --backend=metal \
-  --out-dir=docs/validation/metal_release
+bash .github/scripts/run-hardware-validation.sh metal validation-artifacts/metal
 ```
 
 ```sh
-Rscript tools/run_backend_hardware_validation.R \
-  --backend=cuda \
-  --out-dir=docs/validation/cuda_release
+bash .github/scripts/run-hardware-validation.sh cuda validation-artifacts/cuda
 ```
 
 The command fails if the requested accelerator is unavailable, if a result
@@ -42,17 +55,15 @@ prevents a CPU fallback from being archived as GPU evidence.
 
 ## Archived Results
 
-The repository's benchmark archive contains successful CUDA and Metal
-performance and agreement runs. These results are scientific benchmark
-evidence, not substitutes for release-specific test-suite logs. Before tagging
-a release, rerun the commands above against the release candidate and archive
-the resulting directories under `docs/validation/`.
+The workflow artifact and the corresponding long-term copy in the benchmark
+archive must refer to the same clean Git commit. Evidence from a dirty working
+tree, a different package version, or a run that skipped the requested backend
+is not release evidence. GitHub artifact retention is finite, so accepted
+release artifacts are copied without modification to the benchmark archive;
+the included `SHA256SUMS` file makes that copy verifiable.
 
-The current Mac hardware capture is stored under
-`docs/validation/metal_current/`. Its summary records the source state,
-backend identity, smoke-test timings, and Metal-specific test results. A
-matching CUDA directory must be generated on CUDA hardware for the final
-release tag.
+See [the validation evidence schema](validation/README.md) for the required
+files and release checklist.
 
 Because GPU optimizers use asynchronous atomic updates, a fixed seed controls
 the package random streams but does not guarantee bitwise-identical layouts

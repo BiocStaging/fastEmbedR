@@ -45,7 +45,10 @@ tools/
 examples/
 cache/
 results/
+fastEmbedR-rlayout/
 backups/
+validation-artifacts/
+docs/validation/*_current/
 _umap_cycle_cache/
 *_gate/
 *_baseline/

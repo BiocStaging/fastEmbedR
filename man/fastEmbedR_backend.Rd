@@ -15,3 +15,9 @@ The active backend. Setting returns the previous option invisibly.
 \description{
 Configure the default fastEmbedR execution backend
 }
+\examples{
+old_backend <- getOption("fastEmbedR.backend")
+fastEmbedR_backend("cpu")
+fastEmbedR_backend()
+options(fastEmbedR.backend = old_backend)
+}

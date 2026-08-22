@@ -13,6 +13,41 @@
 This page records the dependency boundary used for a Bioconductor-friendly
 submission of `fastEmbedR`.
 
+## Current Review Status
+
+`fastEmbedR` is under review in
+[BiocContributions issue 142](https://github.com/Bioconductor/BiocContributions/issues/142).
+For the last public review build, version 0.99.5, the source and Linux, macOS,
+Windows, WebAssembly, Intel, and ARM platform builds pass. Its remaining
+BiocCheck summary is 0 errors, 1 warning, and 10 notes. The warning is:
+
+> No Bioconductor dependencies detected. Note that some infrastructure
+> packages may not have Bioconductor dependencies.
+
+This is a submission-scope question rather than a compilation or correctness
+failure. `fastEmbedR` is intended as infrastructure for dimensionality
+reduction of large biological data, including single-cell, flow-cytometry,
+gene-expression, and other high-dimensional assays. Its native CPU path is
+deliberately standalone, however, and no Bioconductor package provides a
+legitimate mandatory runtime API dependency. An artificial dependency will
+therefore not be added merely to silence the check. Eligibility and any
+required scope clarification should be decided with the assigned
+Bioconductor reviewer.
+
+The accompanying notes are triaged as follows:
+
+- a runnable example is provided for `fastEmbedR_backend()`;
+- maintainer ORCID and funder metadata will be added only when verified;
+- the suggested `ATACSeq` and `DNASeq` views are not used because fastEmbedR
+  is not specific to either assay;
+- condition handling is written without nonlocal assignment in the openTSNE
+  PCA initialization path;
+- remaining findings about long functions, line width, indentation,
+  `suppressWarnings()`, and closure state are tracked as maintainability work.
+  They should be changed incrementally with CPU, Metal, and CUDA regression
+  tests rather than by a high-churn formatting or control-flow rewrite during
+  review.
+
 ## Dependency Classes
 
 | Class | Dependency | Role | Required For Core Build |
@@ -25,7 +60,6 @@ submission of `fastEmbedR`.
 | R package | `testthat` | Unit tests. | suggested |
 | R package | `igraph` | Optional graph-clustering validation and examples. | suggested |
 | R package | `Rtsne`, `uwot`, `umap` | Optional reference benchmarks only. | suggested |
-| Companion package | `fastPLS >= 0.99.3` | Preferred optional randomized-SVD PCA provider for CPU; Metal and compiled CUDA initialization use native fastEmbedR backends. | optional enhancement |
 | System library | C++17 compiler | Native CPU code and numerical helper compilation. | yes |
 | System library | Apple Metal framework | Native Metal KNN and embedding backends on macOS. | optional |
 | System library | CUDA Toolkit, FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT and cuVS C libraries | Native CUDA KNN, embedding backend, and CUDA TSVD initialization. | optional |
@@ -90,7 +124,7 @@ LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 R CMD build .
 
 LC_ALL=C \
-FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.0.tar.gz
+FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.6.tar.gz
 ```
 
 GPU-enabled builds should be validated separately on machines with the relevant
@@ -102,10 +136,10 @@ The local submission preflight used for this repository is:
 ```sh
 LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 \
-R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.0.tar.gz
+R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.6.tar.gz
 
 LC_ALL=C \
-Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.0.tar.gz", `quit-with-status`=FALSE)'
+Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.6.tar.gz", `quit-with-status`=FALSE)'
 ```
 
 The `--no-build-vignettes` check mode is useful during development, but it
@@ -115,9 +149,8 @@ The final submission should build vignettes.
 Current Bioconductor-specific follow-up items:
 
 - register and validate the maintainer email on the Bioconductor Support Site;
-- consider whether the package should instead be submitted to CRAN if the
-  Bioconductor review requires a runtime dependency on another Bioconductor
-  package;
+- obtain the assigned reviewer's decision on eligibility without a mandatory
+  Bioconductor dependency;
 - add an ORCID to `Authors@R` when available;
-- reduce or justify `set.seed()` usage in package code;
+- audit targeted warning suppression and closure state;
 - gradually shorten very long R helper functions as maintenance work.

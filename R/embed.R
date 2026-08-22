@@ -133,12 +133,32 @@ prepare_embedding_data <- function(data,
     }
     rank <- min(pca_dims, nrow(x) - 1L, ncol(x))
     if (rank >= 1L && rank < ncol(x)) {
-      pca <- fastembedr_rsvd_pca_scores(
-        x,
-        rank = rank,
-        seed = seed,
-        backend = backend
-      )
+      pca <- if (identical(backend, "cuda")) {
+        fastembedr_cuda_tsvd_pca(
+          x,
+          ncomp = rank,
+          center = FALSE,
+          scale = FALSE,
+          seed = seed
+        )
+      } else if (identical(backend, "metal")) {
+        fastembedr_metal_tsvd_pca(
+          x,
+          ncomp = rank,
+          center = FALSE,
+          scale = FALSE,
+          seed = seed
+        )
+      } else {
+        fastembedr_cpu_rsvd_pca(
+          x,
+          ncomp = rank,
+          center = FALSE,
+          scale = FALSE,
+          seed = seed,
+          n.cores = 1L
+        )
+      }
       x <- pca$scores
       preprocess$pca_dims <- as.integer(ncol(x))
       preprocess$pca_backend <- pca$backend
@@ -238,35 +258,38 @@ fastembedr_metal_tsvd_pca <- function(data,
   out
 }
 
-prepare_pca_matrix <- function(data, center = TRUE, scale = FALSE) {
-  x <- if (is_float32_matrix(data)) {
-    if (!requireNamespace("float", quietly = TRUE)) {
-      stop("The float package is required to use float32 input.", call. = FALSE)
-    }
-    float::dbl(data)
-  } else {
-    as.matrix(data)
-  }
-  storage.mode(x) <- "double"
-  if (nrow(x) < 2L || ncol(x) < 1L) {
-    stop("`data` must have at least two rows and one column.", call. = FALSE)
-  }
-  if (any(!is.finite(x))) {
-    stop("`data` must contain only finite values.", call. = FALSE)
-  }
-
-  center_values <- rep(0, ncol(x))
-  scale_values <- rep(1, ncol(x))
-  if (isTRUE(center)) {
-    center_values <- colMeans(x)
-    x <- sweep(x, 2L, center_values, check.margin = FALSE)
-  }
-  if (isTRUE(scale)) {
-    scale_values <- apply(x, 2L, stats::sd)
-    scale_values[!is.finite(scale_values) | scale_values == 0] <- 1
-    x <- sweep(x, 2L, scale_values, "/", check.margin = FALSE)
-  }
-  list(data = x, center = center_values, scale = scale_values)
+fastembedr_cuda_tsvd_pca <- function(data,
+                                     ncomp,
+                                     center = TRUE,
+                                     scale = FALSE,
+                                     seed = 4L) {
+  fit <- pca_tsvd_cuda_cpp(
+    data,
+    as.integer(ncomp),
+    isTRUE(center),
+    isTRUE(scale)
+  )
+  colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
+  colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
+  out <- list(
+    scores = fit$scores,
+    loadings = fit$loadings,
+    singular_values = fit$singular_values,
+    center = fit$center,
+    scale = fit$scale,
+    ncomp = as.integer(ncol(fit$scores)),
+    method = fit$method,
+    backend = fit$backend,
+    backend_reason = NA_character_,
+    engine = "native_cuda_raft",
+    precision = fit$precision,
+    oversample = fit$oversample,
+    power = fit$power,
+    seed = as.integer(seed),
+    timing = fit$timing
+  )
+  class(out) <- "fastEmbedR_pca"
+  out
 }
 
 attach_opentsne_pca_init <- function(fit, requested) {
@@ -493,16 +516,17 @@ fastembedr_cpu_rsvd_pca <- function(data,
 #' decomposition. CPU uses a package-native float32 blocked randomized SVD
 #' (RSVD). Metal uses a package-native float32 block-subspace TSVD whose large
 #' matrix products are executed with Metal Performance Shaders while data and
-#' work buffers remain resident in unified GPU memory. CUDA uses the
-#' package-native RSVD route. The resident CUDA openTSNE initializer separately
-#' uses RAFT TSVD so that its scores can remain on-device.
+#' work buffers remain resident in unified GPU memory. CUDA uses native RAPIDS
+#' RAFT TSVD with float32 input, score, and loading buffers. CUDA requests fail
+#' explicitly when RAFT TSVD support is unavailable; they never fall back to
+#' CPU PCA.
 #'
 #' CPU matrix products and factorizations use the BLAS/LAPACK linked to R.
 #' Set `n.cores` to control their CPU core limit. The requested value is
 #' applied temporarily through standard BLAS/OpenMP environment variables and,
 #' when installed, `RhpcBLASctl`; the prior process settings are restored after
 #' the call. A single-threaded BLAS can still report one effective thread. With
-#' `float::float32` input, native Metal preprocessing and the returned
+#' `float::float32` input, native Metal and CUDA preprocessing and the returned
 #' scores/loadings also remain float32. The API intentionally has no
 #' decomposition method menu and does not call Python. Explicit unavailable GPU
 #' requests fail instead of being reported as GPU work.
@@ -519,7 +543,9 @@ fastembedr_cpu_rsvd_pca <- function(data,
 #' @param n.cores Positive integer CPU core limit. It controls the linked
 #'   BLAS/OpenMP numerical kernels when `backend = "cpu"` and is ignored by
 #'   Metal and CUDA.
-#' @param seed Random seed for the Gaussian subspace sketch.
+#' @param seed Random seed for backends that use a Gaussian subspace sketch.
+#'   The native RAFT covariance-eigensolver route records this value for
+#'   provenance but does not consume random numbers.
 #' @param opentsne_init If `TRUE`, add `opentsne_init` to the returned PCA
 #'   object. This matrix is centered and rescaled so its largest component
 #'   standard deviation is `1e-4`, ready to pass as `Y_init` to [opentsne()]
@@ -528,7 +554,7 @@ fastembedr_cpu_rsvd_pca <- function(data,
 #'   `singular_values`, centering/scaling vectors, backend metadata, and
 #'   decomposition metadata. When `opentsne_init = TRUE`, the list also
 #'   contains `opentsne_init`; when `xtest` is supplied, it also contains
-#'   `scores_test`. Metal preserves `float::float32` scores, loadings,
+#'   `scores_test`. Metal and CUDA preserve `float::float32` scores, loadings,
 #'   initialization, and compatible test projections when the input is
 #'   float32. CPU results also record `n.cores_requested`,
 #'   `n.cores_effective`, and `core_control`.
@@ -585,41 +611,14 @@ pca <- function(x,
       )
       return(finalize_pca_fit(fit, xtest, opentsne_init))
     }
-    prepared <- prepare_pca_matrix(x, center = center, scale = scale)
-    rank <- min(ncomp, nrow(prepared$data) - 1L, ncol(prepared$data))
-    if (rank < 1L) {
-      stop("`data` has no usable PCA rank.", call. = FALSE)
-    }
-    fit <- fastembedr_rsvd_pca_scores(
-      prepared$data,
-      rank = rank,
-      seed = seed,
-      backend = backend
+    fit <- fastembedr_cuda_tsvd_pca(
+      x,
+      ncomp = ncomp,
+      center = center,
+      scale = scale,
+      seed = seed
     )
-    if (!identical(backend, "cpu") &&
-        !startsWith(as.character(fit$backend), paste0(backend, "_"))) {
-      reason <- fit$backend_reason
-      if (is.null(reason) || length(reason) != 1L || is.na(reason)) {
-        reason <- paste0(backend, " RSVD backend is unavailable")
-      }
-      stop(reason, call. = FALSE)
-    }
-    out <- list(
-      scores = fit$scores,
-      loadings = fit$loadings,
-      singular_values = fit$singular_values,
-      center = prepared$center,
-      scale = prepared$scale,
-      ncomp = as.integer(ncol(fit$scores)),
-      method = "rsvd",
-      backend = fit$backend,
-      backend_reason = fit$backend_reason,
-      oversample = fit$oversample,
-      power = fit$power,
-      seed = as.integer(seed)
-    )
-    class(out) <- "fastEmbedR_pca"
-    finalize_pca_fit(out, xtest, opentsne_init)
+    finalize_pca_fit(fit, xtest, opentsne_init)
   }
 
   if (!identical(backend, "cpu")) return(run_pca())
@@ -648,160 +647,6 @@ fastembedr_rsvd_tuning <- function(n, p, rank, backend) {
     oversample = as.integer(max(0L, oversample)),
     power = as.integer(max(0L, power))
   )
-}
-
-fastembedr_rsvd_pca_scores <- function(x,
-                                       rank,
-                                       seed,
-                                       backend = "cpu") {
-  x <- as.matrix(x)
-  storage.mode(x) <- "double"
-  n <- nrow(x)
-  p <- ncol(x)
-  max_rank <- min(n, p)
-  rank <- max(1L, min(as.integer(rank), max_rank))
-  backend_requested <- if (identical(backend, "gpu")) {
-    resolve_backend_request(backend, need_embedding = TRUE)
-  } else if (identical(backend, "auto")) {
-    "cpu"
-  } else {
-    backend
-  }
-  tuning <- fastembedr_rsvd_tuning(n, p, rank, backend_requested)
-  sketch_rank <- min(max_rank, rank + tuning$oversample)
-
-  run_backend <- function(selected_backend) {
-    fastembedr_rsvd_pca_scores_backend(
-      x,
-      rank = rank,
-      sketch_rank = sketch_rank,
-      seed = seed,
-      power = tuning$power,
-      backend = selected_backend
-    )
-  }
-
-  native_reason <- NA_character_
-  if (backend_requested %in% c("cuda", "metal")) {
-    native <- tryCatch(
-      run_backend(backend_requested),
-      error = function(e) {
-        native_reason <<- conditionMessage(e)
-        NULL
-      }
-    )
-    if (!is.null(native)) {
-      return(c(native, list(backend_reason = NA_character_)))
-    }
-  }
-
-  cpu <- run_backend("cpu")
-  if (!is.na(native_reason)) {
-    cpu$backend_reason <- paste0(backend_requested, "_rsvd_unavailable: ", native_reason)
-  } else if (!identical(backend_requested, "cpu")) {
-    cpu$backend_reason <- paste0(backend_requested, "_rsvd_not_requested")
-  } else {
-    cpu$backend_reason <- NA_character_
-  }
-  cpu
-}
-
-fastembedr_rsvd_pca_scores_backend <- function(x,
-                                               rank,
-                                               sketch_rank,
-                                               seed,
-                                               power,
-                                               backend) {
-  restore_seed <- set_local_seed(seed)
-  on.exit(restore_seed(), add = TRUE)
-  omega <- matrix(stats::rnorm(ncol(x) * sketch_rank), nrow = ncol(x), ncol = sketch_rank)
-  multiply <- function(left, right, transpose_left = FALSE) {
-    rsvd_matrix_multiply(left, right, transpose_left = transpose_left, backend = backend)
-  }
-
-  y <- multiply(x, omega)
-  power <- max(0L, as.integer(power))
-  if (power == 1L) {
-    y <- multiply(x, multiply(x, y, transpose_left = TRUE))
-  } else if (power > 1L) {
-    for (i in seq_len(power)) {
-      z <- multiply(x, y, transpose_left = TRUE)
-      qz <- qr.Q(qr(z))
-      y <- multiply(x, qz)
-    }
-  }
-
-  q <- qr.Q(qr(y))
-  b <- multiply(q, x, transpose_left = TRUE)
-  small <- svd(b, nu = rank, nv = rank)
-  usable <- min(rank, length(small$d), ncol(small$u), ncol(small$v))
-  if (usable < 1L) {
-    stop("RSVD PCA produced no usable singular vectors.", call. = FALSE)
-  }
-
-  u <- q %*% small$u[, seq_len(usable), drop = FALSE]
-  scores <- sweep(u, 2L, small$d[seq_len(usable)], "*")
-  loadings <- small$v[, seq_len(usable), drop = FALSE]
-  scores <- orient_pca_scores(scores, loadings)
-  colnames(scores) <- paste0("PC", seq_len(ncol(scores)))
-
-  list(
-    scores = scores,
-    loadings = attr(scores, "loadings"),
-    singular_values = small$d[seq_len(usable)],
-    backend = paste0(backend, "_rsvd"),
-    method = "rsvd",
-    oversample = as.integer(sketch_rank - rank),
-    power = as.integer(power)
-  )
-}
-
-rsvd_matrix_multiply <- function(left,
-                                 right,
-                                 transpose_left = FALSE,
-                                 backend = "cpu") {
-  left <- as.matrix(left)
-  right <- as.matrix(right)
-  storage.mode(left) <- "double"
-  storage.mode(right) <- "double"
-  if (isTRUE(transpose_left)) {
-    if (nrow(left) != nrow(right)) {
-      stop("Non-conformable RSVD cross-product.", call. = FALSE)
-    }
-  } else if (ncol(left) != nrow(right)) {
-    stop("Non-conformable RSVD matrix multiply.", call. = FALSE)
-  }
-
-  if (identical(backend, "cuda")) {
-    if (!cuda_metric_available()) {
-      stop("CUDA RSVD matrix multiply is not available.", call. = FALSE)
-    }
-    return(rsvd_multiply_cuda_cpp(left, right, isTRUE(transpose_left)))
-  }
-  if (identical(backend, "metal")) {
-    if (!metal_metric_available()) {
-      stop("Metal RSVD matrix multiply is not available.", call. = FALSE)
-    }
-    return(rsvd_multiply_metal_cpp(left, right, isTRUE(transpose_left)))
-  }
-
-  if (isTRUE(transpose_left)) {
-    crossprod(left, right)
-  } else {
-    left %*% right
-  }
-}
-
-orient_pca_scores <- function(scores, loadings) {
-  for (j in seq_len(ncol(scores))) {
-    pivot <- which.max(abs(loadings[, j]))
-    if (length(pivot) == 1L && is.finite(loadings[pivot, j]) && loadings[pivot, j] < 0) {
-      scores[, j] <- -scores[, j]
-      loadings[, j] <- -loadings[, j]
-    }
-  }
-  attr(scores, "loadings") <- loadings
-  scores
 }
 
 normalize_supplied_knn <- function(nn, n, n_neighbors = NULL, keep_self = FALSE) {

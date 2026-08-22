@@ -30,6 +30,8 @@ when they influenced design, benchmarking, or backend engineering.
 15. Traag VA, Waltman L, van Eck NJ. From Louvain to Leiden: guaranteeing well-connected communities. Sci Rep 2019;9:5233.
 16. Pons P, Latapy M. Computing communities in large networks using random walks. J Graph Algorithms Appl 2006;10:191-218.
 17. Staudt CL, Sazonovs A, Meyerhenke H. NetworKit: a tool suite for large-scale complex network analysis. Network Sci 2016;4:508-530.
+18. RAPIDS Development Team. RAPIDS cuGraph: GPU-accelerated graph analytics
+    [software]. Available from: https://github.com/rapidsai/cugraph.
 
 ## Software Provenance Notes
 
@@ -45,4 +47,5 @@ when they influenced design, benchmarking, or backend engineering.
   keeps its own backend surface and does not expose experimental FFT variants.
 - Louvain, Leiden, and Walktrap are native package implementations [14-16].
   The Leiden phase organization was informed by MIT-licensed NetworKit [17];
-  fastEmbedR does not link NetworKit, igraph, or cuGraph at run time.
+  public cuGraph documentation [18] informed the parallel CSR design.
+  fastEmbedR does not copy or link NetworKit, igraph, or cuGraph at run time.

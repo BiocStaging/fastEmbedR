@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Fast Native UMAP and openTSNE Embeddings
-Version: 0.99.5
+Version: 0.99.6
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),
@@ -15,6 +15,8 @@ Authors@R: c(
         email = "vignoli@cerm.unifi.it"),
     person(given = "Leonardo", family = "Tenori", role = "aut",
         email = "tenori@cerm.unifi.it"),
+    person(given = "Dinesh", family = "Gupta", role = "aut"),
+    person(given = "Silvano", family = "Piazza", role = "aut"),
     person(given = "Stefano", family = "Cacciatore",
         role = c("aut", "cre"),
         email = "tkcaccia@gmail.com")
@@ -25,6 +27,8 @@ Author: Moussa Kassim [aut],
     Dupe Ojo [aut],
     Alessia Vignoli [aut],
     Leonardo Tenori [aut],
+    Dinesh Gupta [aut],
+    Silvano Piazza [aut],
     Stefano Cacciatore [aut, cre]
 Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
 Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN

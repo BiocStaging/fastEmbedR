@@ -600,20 +600,23 @@ opentsne <- function(data,
         init_info$method <- "pca_cuda_raft_tsvd_pca_device"
         init_info$backend <- "cuda_raft_tsvd_device"
       } else {
-        Y_init <- tryCatch(
-          make_opentsne_pca_init_from_data(
-            init_source,
-            n = n,
-            n_components = n_components,
-            seed = seed,
-            backend = init_backend,
-            n_threads = n_threads
+        init_result <- tryCatch(
+          list(
+            layout = make_opentsne_pca_init_from_data(
+              init_source,
+              n = n,
+              n_components = n_components,
+              seed = seed,
+              backend = init_backend,
+              n_threads = n_threads
+            ),
+            problem = NULL
           ),
           error = function(e) {
-            init_info$error <<- conditionMessage(e)
-            NULL
+            list(layout = NULL, problem = conditionMessage(e))
           }
         )
+        Y_init <- init_result$layout
         if (!is.null(Y_init)) {
           init_info$method <- attr(Y_init, "fastEmbedR_init_method") %||% "pca"
           init_info$backend <- attr(Y_init, "fastEmbedR_init_backend") %||% init_backend
@@ -622,7 +625,7 @@ opentsne <- function(data,
             "openTSNE PCA initialization failed for backend `",
             init_backend,
             "`: ",
-            init_info$error %||% "unknown error",
+            init_result$problem %||% "unknown problem",
             call. = FALSE
           )
         }

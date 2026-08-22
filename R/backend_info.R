@@ -1,5 +1,21 @@
-# Internal backend summary used by tests and diagnostics.
-backend_info <- function() {
+#' Report compiled fastEmbedR backend capabilities
+#'
+#' Reports whether the installed fastEmbedR build can provide nearest-neighbor
+#' search, embedding optimization, and graph clustering through each native
+#' execution backend. This function performs capability checks only; it does
+#' not change the backend selected by [fastEmbedR_backend()].
+#'
+#' The `cuvs` row describes the RAPIDS cuVS nearest-neighbor component used by
+#' the CUDA backend. It is diagnostic information and is not itself a value
+#' accepted by public `backend` arguments.
+#'
+#' @return A data frame with one row per backend or backend component and
+#'   logical columns describing KNN, embedding, and clustering availability.
+#'   The `explicit_backend` column gives the corresponding public backend name.
+#' @examples
+#' fastEmbedR_capabilities()
+#' @export
+fastEmbedR_capabilities <- function() {
   cuda_knn <- backend_flag(native_cuda_knn_available_cpp)
   cuda_embedding <- backend_flag(embedding_cuda_available_cpp)
   cuda_clustering <- backend_flag(graph_clustering_cuda_available_cpp)
@@ -41,10 +57,18 @@ backend_info <- function() {
   )
 }
 
+# Private compatibility alias for package-internal diagnostics.
+backend_info <- function() fastEmbedR_capabilities()
+
 #' Configure the default fastEmbedR execution backend
 #'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #' @return The active backend. Setting returns the previous option invisibly.
+#' @examples
+#' old_backend <- getOption("fastEmbedR.backend")
+#' fastEmbedR_backend("cpu")
+#' fastEmbedR_backend()
+#' options(fastEmbedR.backend = old_backend)
 #' @export
 fastEmbedR_backend <- function(backend = NULL) {
   if (is.null(backend)) return(resolve_embedding_backend(NULL))

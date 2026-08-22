@@ -37,6 +37,27 @@ test_that("preprocessing PCA uses package-native RSVD", {
   expect_equal(pre$preprocess$pca_backend, "cpu_rsvd")
 })
 
+test_that("explicit CUDA PCA never falls back to CPU", {
+  if (isTRUE(fastEmbedR:::embedding_cuda_available_cpp())) {
+    skip("CUDA is available; the hardware test covers the native path.")
+  }
+  x <- matrix(rnorm(120L), 30L, 4L)
+  expect_error(
+    pca(x, ncomp = 2L, backend = "cuda"),
+    "CUDA|RAFT"
+  )
+  expect_error(
+    fastEmbedR:::prepare_embedding_data(
+      x,
+      standardize = FALSE,
+      pca_dims = 2L,
+      seed = 4L,
+      backend = "cuda"
+    ),
+    "CUDA|RAFT"
+  )
+})
+
 test_that("float32 matrix input is accepted and preserved without preprocessing", {
   skip_if_not_installed("float")
   set.seed(41)

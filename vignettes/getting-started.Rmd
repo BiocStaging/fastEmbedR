@@ -7,6 +7,8 @@ author:
   - "Dupe Ojo"
   - "Alessia Vignoli"
   - "Leonardo Tenori"
+  - "Dinesh Gupta"
+  - "Silvano Piazza"
   - "Stefano Cacciatore"
 output:
   BiocStyle::html_document:
@@ -17,6 +19,21 @@ vignette: >
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
+
+**Affiliations.** [1] Bioinformatics Unit, International Centre for Genetic
+Engineering and Biotechnology (ICGEB), Cape Town 7925, South Africa;
+[2] Department of Integrative Biomedical Sciences, Institute of Infectious
+Disease & Molecular Medicine (IDM), University of Cape Town, Cape Town 7925,
+South Africa; [3] Department of Chemistry "Ugo Schiff", University of
+Florence, Sesto Fiorentino, Italy; [4] Magnetic Resonance Center (CERM),
+University of Florence, Sesto Fiorentino, Italy; [20] Translational
+Bioinformatics Group, International Centre for Genetic Engineering and
+Biotechnology (ICGEB), New Delhi, India; [21] Computational Biology Group,
+International Centre for Genetic Engineering and Biotechnology (ICGEB),
+Trieste, Italy; [22] Bioinformatics Facility, Department of Cellular,
+Computational and Integrative Biology - CIBIO, University of Trento, Trento,
+Italy. Moussa Kassim and Martin Ocharo contributed equally. Leonardo Tenori and
+Stefano Cacciatore are co-corresponding authors.
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(
@@ -251,7 +268,8 @@ layout_tsne_fixed_init <- opentsne(
 CPU PCA uses the package-native float32 blocked RSVD path. Metal uses a native
 float32 block-subspace TSVD with Metal Performance Shaders matrix products.
 CUDA uses native RAPIDS RAFT TSVD when that support is compiled. No backend
-calls Python or `reticulate`.
+calls Python or `reticulate`. Float32 CUDA input is passed to RAFT without an
+intermediate R double matrix, and float32 scores and loadings are preserved.
 
 # Reusing a nearest-neighbor graph
 

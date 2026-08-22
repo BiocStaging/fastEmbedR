@@ -30,9 +30,11 @@ The public package surface is deliberately small:
 - `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
 - `opentsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
   then call the corresponding KNN entry point.
-- `pca()` computes backend-native truncated PCA scores and loadings. CPU and
-  CUDA use fastEmbedR's native RSVD implementation; Metal uses a resident
-  float32 MPS TSVD path. Resident CUDA openTSNE initialization uses RAFT TSVD.
+- `pca()` computes backend-native truncated PCA scores and loadings. CPU uses
+  fastEmbedR's native blocked RSVD implementation, Metal uses a resident
+  float32 MPS TSVD path, and CUDA uses native RAPIDS RAFT TSVD. Float32 CUDA
+  input is passed to the native fit without an intermediate R double matrix;
+  unavailable RAFT support is an explicit error rather than a CPU fallback.
 - `knn_graph()` builds one compact undirected graph from data, an embedding,
   or supplied neighbors; `graph_cluster()` applies native Louvain, Leiden,
   or Walktrap community detection.
@@ -223,14 +225,14 @@ are not guaranteed to be bitwise identical across devices.
 openTSNE initialization. The API has no method-selection layer and does not
 call `irlba`, ARPACK, Python, or `reticulate`.
 
-The backend implementations share a randomized subspace objective but use
-hardware-appropriate execution:
+The backend implementations share the same truncated low-rank PCA target but
+use hardware-appropriate execution:
 
 | Backend | PCA implementation |
 | --- | --- |
 | CPU | Package-native float32 blocked RSVD. Centering/scaling and large matrix products run in C++; Apple builds use Accelerate SGEMM and other platforms use a threaded float32 kernel. `n.cores` controls the temporary numerical-library/thread limit. |
 | Metal | Package-native float32 block-subspace TSVD using MPS matrix multiplication and a resident unified-memory workspace. |
-| CUDA | Native C++/CUDA initialization through RAPIDS RAFT TSVD compiled into the CUDA backend. |
+| CUDA | Native C++/CUDA PCA through RAPIDS RAFT TSVD compiled into the CUDA backend. Float32 input is read from its payload without constructing an R double matrix; scores and loadings remain float32 until the requested R return boundary. |
 
 The Metal path is deliberately different from the former R-orchestrated RSVD.
 It converts and centers the input once into a float32 buffer whose column-major

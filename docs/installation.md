@@ -47,7 +47,7 @@ required by the core `fastEmbedR` embedding functions.
 one-call KNN. Follow the [backend build guide](installation-backends.md) for
 the exact compiler, GPU-architecture, host-compiler, header, library, and
 runtime requirements. CPU, Metal, and correctly compiled CUDA
-`opentsne()`/`umap()` do not call another R package for neighbour search.
+`opentsne()`/`umap()` do not call another R package for neighbor search.
 
 The portable C++ core inherits `CXX17` and `CXX17FLAGS` from R and adds only
 `-pthread`. The package does not globally force `-march=native`,
@@ -101,10 +101,10 @@ For CUDA dependency diagnostics after installation:
 
 ```r
 library(fastEmbedR)
-fastEmbedR:::backend_info()
+fastEmbedR_capabilities()
 ```
 
-The diagnostic reports CUDA nearest-neighbour and embedding availability.
+The diagnostic reports CUDA nearest-neighbor and embedding availability.
 `fastEmbedR` checks CPU, Metal, and CUDA embedding backends when a function is
 called with `backend = "cpu"`, `"metal"`, or `"cuda"`.
 

@@ -3361,7 +3361,13 @@ int raft_tsvd_scores_to_device(const HostT* values,
                                int p,
                                int n_components,
                                float* d_scores_out,
-                               CudaWorkspace* workspace = nullptr) {
+                               CudaWorkspace* workspace = nullptr,
+                               bool center_input = true,
+                               bool scale_input = false,
+                               float* host_components_out = nullptr,
+                               float* host_singular_out = nullptr,
+                               float* host_center_out = nullptr,
+                               float* host_scale_out = nullptr) {
   if (values == nullptr || d_scores_out == nullptr) {
     set_embedding_error("null pointer in RAFT TSVD device PCA initialization");
     return 1;
@@ -3374,20 +3380,44 @@ int raft_tsvd_scores_to_device(const HostT* values,
   const std::size_t input_items = static_cast<std::size_t>(n) * p;
   const std::size_t component_items = static_cast<std::size_t>(n_components) * p;
 
-  std::vector<double> means(p, 0.0);
+  std::vector<float> centers(p, 0.0f);
+  std::vector<float> scales(p, 1.0f);
   for (int j = 0; j < p; ++j) {
     const std::size_t col = static_cast<std::size_t>(j) * n;
     double sum = 0.0;
-    for (int i = 0; i < n; ++i) sum += static_cast<double>(values[col + i]);
-    means[j] = sum / static_cast<double>(n);
+    for (int i = 0; i < n; ++i) {
+      const double value = static_cast<double>(values[col + i]);
+      if (!std::isfinite(value)) {
+        set_embedding_error("PCA input must contain only finite values");
+        return 1;
+      }
+      sum += value;
+    }
+    const double mean = center_input ? sum / static_cast<double>(n) : 0.0;
+    centers[j] = static_cast<float>(mean);
+    if (scale_input) {
+      double sum_squares = 0.0;
+      for (int i = 0; i < n; ++i) {
+        const double centered = static_cast<double>(values[col + i]) - mean;
+        sum_squares += centered * centered;
+      }
+      const double denominator = static_cast<double>(std::max(1, n - 1));
+      const double scale = std::sqrt(sum_squares / denominator);
+      scales[j] = (!std::isfinite(scale) || scale == 0.0) ?
+        1.0f : static_cast<float>(scale);
+    }
+    if (host_center_out != nullptr) host_center_out[j] = centers[j];
+    if (host_scale_out != nullptr) host_scale_out[j] = scales[j];
   }
 
   std::vector<float> h_input(input_items);
   for (int j = 0; j < p; ++j) {
     const std::size_t col = static_cast<std::size_t>(j) * n;
-    const float mean = static_cast<float>(means[j]);
+    const float mean = centers[j];
+    const float inverse_scale = 1.0f / scales[j];
     for (int i = 0; i < n; ++i) {
-      h_input[col + i] = static_cast<float>(values[col + i]) - mean;
+      h_input[col + i] =
+        (static_cast<float>(values[col + i]) - mean) * inverse_scale;
     }
   }
 
@@ -3474,6 +3504,32 @@ int raft_tsvd_scores_to_device(const HostT* values,
       true);
 
     if (check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize(raft_tsvd device init)")) {
+      cleanup();
+      return 1;
+    }
+    if (host_components_out != nullptr &&
+        check_cuda(
+          cudaMemcpy(
+            host_components_out,
+            d_components,
+            component_items * sizeof(float),
+            cudaMemcpyDeviceToHost
+          ),
+          "cudaMemcpy(raft_tsvd components D2H)"
+        )) {
+      cleanup();
+      return 1;
+    }
+    if (host_singular_out != nullptr &&
+        check_cuda(
+          cudaMemcpy(
+            host_singular_out,
+            d_singular,
+            static_cast<std::size_t>(n_components) * sizeof(float),
+            cudaMemcpyDeviceToHost
+          ),
+          "cudaMemcpy(raft_tsvd singular values D2H)"
+        )) {
       cleanup();
       return 1;
     }
@@ -3965,6 +4021,88 @@ extern "C" int fastembedr_cuda_raft_tsvd_pca_init(const double* values,
   } catch (...) {
     cleanup();
     set_embedding_error("RAFT TSVD PCA initialization failed with an unknown error.");
+    return 1;
+  }
+#endif
+}
+
+extern "C" int fastembedr_cuda_raft_tsvd_pca_fit(const float* values,
+                                                  int n,
+                                                  int p,
+                                                  int n_components,
+                                                  int center,
+                                                  int scale,
+                                                  float* scores,
+                                                  float* components,
+                                                  float* singular_values,
+                                                  float* center_values,
+                                                  float* scale_values) {
+  embedding_last_error.clear();
+#ifndef FASTEMBEDR_HAS_RAFT
+  set_embedding_error("fastEmbedR was not built with RAPIDS RAFT TSVD support.");
+  return 1;
+#else
+  if (values == nullptr || scores == nullptr || components == nullptr ||
+      singular_values == nullptr || center_values == nullptr ||
+      scale_values == nullptr) {
+    set_embedding_error("null host pointer in RAFT TSVD PCA fit");
+    return 1;
+  }
+  if (n < 2 || p < 2 || n_components < 1 ||
+      n_components > std::min(n - 1, p)) {
+    set_embedding_error("invalid dimensions in RAFT TSVD PCA fit");
+    return 1;
+  }
+
+  const std::size_t score_items = static_cast<std::size_t>(n) * n_components;
+  const std::size_t component_items =
+    static_cast<std::size_t>(n_components) * p;
+  const std::size_t input_items = static_cast<std::size_t>(n) * p;
+  const std::size_t workspace_bytes =
+    (score_items + input_items + component_items +
+     static_cast<std::size_t>(3 * n_components)) * sizeof(float) +
+    32u * 256u;
+  CudaWorkspace workspace;
+  try {
+    if (check_embedding_memory_available(
+          workspace_bytes,
+          "RAFT TSVD PCA fit allocation preflight"
+        )) {
+      return 1;
+    }
+    if (workspace.init(workspace_bytes, "raft_tsvd pca fit")) return 1;
+    float* d_scores = workspace.alloc<float>(score_items, "raft_tsvd scores");
+    if (d_scores == nullptr) return 1;
+    if (raft_tsvd_scores_to_device<float>(
+          values,
+          n,
+          p,
+          n_components,
+          d_scores,
+          &workspace,
+          center != 0,
+          scale != 0,
+          components,
+          singular_values,
+          center_values,
+          scale_values
+        )) {
+      return 1;
+    }
+    return check_cuda(
+      cudaMemcpy(
+        scores,
+        d_scores,
+        score_items * sizeof(float),
+        cudaMemcpyDeviceToHost
+      ),
+      "cudaMemcpy(raft_tsvd scores D2H)"
+    );
+  } catch (const std::exception& e) {
+    set_embedding_error(std::string("RAFT TSVD PCA fit failed: ") + e.what());
+    return 1;
+  } catch (...) {
+    set_embedding_error("RAFT TSVD PCA fit failed with an unknown error.");
     return 1;
   }
 #endif
