@@ -133,7 +133,7 @@ umap_init <- function(x,
   cfg$backend <- backend
   cfg$graph_mode <- graph_mode
   if (!is.null(n_threads)) {
-    requested_threads <- suppressWarnings(as.integer(n_threads))
+    requested_threads <- integer_scalar(n_threads)
     if (length(requested_threads) != 1L || is.na(requested_threads) ||
         requested_threads < 1L) {
       stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)

@@ -154,7 +154,11 @@ umap <- function(data,
       if (fastembedr_is_gpu_knn(nn)) {
         nn <- fastembedr_as_gpu_knn(nn)
         if (!identical(backend, "cuda")) {
-          stop("A GPU-resident KNN object can only be used with `backend = \"cuda\"`.", call. = FALSE)
+          stop(
+            "A GPU-resident KNN object can only be used with ",
+            "`backend = \"cuda\"`.",
+            call. = FALSE
+          )
         }
         gpu_info <- fastembedr_gpu_knn_info(nn)
         if (gpu_info$n != n || isTRUE(gpu_info$has_self)) {
@@ -370,7 +374,9 @@ landmark_umap <- function(data,
         projected <- affine_projected
       }
       if (is.null(projected)) {
-        project_backend <- if (identical(backend, "metal") && isTRUE(embedding_metal_available_cpp())) {
+        metal_available <- identical(backend, "metal") &&
+          isTRUE(embedding_metal_available_cpp())
+        project_backend <- if (metal_available) {
           "metal"
         } else {
           "cpu"
@@ -408,7 +414,7 @@ landmark_umap <- function(data,
   refinement_time <- zero_proc_time()
   refinement_backend <- NA_character_
   refinement_epochs <- getOption("fastEmbedR.landmark_umap_refine_epochs", 50L)
-  refinement_epochs <- suppressWarnings(as.integer(refinement_epochs))
+  refinement_epochs <- integer_scalar(refinement_epochs)
   if (length(refinement_epochs) != 1L || is.na(refinement_epochs) || refinement_epochs < 0L) {
     refinement_epochs <- 50L
   }
@@ -453,9 +459,13 @@ landmark_umap <- function(data,
       ref_learning_rate <- as.numeric(ref_params$learning_rate %||% 1)
       ref_repulsion_strength <- as.numeric(ref_params$repulsion_strength %||% 1)
       if (!is.finite(ref_min_dist) || ref_min_dist < 0) ref_min_dist <- 0.01
-      if (is.na(ref_negative_sample_rate) || ref_negative_sample_rate < 0L) ref_negative_sample_rate <- 5L
+      if (is.na(ref_negative_sample_rate) || ref_negative_sample_rate < 0L) {
+        ref_negative_sample_rate <- 5L
+      }
       if (!is.finite(ref_learning_rate) || ref_learning_rate <= 0) ref_learning_rate <- 1
-      if (!is.finite(ref_repulsion_strength) || ref_repulsion_strength <= 0) ref_repulsion_strength <- 1
+      if (!is.finite(ref_repulsion_strength) || ref_repulsion_strength <= 0) {
+        ref_repulsion_strength <- 1
+      }
       use_metal_refinement <- n_components == 2L &&
         identical(backend, "metal") &&
         isTRUE(embedding_metal_available_cpp())
@@ -482,7 +492,8 @@ landmark_umap <- function(data,
               stop("Metal UMAP landmark refinement failed: ", msg, call. = FALSE)
             }
             warning(
-              "Metal UMAP landmark refinement failed; using CPU refinement and reporting backend='cpu': ",
+              "Metal UMAP landmark refinement failed; using CPU refinement ",
+              "and reporting backend='cpu': ",
               msg,
               call. = FALSE
             )
@@ -605,7 +616,11 @@ landmark_umap <- function(data,
       transform_k = transform_k,
       landmark_refinement = if (refinement_epochs > 0L) "fixed_landmark_umap_rows" else "none",
       landmark_refinement_epochs = as.integer(refinement_epochs),
-      landmark_refinement_backend = if (refinement_epochs > 0L) refinement_backend else NA_character_,
+      landmark_refinement_backend = if (refinement_epochs > 0L) {
+        refinement_backend
+      } else {
+        NA_character_
+      },
       keep_knn = keep_knn,
       provenance = "UMAP_landmark_projection_native_cpp"
     ),

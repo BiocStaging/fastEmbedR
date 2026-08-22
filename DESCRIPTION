@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Fast Native UMAP and openTSNE Embeddings
-Version: 0.99.6
+Version: 0.99.7
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),

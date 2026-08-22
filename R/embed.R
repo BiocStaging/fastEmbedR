@@ -86,34 +86,26 @@ prepare_embedding_data <- function(data,
       preprocess$preprocess_backend <- "cpu_float32"
       preprocess$preprocess_backend_reason <- "native_float32_column_standardization"
     } else if (identical(backend, "cuda") && cuda_metric_available()) {
-      standardized <- tryCatch(
-        standardize_cuda_cpp(x),
-        error = function(e) {
-          preprocess$preprocess_backend_reason <<- conditionMessage(e)
-          NULL
-        }
-      )
-      if (!is.null(standardized)) {
-        x <- standardized$data
+      standardized <- capture_error(standardize_cuda_cpp(x))
+      if (!is.null(standardized$value)) {
+        x <- standardized$value$data
         used_native <- TRUE
         preprocess$standardize_backend <- "cuda"
         preprocess$preprocess_backend <- "cuda"
+      } else {
+        preprocess$preprocess_backend_reason <- standardized$error
       }
     } else if (identical(backend, "cuda")) {
       preprocess$preprocess_backend_reason <- "cuda_preprocessing_unavailable"
     } else if (identical(backend, "metal") && metal_metric_available()) {
-      standardized <- tryCatch(
-        standardize_metal_cpp(x),
-        error = function(e) {
-          preprocess$preprocess_backend_reason <<- conditionMessage(e)
-          NULL
-        }
-      )
-      if (!is.null(standardized)) {
-        x <- standardized$data
+      standardized <- capture_error(standardize_metal_cpp(x))
+      if (!is.null(standardized$value)) {
+        x <- standardized$value$data
         used_native <- TRUE
         preprocess$standardize_backend <- "metal"
         preprocess$preprocess_backend <- "metal"
+      } else {
+        preprocess$preprocess_backend_reason <- standardized$error
       }
     } else if (identical(backend, "metal")) {
       preprocess$preprocess_backend_reason <- "metal_preprocessing_unavailable"
@@ -365,7 +357,7 @@ finalize_pca_fit <- function(fit, xtest, opentsne_init) {
 }
 
 normalize_pca_threads <- function(n.cores) {
-  n.cores <- suppressWarnings(as.integer(n.cores))
+  n.cores <- integer_scalar(n.cores)
   if (length(n.cores) != 1L || is.na(n.cores) ||
       !is.finite(n.cores) || n.cores < 1L) {
     stop("`n.cores` must be a positive integer.", call. = FALSE)
@@ -698,7 +690,11 @@ normalize_supplied_knn <- function(nn, n, n_neighbors = NULL, keep_self = FALSE)
     n_neighbors <- ncol(indices)
   } else {
     n_neighbors <- as.integer(n_neighbors)
-    if (length(n_neighbors) != 1L || is.na(n_neighbors) || !is.finite(n_neighbors) || n_neighbors < 1L) {
+    invalid_n_neighbors <- length(n_neighbors) != 1L ||
+      is.na(n_neighbors) ||
+      !is.finite(n_neighbors) ||
+      n_neighbors < 1L
+    if (invalid_n_neighbors) {
       stop("`n_neighbors` must be NULL or a positive integer.", call. = FALSE)
     }
     if (n_neighbors > ncol(indices)) {
@@ -733,10 +729,18 @@ embedding_scores <- function(layout,
   if (is.null(preserve_keep)) {
     preserve_keep <- sample_indices(n, preserve_sample, seed)
   }
-  preserve_k <- if (is.null(preserve_k)) ncol(indices) else min(as.integer(preserve_k), ncol(indices))
+  preserve_k <- if (is.null(preserve_k)) {
+    ncol(indices)
+  } else {
+    min(as.integer(preserve_k), ncol(indices))
+  }
 
   silhouette_result <- if (is.null(labels_int) || length(silhouette_keep) == 0L) {
-    list(value = NA_real_, backend = if (is.null(labels_int)) "none" else "skipped", reason = NA_character_)
+    list(
+      value = NA_real_,
+      backend = if (is.null(labels_int)) "none" else "skipped",
+      reason = NA_character_
+    )
   } else {
     silhouette_score_with_backend(
       labels_int[silhouette_keep],
@@ -803,7 +807,11 @@ resolve_landmarks <- function(landmarks, x, seed, n_threads = NULL) {
   if (length(landmarks) == 1L && is.numeric(landmarks)) {
     value <- as.numeric(landmarks)
     if (!is.finite(value) || value <= 0) {
-      stop("`landmarks` must be NULL, TRUE, a positive count, a fraction in (0, 1), or row indices.", call. = FALSE)
+      stop(
+        "`landmarks` must be NULL, TRUE, a positive count, ",
+        "a fraction in (0, 1), or row indices.",
+        call. = FALSE
+      )
     }
     count <- if (value > 0 && value < 1) {
       ceiling(n * value)
@@ -820,7 +828,11 @@ resolve_landmarks <- function(landmarks, x, seed, n_threads = NULL) {
   }
 
   if (!is.numeric(landmarks)) {
-    stop("`landmarks` must be NULL, TRUE, a positive count, a fraction in (0, 1), or row indices.", call. = FALSE)
+    stop(
+      "`landmarks` must be NULL, TRUE, a positive count, ",
+      "a fraction in (0, 1), or row indices.",
+      call. = FALSE
+    )
   }
   idx <- sort(unique(as.integer(landmarks)))
   if (length(idx) < 2L || any(is.na(idx)) || any(idx < 1L) || any(idx > n)) {
@@ -1016,7 +1028,11 @@ print.fastEmbedR_embedding <- function(x, ...) {
   if (length(silhouette) == 1L && is.finite(silhouette)) {
     cat("  silhouette: ", format(round(silhouette, 4L), nsmall = 4L), "\n", sep = "")
   }
-  knn_preservation <- if ("knn_preservation" %in% names(x$metrics)) x$metrics$knn_preservation[[1L]] else NA_real_
+  knn_preservation <- if ("knn_preservation" %in% names(x$metrics)) {
+    x$metrics$knn_preservation[[1L]]
+  } else {
+    NA_real_
+  }
   if (length(knn_preservation) == 1L && is.finite(knn_preservation)) {
     cat("  KNN preservation: ", format(round(knn_preservation, 4L), nsmall = 4L), "\n", sep = "")
   }

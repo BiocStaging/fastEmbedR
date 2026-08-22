@@ -1,5 +1,5 @@
 normalize_nn_threads <- function(n_threads) {
-  n_threads <- suppressWarnings(as.integer(n_threads))
+  n_threads <- integer_scalar(n_threads)
   if (length(n_threads) != 1L || is.na(n_threads) || n_threads < 1L) {
     n_threads <- 1L
   }
@@ -98,7 +98,7 @@ fastembedr_convert_knn_distances <- function(knn, output) {
 
 fastembedr_embedding_nn_policy <- function(embedding_backend, n = NULL) {
   embedding_backend <- resolve_embedding_backend(embedding_backend)
-  n <- suppressWarnings(as.integer(n %||% NA_integer_))
+  n <- integer_scalar(n %||% NA_integer_)
   small_enough_for_exact <- length(n) == 1L && !is.na(n) && n < 100000L
   method <- if (isTRUE(small_enough_for_exact)) "exact" else "ivf"
   if (identical(embedding_backend, "cuda")) {
@@ -130,9 +130,9 @@ fastembedr_query_nn_policy <- function(embedding_backend,
                                        n_query = NULL,
                                        p = NULL) {
   embedding_backend <- resolve_embedding_backend(embedding_backend)
-  n_reference <- suppressWarnings(as.integer(n_reference %||% NA_integer_))
-  n_query <- suppressWarnings(as.integer(n_query %||% NA_integer_))
-  p <- suppressWarnings(as.integer(p %||% NA_integer_))
+  n_reference <- integer_scalar(n_reference %||% NA_integer_)
+  n_query <- integer_scalar(n_query %||% NA_integer_)
+  p <- integer_scalar(p %||% NA_integer_)
   if (identical(embedding_backend, "cuda")) {
     return(list(
       backend = "cuda",
@@ -254,7 +254,7 @@ precompute_knn <- function(data,
   )
   x <- prepared$data
   n <- nrow(x)
-  k <- suppressWarnings(as.integer(k))
+  k <- integer_scalar(k)
   if (length(k) != 1L || is.na(k) || !is.finite(k) || k < 1L || k >= n) {
     stop("`k` must be one integer between 1 and nrow(data) - 1.", call. = FALSE)
   }
@@ -361,7 +361,7 @@ precompute_query_knn <- function(reference,
   if (ncol(reference) != ncol(query)) {
     stop("`reference` and `query` must have the same number of columns.", call. = FALSE)
   }
-  k <- suppressWarnings(as.integer(k))
+  k <- integer_scalar(k)
   if (length(k) != 1L || is.na(k) || !is.finite(k) ||
       k < 1L || k > nrow(reference)) {
     stop("`k` must be one integer between 1 and nrow(reference).", call. = FALSE)
@@ -420,9 +420,14 @@ print.fastEmbedR_knn <- function(x, ...) {
   cat("  observations: ", x$n %||% x$n_query %||% nrow(x$indices), "\n", sep = "")
   cat("  neighbors:    ", x$k %||% ncol(x$indices), " (non-self)\n", sep = "")
   cat("  metric:       ", x$metric %||% attr(x, "metric") %||% "unknown", "\n", sep = "")
-  cat("  backend:      ", x$execution_backend %||% attr(x, "backend") %||% "unknown", "\n", sep = "")
-  cat("  engine:       ", x$engine %||% x$method %||% attr(x, "method") %||% "unknown", "\n", sep = "")
-  cat("  residency:    ", x$result_residency %||% attr(x, "result_residency") %||% "host", "\n", sep = "")
+  backend <- x$execution_backend %||% attr(x, "backend") %||% "unknown"
+  engine <- x$engine %||% x$method %||% attr(x, "method") %||% "unknown"
+  residency <- x$result_residency %||%
+    attr(x, "result_residency") %||%
+    "host"
+  cat("  backend:      ", backend, "\n", sep = "")
+  cat("  engine:       ", engine, "\n", sep = "")
+  cat("  residency:    ", residency, "\n", sep = "")
   if (!is.null(x$elapsed_sec) && is.finite(x$elapsed_sec)) {
     cat("  elapsed:      ", format(round(x$elapsed_sec, 3L), nsmall = 3L), " s\n", sep = "")
   }

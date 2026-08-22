@@ -189,7 +189,8 @@ graph_cluster <- function(graph,
   }
   if (identical(method, "walktrap") && !identical(backend, "cpu")) {
     stop(
-      "Walktrap is supported only with `backend = \"cpu\"`; fastEmbedR does not silently replace a requested GPU backend.",
+      "Walktrap is supported only with `backend = \"cpu\"`; ",
+      "fastEmbedR does not silently replace a requested GPU backend.",
       call. = FALSE
     )
   }
@@ -280,8 +281,8 @@ validate_fastembedr_graph <- function(graph) {
 }
 
 graph_positive_integer <- function(x, name) {
-  numeric_value <- suppressWarnings(as.numeric(x))
-  value <- suppressWarnings(as.integer(numeric_value))
+  numeric_value <- numeric_scalar(x)
+  value <- integer_scalar(numeric_value)
   if (length(numeric_value) != 1L || !is.finite(numeric_value) ||
       numeric_value != value || value < 1L) {
     stop("`", name, "` must be one positive integer.", call. = FALSE)

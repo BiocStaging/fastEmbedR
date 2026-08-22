@@ -77,7 +77,7 @@ structure_score_with_backend <- function(layout,
     } else if (preserve_k > 64L) {
       reason <- "cuda_scoring_supports_at_most_64_neighbors"
     } else {
-      out <- tryCatch(
+      attempt <- capture_error(
         knn_structure_score_cuda_cpp(
           layout,
           indices,
@@ -85,15 +85,16 @@ structure_score_with_backend <- function(layout,
           preserve_k,
           labels_int,
           as.integer(n_label_levels)
-        ),
-        error = function(e) {
-          reason <<- conditionMessage(e)
-          NULL
-        }
+        )
       )
-      if (!is.null(out)) {
-        return(list(values = out, backend = "cuda", reason = NA_character_))
+      if (!is.null(attempt$value)) {
+        return(list(
+          values = attempt$value,
+          backend = "cuda",
+          reason = NA_character_
+        ))
       }
+      reason <- attempt$error
     }
   }
   if (metal_metric_requested(backend)) {
@@ -104,7 +105,7 @@ structure_score_with_backend <- function(layout,
     } else if (preserve_k > 64L) {
       reason <- append_metric_backend_reason(reason, "metal_scoring_supports_at_most_64_neighbors")
     } else {
-      out <- tryCatch(
+      attempt <- capture_error(
         knn_structure_score_metal_cpp(
           layout,
           indices,
@@ -112,15 +113,16 @@ structure_score_with_backend <- function(layout,
           preserve_k,
           labels_int,
           as.integer(n_label_levels)
-        ),
-        error = function(e) {
-          reason <<- append_metric_backend_reason(reason, conditionMessage(e))
-          NULL
-        }
+        )
       )
-      if (!is.null(out)) {
-        return(list(values = out, backend = "metal", reason = NA_character_))
+      if (!is.null(attempt$value)) {
+        return(list(
+          values = attempt$value,
+          backend = "metal",
+          reason = NA_character_
+        ))
       }
+      reason <- append_metric_backend_reason(reason, attempt$error)
     }
   }
 
@@ -153,20 +155,21 @@ silhouette_score_with_backend <- function(labels_int,
     } else if (n_label_levels > 128L) {
       reason <- "cuda_silhouette_supports_at_most_128_label_levels"
     } else {
-      out <- tryCatch(
+      attempt <- capture_error(
         silhouette_score_cuda_cpp(
           layout,
           labels_int,
           as.integer(n_label_levels)
-        ),
-        error = function(e) {
-          reason <<- conditionMessage(e)
-          NULL
-        }
+        )
       )
-      if (!is.null(out)) {
-        return(list(value = out, backend = "cuda", reason = NA_character_))
+      if (!is.null(attempt$value)) {
+        return(list(
+          value = attempt$value,
+          backend = "cuda",
+          reason = NA_character_
+        ))
       }
+      reason <- attempt$error
     }
   }
   if (metal_metric_requested(backend)) {
@@ -175,22 +178,26 @@ silhouette_score_with_backend <- function(labels_int,
     } else if (ncol(layout) != 2L) {
       reason <- append_metric_backend_reason(reason, "metal_silhouette_requires_2d_layout")
     } else if (n_label_levels > 128L) {
-      reason <- append_metric_backend_reason(reason, "metal_silhouette_supports_at_most_128_label_levels")
+      reason <- append_metric_backend_reason(
+        reason,
+        "metal_silhouette_supports_at_most_128_label_levels"
+      )
     } else {
-      out <- tryCatch(
+      attempt <- capture_error(
         silhouette_score_metal_cpp(
           layout,
           labels_int,
           as.integer(n_label_levels)
-        ),
-        error = function(e) {
-          reason <<- append_metric_backend_reason(reason, conditionMessage(e))
-          NULL
-        }
+        )
       )
-      if (!is.null(out)) {
-        return(list(value = out, backend = "metal", reason = NA_character_))
+      if (!is.null(attempt$value)) {
+        return(list(
+          value = attempt$value,
+          backend = "metal",
+          reason = NA_character_
+        ))
       }
+      reason <- append_metric_backend_reason(reason, attempt$error)
     }
   }
 
@@ -206,7 +213,11 @@ sample_indices <- function(n, sample_size = NULL, seed = 4L) {
     return(integer(0L))
   }
   sample_size <- as.integer(sample_size)
-  if (length(sample_size) != 1L || is.na(sample_size) || !is.finite(sample_size) || sample_size < 1L) {
+  invalid_sample_size <- length(sample_size) != 1L ||
+    is.na(sample_size) ||
+    !is.finite(sample_size) ||
+    sample_size < 1L
+  if (invalid_sample_size) {
     return(integer(0L))
   }
   if (sample_size >= n) {

@@ -8,7 +8,11 @@ test_that("Metal public paths stay native and do not depend on Python bridges", 
 
   prepare_body <- paste(deparse(body(fastEmbedR:::prepare_embedding_data)), collapse = "\n")
   transform_body <- paste(deparse(body(fastEmbedR::transform_tsne)), collapse = "\n")
-  opentsne_body <- paste(deparse(body(fastEmbedR:::fast_knn_opentsne_materialized)), collapse = "\n")
+  opentsne_body <- paste(
+    deparse(body(fastEmbedR:::fast_knn_opentsne_materialized)),
+    deparse(body(fastEmbedR:::run_opentsne_native_optimizer)),
+    collapse = "\n"
+  )
 
   expect_match(prepare_body, "standardize_metal_cpp", fixed = TRUE)
   expect_match(transform_body, "transform_tsne_metal_cpp", fixed = TRUE)

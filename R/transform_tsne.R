@@ -196,7 +196,11 @@ transform_tsne <- function(reference_layout,
   y_init <- if (init) {
     y_init <- transform_embedding_matrix(Y_init, "Y_init", min_rows = nrow(projection$indices))
     if (nrow(y_init) != nrow(projection$indices) || ncol(y_init) != ncol(reference_layout)) {
-      stop("`Y_init` must have one row per query and the same columns as `reference_layout`.", call. = FALSE)
+      stop(
+        "`Y_init` must have one row per query and the same columns as ",
+        "`reference_layout`.",
+        call. = FALSE
+      )
     }
     y_init
   } else {
@@ -205,7 +209,11 @@ transform_tsne <- function(reference_layout,
 
   out <- if (identical(optimizer_backend, "metal")) {
     if (ncol(reference_layout) != 2L) {
-      stop("Metal t-SNE transform currently supports only two-dimensional reference layouts.", call. = FALSE)
+      stop(
+        "Metal t-SNE transform currently supports only two-dimensional ",
+        "reference layouts.",
+        call. = FALSE
+      )
     }
     transform_tsne_metal_cpp(
       reference_layout,
@@ -230,7 +238,11 @@ transform_tsne <- function(reference_layout,
     )
   } else if (identical(optimizer_backend, "cuda")) {
     if (ncol(reference_layout) != 2L) {
-      stop("CUDA t-SNE transform currently supports only two-dimensional reference layouts.", call. = FALSE)
+      stop(
+        "CUDA t-SNE transform currently supports only two-dimensional ",
+        "reference layouts.",
+        call. = FALSE
+      )
     }
     transform_tsne_cuda_cpp(
       reference_layout,
@@ -349,10 +361,10 @@ landmark_projection_mode <- function() {
 }
 
 landmark_projection_min_work <- function() {
-  value <- suppressWarnings(as.numeric(getOption(
+  value <- numeric_scalar(getOption(
     "fastEmbedR.landmark_projection_min_work",
     1e10
-  )))
+  ))
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 0) {
     value <- 1e10
   }
@@ -360,10 +372,10 @@ landmark_projection_min_work <- function() {
 }
 
 landmark_projection_min_rows <- function() {
-  value <- suppressWarnings(as.integer(getOption(
+  value <- integer_scalar(getOption(
     "fastEmbedR.landmark_projection_min_rows",
     2000L
-  )))
+  ))
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 1L) {
     value <- 2000L
   }
@@ -377,7 +389,7 @@ landmark_projection_approx_params <- function(n_landmarks, k) {
   if (is.null(n_projections)) {
     n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(2L, n_landmarks)))))
   } else {
-    n_projections <- suppressWarnings(as.integer(n_projections))
+    n_projections <- integer_scalar(n_projections)
     if (length(n_projections) != 1L || is.na(n_projections) || !is.finite(n_projections)) {
       n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(2L, n_landmarks)))))
     }
@@ -393,7 +405,7 @@ landmark_projection_approx_params <- function(n_landmarks, k) {
       ceiling(sqrt(max(1L, n_landmarks)))
     )
   } else {
-    window <- suppressWarnings(as.integer(window))
+    window <- integer_scalar(window)
     if (length(window) != 1L || is.na(window) || !is.finite(window)) {
       window <- max(
         64L,
@@ -600,13 +612,13 @@ scalar_numeric_or_default <- function(values, name, default) {
   value <- scalar_or_default(values, name, default)
   if (length(value) != 1L || is.na(value)) return(default)
   if (is.character(value) && identical(tolower(value), "auto")) return(default)
-  out <- suppressWarnings(as.numeric(value))
+  out <- numeric_scalar(value)
   if (length(out) != 1L || is.na(out) || !is.finite(out)) default else out
 }
 
 scalar_integer_or_default <- function(values, name, default) {
   value <- scalar_numeric_or_default(values, name, default)
-  out <- suppressWarnings(as.integer(value))
+  out <- integer_scalar(value)
   if (length(out) != 1L || is.na(out)) as.integer(default) else out
 }
 

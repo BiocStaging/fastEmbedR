@@ -4,7 +4,7 @@ safe_numeric_cor <- function(x, y, method = "pearson") {
   x <- x[ok]
   y <- y[ok]
   if (stats::sd(x) == 0 || stats::sd(y) == 0) return(NA_real_)
-  suppressWarnings(stats::cor(x, y, method = method))
+  stats::cor(x, y, method = method)
 }
 
 normalized_stress <- function(high_dist, low_dist) {
@@ -98,14 +98,25 @@ class_recall_metrics <- function(truth, pred) {
   rare_cutoff <- stats::quantile(counts, probs = 0.25, type = 1, na.rm = TRUE)
   rare <- counts <= rare_cutoff
   list(
-    table = data.frame(label = levels_truth, n = counts, recall = unname(recall), stringsAsFactors = FALSE),
+    table = data.frame(
+      label = levels_truth,
+      n = counts,
+      recall = unname(recall),
+      stringsAsFactors = FALSE
+    ),
     rare_class_recall = if (any(rare, na.rm = TRUE)) mean(recall[rare], na.rm = TRUE) else NA_real_
   )
 }
 
 class_recall_json <- function(recall_table) {
   if (requireNamespace("jsonlite", quietly = TRUE)) {
-    return(as.character(jsonlite::toJSON(recall_table, auto_unbox = TRUE, dataframe = "rows", null = "null")))
+    json <- jsonlite::toJSON(
+      recall_table,
+      auto_unbox = TRUE,
+      dataframe = "rows",
+      null = "null"
+    )
+    return(as.character(json))
   }
   paste(paste(recall_table$label, recall_table$recall, sep = ":"), collapse = ";")
 }
@@ -135,9 +146,22 @@ centroid_distance_correlation <- function(x_high, embedding, labels) {
   if (is.null(labels)) return(NA_real_)
   labels <- as.factor(labels)
   if (length(levels(labels)) < 3L) return(NA_real_)
-  high_centers <- do.call(rbind, lapply(levels(labels), function(level) colMeans(x_high[labels == level, , drop = FALSE])))
-  low_centers <- do.call(rbind, lapply(levels(labels), function(level) colMeans(embedding[labels == level, , drop = FALSE])))
-  safe_numeric_cor(stats::dist(high_centers), stats::dist(low_centers), method = "pearson")
+  class_centroid <- function(x, level) {
+    colMeans(x[labels == level, , drop = FALSE])
+  }
+  high_centers <- do.call(
+    rbind,
+    lapply(levels(labels), function(level) class_centroid(x_high, level))
+  )
+  low_centers <- do.call(
+    rbind,
+    lapply(levels(labels), function(level) class_centroid(embedding, level))
+  )
+  safe_numeric_cor(
+    stats::dist(high_centers),
+    stats::dist(low_centers),
+    method = "pearson"
+  )
 }
 
 mean_neighbor_rank_error <- function(high_indices, embed_indices, k) {
@@ -215,7 +239,11 @@ normalize_evaluation_reference <- function(reference_nn, n, max_k) {
     out$backend <- "precomputed"
   }
   out$cache_hit <- isTRUE(reference_nn$cache_hit)
-  out$cache_path <- if (is.null(reference_nn$cache_path)) NA_character_ else as.character(reference_nn$cache_path)
+  out$cache_path <- if (is.null(reference_nn$cache_path)) {
+    NA_character_
+  } else {
+    as.character(reference_nn$cache_path)
+  }
   out
 }
 
@@ -463,12 +491,27 @@ evaluate_embedding <- function(x_high,
                                n.cores = NULL,
                                dataset = NA_character_) {
   n_threads <- n.cores
-  if (!is.matrix(x_high) && !is_float32_matrix(x_high)) x_high <- as.matrix(x_high)
-  if (!is.matrix(embedding) && !is_float32_matrix(embedding)) embedding <- as.matrix(embedding)
-  if (nrow(x_high) != nrow(embedding)) stop("`x_high` and `embedding` must have the same row count.", call. = FALSE)
-  if (nrow(x_high) < 3L) stop("`x_high` must contain at least three rows.", call. = FALSE)
-  if (!is.null(labels) && length(labels) != nrow(x_high)) stop("`labels` must have one entry per row.", call. = FALSE)
-  if (!is.null(batch) && length(batch) != nrow(x_high)) stop("`batch` must have one entry per row.", call. = FALSE)
+  if (!is.matrix(x_high) && !is_float32_matrix(x_high)) {
+    x_high <- as.matrix(x_high)
+  }
+  if (!is.matrix(embedding) && !is_float32_matrix(embedding)) {
+    embedding <- as.matrix(embedding)
+  }
+  if (nrow(x_high) != nrow(embedding)) {
+    stop(
+      "`x_high` and `embedding` must have the same row count.",
+      call. = FALSE
+    )
+  }
+  if (nrow(x_high) < 3L) {
+    stop("`x_high` must contain at least three rows.", call. = FALSE)
+  }
+  if (!is.null(labels) && length(labels) != nrow(x_high)) {
+    stop("`labels` must have one entry per row.", call. = FALSE)
+  }
+  if (!is.null(batch) && length(batch) != nrow(x_high)) {
+    stop("`batch` must have one entry per row.", call. = FALSE)
+  }
 
   requested_k <- as.integer(k)
   requested_k <- requested_k[is.finite(requested_k) & requested_k > 0L]
@@ -514,9 +557,24 @@ evaluate_embedding <- function(x_high,
       "reference_nn_recomputed_for_local_subsample"
     )
   }
-  high_nn <- if (!reference_nn_used) {
-    tryCatch(
-      get_or_compute_evaluation_reference(
+  if (!reference_nn_used) {
+    high_nn_attempt <- capture_error(get_or_compute_evaluation_reference(
+      local_x,
+      max_k = max_k,
+      dataset = dataset,
+      use_cache = use_cache,
+      cache_dir = cache_dir,
+      force_recompute = force_recompute,
+      backend = metric_backend,
+      n_threads = n_threads
+    ))
+    if (!is.na(high_nn_attempt$error)) {
+      metric_backend_reason <- append_metric_backend_reason(
+        metric_backend_reason,
+        high_nn_attempt$error
+      )
+      metric_backend <- "cpu"
+      high_nn <- get_or_compute_evaluation_reference(
         local_x,
         max_k = max_k,
         dataset = dataset,
@@ -525,55 +583,41 @@ evaluate_embedding <- function(x_high,
         force_recompute = force_recompute,
         backend = metric_backend,
         n_threads = n_threads
-      ),
-      error = function(e) {
-        metric_backend_reason <<- append_metric_backend_reason(
-          metric_backend_reason,
-          conditionMessage(e)
-        )
-        metric_backend <<- "cpu"
-        get_or_compute_evaluation_reference(
-          local_x,
-          max_k = max_k,
-          dataset = dataset,
-          use_cache = use_cache,
-          cache_dir = cache_dir,
-          force_recompute = force_recompute,
-          backend = "cpu",
-          n_threads = n_threads
-        )
-      }
-    )
+      )
+    } else {
+      high_nn <- high_nn_attempt$value
+    }
   } else {
-    normalize_evaluation_reference(reference_nn, local_n, max_k)
+    high_nn <- normalize_evaluation_reference(reference_nn, local_n, max_k)
   }
-  embed_nn_raw <- tryCatch(
-    fastembedr_nn_without_self(
+
+  embed_nn_attempt <- capture_error(fastembedr_nn_without_self(
+    local_embedding,
+    k = max_k,
+    backend = metric_backend,
+    method = "auto",
+    metric = "euclidean",
+    n_threads = n_threads,
+    target_recall = 0.99
+  ))
+  if (!is.na(embed_nn_attempt$error)) {
+    metric_backend_reason <- append_metric_backend_reason(
+      metric_backend_reason,
+      embed_nn_attempt$error
+    )
+    metric_backend <- "cpu"
+    embed_nn_raw <- fastembedr_nn_without_self(
       local_embedding,
       k = max_k,
-      backend = metric_backend,
-      method = "auto",
+      backend = "cpu",
+      method = "hnsw",
       metric = "euclidean",
       n_threads = n_threads,
       target_recall = 0.99
-    ),
-    error = function(e) {
-      metric_backend_reason <<- append_metric_backend_reason(
-        metric_backend_reason,
-        conditionMessage(e)
-      )
-      metric_backend <<- "cpu"
-      fastembedr_nn_without_self(
-        local_embedding,
-        k = max_k,
-        backend = "cpu",
-        method = "hnsw",
-        metric = "euclidean",
-        n_threads = n_threads,
-        target_recall = 0.99
-      )
-    }
-  )
+    )
+  } else {
+    embed_nn_raw <- embed_nn_attempt$value
+  }
   embed_nn <- normalize_evaluation_reference(embed_nn_raw, local_n, max_k)
   high_indices <- high_nn$indices
   embed_indices <- embed_nn$indices
@@ -620,7 +664,12 @@ evaluate_embedding <- function(x_high,
   }
   label_knn_accuracy <- NA_real_
   ari <- nmi <- rare_class_recall <- NA_real_
-  per_class_recall <- data.frame(label = character(), n = integer(), recall = numeric(), stringsAsFactors = FALSE)
+  per_class_recall <- data.frame(
+    label = character(),
+    n = integer(),
+    recall = numeric(),
+    stringsAsFactors = FALSE
+  )
   if (!is.null(local_labels_factor) && n_label_levels >= 2L) {
     pred <- classification_from_embedding_nn(embed_indices, local_labels_factor, primary_k)
     label_knn_accuracy <- mean(pred == local_labels_factor, na.rm = TRUE)
@@ -635,7 +684,9 @@ evaluate_embedding <- function(x_high,
   }
 
   batch_metrics <- batch_entropy_metrics(embed_indices, local_batch, primary_k)
-  label_batch_tradeoff <- if (is.finite(label_knn_accuracy) && is.finite(batch_metrics$batch_mixing_score)) {
+  finite_label_batch <- is.finite(label_knn_accuracy) &&
+    is.finite(batch_metrics$batch_mixing_score)
+  label_batch_tradeoff <- if (finite_label_batch) {
     0.5 * label_knn_accuracy + 0.5 * batch_metrics$batch_mixing_score
   } else {
     NA_real_
@@ -648,7 +699,11 @@ evaluate_embedding <- function(x_high,
     metric_backend = metric_backend,
     metric_backend_reason = metric_backend_reason,
     rank_metric_backend = "cpu_exact",
-    high_nn_backend = if (is.null(high_nn$backend)) NA_character_ else as.character(high_nn$backend),
+    high_nn_backend = if (is.null(high_nn$backend)) {
+      NA_character_
+    } else {
+      as.character(high_nn$backend)
+    },
     embedding_nn_backend = knn_backend_label(embed_nn),
     n_threads = as.integer(n_threads),
     seed = as.integer(seed),
@@ -674,7 +729,11 @@ evaluate_embedding <- function(x_high,
     density_sample_size = density$density_sample_size,
     evaluation_reference_supplied_used = reference_nn_used,
     evaluation_reference_cache_hit = isTRUE(high_nn$cache_hit),
-    evaluation_reference_cache_path = if (is.null(high_nn$cache_path)) NA_character_ else as.character(high_nn$cache_path),
+    evaluation_reference_cache_path = if (is.null(high_nn$cache_path)) {
+      NA_character_
+    } else {
+      as.character(high_nn$cache_path)
+    },
     centroid_distance_correlation = centroid_distance_correlation(
       local_x,
       local_embedding,

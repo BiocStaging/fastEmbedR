@@ -170,7 +170,7 @@ fixed_embedding_knn_backend <- function(backend) {
 }
 
 cpu_summary <- function() {
-  cores <- suppressWarnings(parallel::detectCores(logical = TRUE))
+  cores <- parallel::detectCores(logical = TRUE)
   if (length(cores) != 1L || is.na(cores) || !is.finite(cores)) {
     "CPU"
   } else {

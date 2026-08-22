@@ -91,8 +91,12 @@ fastembedr_knn_output_type <- function(data, backend) {
 }
 
 knn_index_base <- function(indices, n = nrow(indices)) {
-  min_idx <- suppressWarnings(min(indices, na.rm = TRUE))
-  max_idx <- suppressWarnings(max(indices, na.rm = TRUE))
+  observed <- indices[!is.na(indices)]
+  if (!length(observed)) {
+    return("zero")
+  }
+  min_idx <- min(observed)
+  max_idx <- max(observed)
   if (is.finite(min_idx) && is.finite(max_idx) && min_idx >= 1L && max_idx <= n) {
     return("one")
   }
@@ -162,7 +166,10 @@ strip_self_neighbors <- function(indices, distances) {
   )
 }
 
-materialize_knn_range <- function(indices, distances, col_start = 0L, n_neighbors = ncol(indices) - col_start) {
+materialize_knn_range <- function(indices,
+                                  distances,
+                                  col_start = 0L,
+                                  n_neighbors = ncol(indices) - col_start) {
   col_start <- as.integer(col_start)
   n_neighbors <- as.integer(n_neighbors)
   if (col_start == 0L && n_neighbors == ncol(indices)) {
@@ -216,7 +223,11 @@ finalize_embedding_layout <- function(layout, prefix, return_float32 = FALSE) {
 
 validate_n_components <- function(n_components) {
   n_components <- as.integer(n_components)
-  if (length(n_components) != 1L || is.na(n_components) || !is.finite(n_components) || n_components < 1L) {
+  invalid <- length(n_components) != 1L ||
+    is.na(n_components) ||
+    !is.finite(n_components) ||
+    n_components < 1L
+  if (invalid) {
     stop("`n_components` must be a positive integer.", call. = FALSE)
   }
   n_components

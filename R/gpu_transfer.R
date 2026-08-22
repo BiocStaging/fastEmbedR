@@ -95,14 +95,26 @@ gpu_transfer_plan_knn_optimizer <- function(backend,
 
   note <- if (identical(backend, "cuda")) {
     if (isTRUE(init_on_device) && identical(objective, "umap")) {
-      "CUDA fused UMAP uploads KNN once, computes spectral initialization and CSR graph on device, and returns only the final embedding."
+      paste(
+        "CUDA fused UMAP uploads KNN once, computes spectral initialization",
+        "and CSR graph on device, and returns only the final embedding."
+      )
     } else if (identical(objective, "umap")) {
-      "CUDA uploads KNN and initialization once for optimization; CSR graph offsets and weights stay on device."
+      paste(
+        "CUDA uploads KNN and initialization once for optimization;",
+        "CSR graph offsets and weights stay on device."
+      )
     } else {
-      "CUDA uploads KNN and initialization once for optimization and returns only the final embedding."
+      paste(
+        "CUDA uploads KNN and initialization once for optimization",
+        "and returns only the final embedding."
+      )
     }
   } else {
-    "Metal uses shared Metal buffers; graph preparation is CPU-side unless explicitly reported otherwise."
+    paste(
+      "Metal uses shared Metal buffers; graph preparation is CPU-side",
+      "unless explicitly reported otherwise."
+    )
   }
 
   list(

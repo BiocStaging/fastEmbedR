@@ -1,6 +1,57 @@
 cache_file <- function(cache_dir, prefix, dataset, n, p, key) {
   safe_dataset <- gsub("[^A-Za-z0-9_.-]+", "_", dataset)
-  file.path(cache_dir, sprintf("%s_%s_n%s_p%s_%s.rds", prefix, safe_dataset, n, p, key))
+  filename <- sprintf(
+    "%s_%s_n%s_p%s_%s.rds",
+    prefix,
+    safe_dataset,
+    n,
+    p,
+    key
+  )
+  file.path(cache_dir, filename)
+}
+
+capture_error <- function(expr) {
+  tryCatch(
+    list(value = force(expr), error = NA_character_),
+    error = function(e) {
+      list(value = NULL, error = conditionMessage(e))
+    }
+  )
+}
+
+numeric_scalar <- function(x, default = NA_real_) {
+  if (length(x) != 1L || is.na(x)) {
+    return(default)
+  }
+  if (is.factor(x)) {
+    x <- as.character(x)
+  }
+  if (is.numeric(x) || is.logical(x)) {
+    return(as.numeric(x))
+  }
+  if (!is.character(x)) {
+    return(default)
+  }
+  value <- trimws(x)
+  numeric_pattern <- paste0(
+    "^[+-]?(?:(?:[0-9]+(?:\\.[0-9]*)?)|(?:\\.[0-9]+))",
+    "(?:[eE][+-]?[0-9]+)?$"
+  )
+  if (!grepl(numeric_pattern, value, perl = TRUE)) {
+    return(default)
+  }
+  as.numeric(value)
+}
+
+integer_scalar <- function(x, default = NA_integer_) {
+  value <- numeric_scalar(x)
+  if (!is.finite(value) ||
+      value < -.Machine$integer.max - 1 ||
+      value > .Machine$integer.max) {
+    return(default)
+  }
+  as.integer(value)
 }
 
 set_local_seed <- function(seed) {

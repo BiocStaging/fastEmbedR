@@ -49,53 +49,40 @@ fast_knn_umap_core <- function(indices,
                                n_epochs = NULL,
                                config_override = NULL,
                                graph_mode = c("fuzzy", "binary")) {
-  if (inherits(indices, "fastEmbedR_umap_initialization")) {
-    if (!is.null(distances)) {
-      stop(
-        "Do not pass `distances` when `indices` is a UMAP initialization object.",
-        call. = FALSE
-      )
-    }
-    prepared <- indices$prepared
-    prepared$initialization <- indices$layout
-    prepared$initialization_parameters <- indices$parameters
-    return(fast_knn_umap_prepared_core(
-      prepared,
-      n_components = n_components,
-      seed = seed,
-      verbose = verbose,
-      backend = backend,
-      n_threads = n_threads,
-      n_epochs = n_epochs
-    ))
+  prepared <- dispatch_prepared_umap_input(
+    indices,
+    distances,
+    n_components,
+    seed,
+    verbose,
+    backend,
+    n_threads,
+    n_epochs
+  )
+  if (isTRUE(prepared$handled)) {
+    return(prepared$layout)
   }
-  if (inherits(indices, "fastEmbedR_umap_prepared")) {
-    if (!is.null(distances)) {
-      stop("Do not pass `distances` when `indices` is a prepared UMAP object.", call. = FALSE)
-    }
-    return(fast_knn_umap_prepared_core(
-      indices,
-      n_components = n_components,
-      seed = seed,
-      verbose = verbose,
-      backend = backend,
-      n_threads = n_threads,
-      n_epochs = n_epochs
-    ))
-  }
+
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
   if (fastembedr_is_gpu_knn(indices)) {
-    indices <- fastembedr_as_gpu_knn(indices)
+    gpu_knn <- fastembedr_as_gpu_knn(indices)
     if (!is.null(distances)) {
-      stop("Do not pass `distances` when `indices` is a GPU-resident KNN object.", call. = FALSE)
+      stop(
+        "Do not pass `distances` when `indices` is a GPU-resident KNN object.",
+        call. = FALSE
+      )
     }
     if (!identical(backend, "cuda")) {
-      stop("GPU-resident KNN input is currently supported only with `backend = \"cuda\"`.", call. = FALSE)
+      stop(
+        "GPU-resident KNN input is currently supported only with ",
+        "`backend = \"cuda\"`.",
+        call. = FALSE
+      )
     }
     return(fast_knn_umap_cuda_gpu_core(
-      indices,
+      gpu_knn,
       n_components = n_components,
       seed = seed,
       verbose = verbose,
@@ -105,451 +92,42 @@ fast_knn_umap_core <- function(indices,
       graph_mode = graph_mode
     ))
   }
+
   knn <- coerce_knn_input(indices, distances)
   indices <- knn$indices
   distances <- knn$distances
-
-	  cfg <- fast_knn_umap_config(
-	    n = nrow(indices),
-	    k = knn$n_neighbors,
-	    backend = backend
-	  )
-	  auto_policy <- tryCatch(
-	    {
-	      policy_distances <- if (knn$col_start != 0L || knn$n_neighbors != ncol(distances)) {
-	        materialize_knn_range(indices, distances, knn$col_start, knn$n_neighbors)$distances
-	      } else {
-	        distances
-	      }
-	      if (is_float32_matrix(policy_distances)) {
-	        stop("float32 KNN auto-policy uses default parameters", call. = FALSE)
-	      }
-	      umap_auto_parameters_cpp(
-	        policy_distances,
-	        as.integer(knn$n_neighbors),
-	        as.character(cfg$backend)
-	      )
-	    },
-	    error = function(e) {
-	      list(error = conditionMessage(e))
-	    }
-	  )
-	  if (is.null(auto_policy$error)) {
-	    cfg$n_epochs <- as.integer(auto_policy$n_epochs)
-	    cfg$min_dist <- as.numeric(auto_policy$min_dist)
-	    cfg$negative_sample_rate <- as.integer(auto_policy$negative_sample_rate)
-	    cfg$learning_rate <- as.numeric(auto_policy$learning_rate)
-	    cfg$spectral_n_iter <- as.integer(auto_policy$spectral_n_iter)
-	    cfg$init_scale <- as.numeric(auto_policy$init_scale)
-	    cfg$auto_parameter_backend <- "cpp_knn_distance_profile"
-	    cfg$auto_parameter_rule <- as.character(auto_policy$rule)
-	    cfg$knn_distance_cv <- as.numeric(auto_policy$knn_distance_cv)
-	    cfg$knn_distance_ratio_30_15 <- as.numeric(auto_policy$knn_distance_ratio_30_15)
-	    cfg$knn_distance_ratio_50_15 <- as.numeric(auto_policy$knn_distance_ratio_50_15)
-	  } else {
-	    cfg$auto_parameter_backend <- "r_size_rule_fallback"
-	    cfg$auto_parameter_error <- auto_policy$error
-	  }
-	  if (!is.null(n_threads)) {
-    n_threads <- as.integer(n_threads)
-    if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
-      stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
-    }
-    cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
-  }
-  cfg$input_had_self <- isTRUE(knn$has_self)
-  cfg$knn_col_start <- as.integer(knn$col_start)
-  cfg$knn_n_neighbors <- as.integer(knn$n_neighbors)
-  cfg$knn_materialized <- isTRUE(knn$materialized)
-  cfg$knn_backend <- knn$input_backend
-  cfg$graph_mode <- graph_mode
-  cfg$sgd_loop <- "csr_float32_contiguous_inplace"
-  if (!is.null(n_epochs)) {
-    cfg$n_epochs <- validate_epoch_count(n_epochs)
-    cfg$preset <- "internal_epoch_override"
-    cfg$epoch_source <- "internal_override"
-  }
-  cfg <- apply_umap_connectivity_spectral_rule(
-    cfg,
-    indices,
-    col_start = knn$col_start,
-    n_neighbors = knn$n_neighbors
-  )
-  if (fast_knn_umap_should_auto_pilot(
-    cfg = cfg,
-    indices = indices,
-    config_override = config_override,
-    n_epochs = n_epochs
-  )) {
-    pilot <- tryCatch(
-      auto_umap_knn_pilot_tune(
-        indices,
-        distances,
-        seed = seed,
-        full_n = nrow(indices),
-        pilot_min_n = fast_knn_umap_auto_pilot_min_n(),
-        pilot_max_n = fast_knn_umap_auto_pilot_max_n(),
-        pilot_max_configs = fast_knn_umap_auto_pilot_max_configs(),
-        use_cache = fast_knn_umap_auto_pilot_use_cache(),
-        cache_dir = getOption("fastEmbedR.knn_pilot_cache_dir", NULL),
-        force_recompute = isTRUE(getOption("fastEmbedR.knn_pilot_force_recompute", FALSE))
-      ),
-      error = function(e) {
-        list(status = "failed", reason = conditionMessage(e))
-      }
-    )
-    cfg$auto_knn_pilot_status <- pilot$status
-    cfg$auto_knn_pilot_reason <- pilot$reason
-    if (identical(pilot$status, "success") && !is.null(pilot$config_override)) {
-      cfg <- apply_fast_knn_umap_config_override(cfg, pilot$config_override)
-    }
-  } else {
-    cfg$auto_knn_pilot_status <- "skipped"
-    cfg$auto_knn_pilot_reason <- fast_knn_umap_auto_pilot_skip_reason(
-      cfg = cfg,
-      indices = indices,
-      config_override = config_override,
-      n_epochs = n_epochs
-    )
-  }
-  cfg <- apply_fast_knn_umap_config_override(cfg, config_override)
-
-  if (cfg$backend %in% c("cuda", "metal")) {
-    if (knn$col_start != 0L || knn$n_neighbors != ncol(indices)) {
-      gpu_knn <- materialize_knn_range(indices, distances, knn$col_start, knn$n_neighbors)
-      indices <- gpu_knn$indices
-      distances <- gpu_knn$distances
-      cfg$knn_materialized_for_gpu <- TRUE
-      cfg$knn_col_start <- 0L
-      cfg$knn_n_neighbors <- ncol(indices)
-    } else {
-      cfg$knn_materialized_for_gpu <- FALSE
-    }
-    if (n_components != 2L) {
-      stop("Native GPU embedding backends currently support only `n_components = 2`.", call. = FALSE)
-    }
-    gpu_backend <- cfg$backend
-    cfg$gpu_transfer_policy <- "single_upload_optimizer"
-    use_fused_cuda_umap <- FALSE
-    cfg$gpu_optimizer_mode <- if (identical(gpu_backend, "metal")) {
-      "clean_linear_atomic_inplace"
-    } else {
-      "atomic_coo"
-    }
-    cfg$gpu_optimizer_update_rule <- if (gpu_backend == "metal") {
-      "native_metal_csr_clean_linear_atomic_inplace_edge_update"
-    } else {
-      "native_cuda_atomic_coo_umap_schedule"
-    }
-    cfg$gpu_optimizer_schedule <- if (gpu_backend == "metal") {
-      "clean_edge_probability_linear_decay"
-    } else {
-      "coo_epochs_per_sample"
-    }
-    cfg$gpu_epochs_per_command <- if (gpu_backend == "metal") 64L else NA_integer_
-    init <- NULL
-    if (isTRUE(use_fused_cuda_umap)) {
-      cfg$init_backend <- "cuda_fused_spectral"
-      cfg$init_backend_reason <- "CUDA fused UMAP uploads KNN once, computes spectral initialization on device, keeps graph/layout on device, and returns only the final layout."
-    } else if (!identical(graph_mode, "binary")) {
-      init_distances <- if (is_float32_matrix(distances)) {
-        matrix(
-          as.numeric(distances),
-          nrow = nrow(indices),
-          ncol = ncol(indices)
-        )
-      } else {
-        distances
-      }
-      init <- spectral_knn_init(
-        indices,
-        init_distances,
-        n_components = 2L,
-        min_dist = cfg$min_dist,
-        spectral_n_iter = cfg$spectral_n_iter,
-        seed = seed,
-        backend = "cpu",
-        n_threads = cfg$n_threads
-      )
-      init <- scale_embedding_sdev_r(init, cfg$init_scale)
-      cfg$init_backend <- attr(init, "backend")
-      cfg$init_backend_reason <- "CPU initialization avoids a separate GPU init round trip; the native optimizer uploads KNN and init once."
-    } else {
-      cfg$init_backend <- "pending_binary_csr"
-      cfg$init_backend_reason <- "Binary UMAP initializes from the same unit-weight CSR graph used by the optimizer."
-    }
-    cfg$graph_prep_backend <- if (gpu_backend == "cuda" && isTRUE(use_fused_cuda_umap)) {
-      "cuda_fused_fuzzy_float32_coo"
-    } else if (identical(graph_mode, "binary")) {
-      "cpu_binary_csr"
-    } else {
-      "cpu_fuzzy_csr"
-    }
-    cfg$graph_storage <- if (gpu_backend == "cuda" && isTRUE(use_fused_cuda_umap)) {
-      "native_cuda_fuzzy_float32_coo_fused"
-    } else if (gpu_backend == "cuda") {
-      "cpu_csr_uploaded_to_cuda"
-    } else {
-      "cpu_csr_packed_to_metal"
-    }
-    cfg$gpu_initial_backend <- gpu_backend
-    cfg$optimizer_backend <- gpu_backend
-    cfg <- add_gpu_transfer_metadata(
-      cfg,
-      indices,
-      distances,
-      init = init,
-      n = nrow(indices),
-      n_components = 2L,
-      objective = "umap"
-    )
-    cfg$backend <- cfg$optimizer_backend
-    cfg$gpu_umap_path <- if (identical(gpu_backend, "cuda") && isTRUE(use_fused_cuda_umap)) {
-      "cuda_fuzzy_float32_atomic"
-    } else if (identical(gpu_backend, "cuda")) {
-      "cuda_fuzzy_graph_atomic"
-    } else {
-      "metal_atomic_inplace"
-    }
-    cfg$gpu_initial_epochs <- as.integer(cfg$n_epochs)
-    layout <- if (isTRUE(use_fused_cuda_umap)) {
-      knn_umap_cuda_fused_float_cpp(
-        indices,
-        distances,
-        as.integer(cfg$n_epochs),
-        as.integer(cfg$negative_sample_rate),
-        cfg$learning_rate,
-        cfg$min_dist,
-        cfg$repulsion_strength,
-        as.integer(cfg$spectral_n_iter),
-        as.integer(seed),
-        0L
-      )
-    } else if (identical(gpu_backend, "metal")) {
-      graph <- umap_build_csr_graph(
-        indices,
-        distances,
-        0L,
-        as.integer(ncol(indices)),
-        as.integer(ncol(indices)),
-        as.integer(cfg$n_threads),
-        graph_mode = graph_mode
-      )
-      if (is.null(init)) {
-        init <- umap_init_from_csr_graph(
-          graph,
-          n_components = 2L,
-          cfg = cfg,
-          seed = seed,
-          verbose = FALSE
-        )
-        cfg$init_backend <- attr(init, "backend")
-      }
-      cfg$graph_nnz <- as.integer(graph$nnz)
-      cfg$graph_max_weight <- as.numeric(graph$max_weight)
-      cfg$graph_cuda_like_width <- graph$cuda_like_width
-      cfg$graph_builder <- graph$graph_builder
-      out <- knn_embed_metal_csr_cpp(
-        graph$offsets,
-        graph$neighbors,
-        graph$weights,
-        init,
-        as.integer(cfg$n_epochs),
-        as.integer(cfg$negative_sample_rate),
-        cfg$learning_rate,
-        cfg$min_dist,
-        as.numeric(graph$max_weight),
-        cfg$repulsion_strength,
-        as.integer(seed),
-        1L
-      )
-      cfg$metal_graph_input <- attr(out, "metal_graph_input")
-      cfg$metal_csr_width <- attr(out, "metal_csr_width")
-      cfg$metal_truncated_edges <- attr(out, "metal_truncated_edges")
-      out
-    } else if (identical(gpu_backend, "cuda")) {
-      graph <- umap_build_csr_graph(
-        indices,
-        distances,
-        0L,
-        as.integer(ncol(indices)),
-        as.integer(ncol(indices)),
-        as.integer(cfg$n_threads),
-        graph_mode = graph_mode
-      )
-      if (is.null(init)) {
-        init <- umap_init_from_csr_graph(
-          graph,
-          n_components = 2L,
-          cfg = cfg,
-          seed = seed,
-          verbose = FALSE
-        )
-        cfg$init_backend <- attr(init, "backend")
-      }
-      cfg$graph_nnz <- as.integer(graph$nnz)
-      cfg$graph_max_weight <- as.numeric(graph$max_weight)
-      cfg$graph_cuda_like_width <- graph$cuda_like_width
-      cfg$graph_builder <- graph$graph_builder
-      umap_cuda_optimize_csr_cpp(
-        graph$offsets,
-        graph$neighbors,
-        graph$weights,
-        graph$epochs_per_sample,
-        init,
-        as.integer(cfg$n_epochs),
-        as.integer(cfg$negative_sample_rate),
-        cfg$learning_rate,
-        cfg$min_dist,
-        cfg$repulsion_strength,
-        as.integer(seed),
-        0L
-      )
-    } else {
-      run_native_knn_optimizer(
-        gpu_backend,
-        indices,
-        distances,
-        init,
-        "umap",
-        cfg$n_epochs,
-        cfg$negative_sample_rate,
-        cfg$learning_rate,
-        min_dist = cfg$min_dist,
-        seed = seed
-      )
-    }
-    layout <- finalize_embedding_layout(
-      layout,
-      "UMAP",
-      return_float32 = is_float32_matrix(distances)
-    )
-    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
-    return(layout)
-  }
-
-  cfg$graph_prep_backend <- "cpu"
-  if (n_components != 2L) {
-    cfg <- add_gpu_transfer_metadata(
-      cfg,
-      indices,
-      distances,
-      n = nrow(indices),
-      n_components = n_components,
-      objective = "umap"
-    )
-    cfg$init_backend <- "cpu"
-    cfg$optimizer_mode <- "legacy_range_optimizer_non_2d"
-    layout <- fast_knn_umap_range_cpp(
-      indices, distances, as.integer(knn$col_start), as.integer(knn$n_neighbors),
-      n_components, as.integer(cfg$n_epochs),
-      cfg$min_dist, as.integer(cfg$negative_sample_rate), cfg$learning_rate,
-      cfg$repulsion_strength, as.integer(cfg$spectral_n_iter), as.integer(cfg$n_threads),
-      cfg$init_scale, as.integer(seed), isTRUE(verbose)
-    )
-    layout <- finalize_embedding_layout(
-      layout,
-      "UMAP",
-      return_float32 = is_float32_matrix(distances)
-    )
-    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
-    return(layout)
-  }
-
-  if (identical(graph_mode, "binary")) {
-    graph <- umap_build_csr_graph(
-      indices,
-      distances,
-      as.integer(knn$col_start),
-      as.integer(knn$n_neighbors),
-      as.integer(knn$n_neighbors),
-      as.integer(cfg$n_threads),
-      graph_mode = graph_mode
-    )
-    init <- umap_init_from_csr_graph(
-      graph,
-      n_components = n_components,
-      cfg = cfg,
-      seed = seed,
-      verbose = FALSE
-    )
-    cfg$graph_prep_backend <- "cpu_binary_csr"
-    cfg$graph_storage <- "cpu_binary_csr"
-    cfg$graph_nnz <- as.integer(graph$nnz)
-    cfg$graph_max_weight <- as.numeric(graph$max_weight)
-    cfg$graph_cuda_like_width <- graph$cuda_like_width
-    cfg$graph_builder <- graph$graph_builder
-    cfg$init_backend <- attr(init, "backend")
-    cfg$optimizer_mode <- "csr_epoch_schedule"
-    cfg$optimizer_schedule <- "epochs_per_sample_binary_csr"
-    layout <- fast_knn_umap_csr_init_cpp(
-      graph$offsets,
-      graph$neighbors,
-      graph$weights,
-      init,
-      as.integer(cfg$n_epochs),
-      cfg$min_dist,
-      as.integer(cfg$negative_sample_rate),
-      cfg$learning_rate,
-      cfg$repulsion_strength,
-      as.integer(cfg$n_threads),
-      as.integer(seed),
-      isTRUE(verbose)
-    )
-    layout <- finalize_embedding_layout(
-      layout,
-      "UMAP",
-      return_float32 = is_float32_matrix(distances)
-    )
-    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
-    return(layout)
-  }
-  graph <- umap_build_csr_graph(
+  cfg <- configure_host_knn_umap(
     indices,
     distances,
-    as.integer(knn$col_start),
-    as.integer(knn$n_neighbors),
-    as.integer(knn$n_neighbors),
-    as.integer(cfg$n_threads),
-    graph_mode = graph_mode
+    knn,
+    backend,
+    n_threads,
+    n_epochs,
+    config_override,
+    graph_mode,
+    seed
   )
-  init <- umap_init_from_csr_graph(
-    graph,
-    n_components = n_components,
-    cfg = cfg,
-    seed = seed,
-    verbose = FALSE
+  if (cfg$backend %in% c("cuda", "metal")) {
+    return(run_umap_gpu_host_knn(
+      indices,
+      distances,
+      knn,
+      cfg,
+      n_components,
+      graph_mode,
+      seed
+    ))
+  }
+  run_umap_cpu_host_knn(
+    indices,
+    distances,
+    knn,
+    cfg,
+    n_components,
+    graph_mode,
+    seed,
+    verbose
   )
-  cfg$graph_prep_backend <- "cpu_fuzzy_csr"
-  cfg$graph_storage <- "cpu_fuzzy_csr"
-  cfg$graph_nnz <- as.integer(graph$nnz)
-  cfg$graph_max_weight <- as.numeric(graph$max_weight)
-  cfg$graph_cuda_like_width <- graph$cuda_like_width
-  cfg$graph_builder <- graph$graph_builder
-  cfg$init_backend <- attr(init, "backend")
-  cfg$optimizer_mode <- "csr_epoch_schedule"
-  cfg$optimizer_schedule <- "epochs_per_sample_fuzzy_csr"
-  layout <- fast_knn_umap_csr_init_cpp(
-    graph$offsets,
-    graph$neighbors,
-    graph$weights,
-    init,
-    as.integer(cfg$n_epochs),
-    cfg$min_dist,
-    as.integer(cfg$negative_sample_rate),
-    cfg$learning_rate,
-    cfg$repulsion_strength,
-    as.integer(cfg$n_threads),
-    as.integer(seed),
-    isTRUE(verbose)
-  )
-  layout <- finalize_embedding_layout(
-    layout,
-    "UMAP",
-    return_float32 = is_float32_matrix(distances)
-  )
-  attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
-  layout
 }
 
 fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
@@ -579,10 +157,17 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
     backend = "cuda"
   )
   cfg$auto_parameter_backend <- "r_size_rule_gpu_resident_knn"
-  cfg$auto_parameter_reason <- "KNN distances stay on the CUDA device; host distance profiling is skipped."
+  cfg$auto_parameter_reason <- paste(
+    "KNN distances stay on the CUDA device;",
+    "host distance profiling is skipped."
+  )
   if (!is.null(n_threads)) {
     n_threads <- as.integer(n_threads)
-    if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
+    invalid_threads <- length(n_threads) != 1L ||
+      is.na(n_threads) ||
+      !is.finite(n_threads) ||
+      n_threads < 1L
+    if (invalid_threads) {
       stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
     }
     cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
@@ -616,7 +201,10 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
   cfg$gpu_initial_backend <- "cuda"
   cfg$optimizer_backend <- "cuda"
   cfg$init_backend <- "cuda_fused_diffusion"
-  cfg$init_backend_reason <- "CUDA UMAP consumes native cuVS GPU KNN pointers, builds the graph/schedule, initializes, and optimizes on device."
+  cfg$init_backend_reason <- paste(
+    "CUDA UMAP consumes native cuVS GPU KNN pointers, builds the",
+    "graph/schedule, initializes, and optimizes on device."
+  )
   cfg$gpu_umap_path <- if (identical(graph_mode, "binary")) {
     "cuda_gpu_knn_binary_float32_atomic"
   } else {
@@ -626,7 +214,11 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
   cfg$verbose <- isTRUE(verbose)
 
   if (!embedding_cuda_available_cpp()) {
-    stop("Native CUDA UMAP optimizer was requested, but it is not available in this build.", call. = FALSE)
+    stop(
+      "Native CUDA UMAP optimizer was requested, ",
+      "but it is not available in this build.",
+      call. = FALSE
+    )
   }
   layout <- knn_umap_cuda_fused_gpu_cpp(
     gpu_knn,
@@ -748,7 +340,11 @@ prepare_umap_knn <- function(indices,
     as.integer(cfg$n_threads),
     graph_mode = graph_mode
   )
-  cfg$graph_prep_backend <- if (identical(graph_mode, "binary")) "cpu_binary_csr" else "cpu_fuzzy_csr"
+  cfg$graph_prep_backend <- if (identical(graph_mode, "binary")) {
+    "cpu_binary_csr"
+  } else {
+    "cpu_fuzzy_csr"
+  }
   cfg$graph_storage <- cfg$graph_prep_backend
   cfg$graph_nnz <- as.integer(graph$nnz)
   cfg$graph_max_weight <- as.numeric(graph$max_weight)
@@ -857,7 +453,11 @@ fast_knn_umap_prepared_core <- function(prepared,
 
   layout <- if (identical(backend, "metal")) {
     if (!embedding_metal_available_cpp()) {
-      stop("Native Metal UMAP optimizer was requested, but it is not available in this build.", call. = FALSE)
+      stop(
+        "Native Metal UMAP optimizer was requested, ",
+        "but it is not available in this build.",
+        call. = FALSE
+      )
     }
     out <- knn_embed_metal_csr_cpp(
       graph$offsets,
@@ -879,7 +479,11 @@ fast_knn_umap_prepared_core <- function(prepared,
     out
   } else if (identical(backend, "cuda")) {
     if (!embedding_cuda_available_cpp()) {
-      stop("Native CUDA UMAP optimizer was requested, but it is not available in this build.", call. = FALSE)
+      stop(
+        "Native CUDA UMAP optimizer was requested, ",
+        "but it is not available in this build.",
+        call. = FALSE
+      )
     }
     umap_cuda_optimize_csr_cpp(
       graph$offsets,
@@ -1044,7 +648,9 @@ apply_fast_knn_umap_config_override <- function(cfg, override) {
   }
   if (!is.null(override$init_scale)) {
     init_scale <- as.numeric(override$init_scale)
-    if (length(init_scale) != 1L || (!is.na(init_scale) && (!is.finite(init_scale) || init_scale <= 0))) {
+    invalid_scale <- length(init_scale) != 1L ||
+      (!is.na(init_scale) && (!is.finite(init_scale) || init_scale <= 0))
+    if (invalid_scale) {
       stop("`init_scale` override must be NA or a positive finite number.", call. = FALSE)
     }
     cfg$init_scale <- init_scale
@@ -1081,7 +687,10 @@ apply_fast_knn_umap_config_override <- function(cfg, override) {
   }
   if (!is.null(override$repulsion_strength)) {
     repulsion_strength <- as.numeric(override$repulsion_strength)
-    if (length(repulsion_strength) != 1L || !is.finite(repulsion_strength) || repulsion_strength <= 0) {
+    invalid_repulsion <- length(repulsion_strength) != 1L ||
+      !is.finite(repulsion_strength) ||
+      repulsion_strength <= 0
+    if (invalid_repulsion) {
       stop("`repulsion_strength` override must be a positive finite number.", call. = FALSE)
     }
     cfg$repulsion_strength <- repulsion_strength
@@ -1131,17 +740,28 @@ fast_knn_umap_auto_pilot_skip_reason <- function(cfg,
                                                  n_epochs = NULL) {
   if (!is.null(config_override)) return("explicit config override supplied")
   if (!is.null(n_epochs)) return("explicit epoch override supplied")
-  if (!identical(cfg$backend, "cpu")) return("auto KNN pilot currently runs only on the CPU optimizer path")
-  if (!cfg$epoch_source %in% c("clean_large_default")) return("default is not the clean atomic UMAP path")
-  if (!isTRUE(getOption("fastEmbedR.knn_pilot", FALSE))) return("disabled by default; set option fastEmbedR.knn_pilot = TRUE for internal benchmarking")
-  if (nrow(indices) < fast_knn_umap_auto_pilot_min_n()) return("below auto KNN pilot size threshold")
+  if (!identical(cfg$backend, "cpu")) {
+    return("auto KNN pilot currently runs only on the CPU optimizer path")
+  }
+  if (!cfg$epoch_source %in% c("clean_large_default")) {
+    return("default is not the clean atomic UMAP path")
+  }
+  if (!isTRUE(getOption("fastEmbedR.knn_pilot", FALSE))) {
+    return(paste(
+      "disabled by default; set option fastEmbedR.knn_pilot = TRUE",
+      "for internal benchmarking"
+    ))
+  }
+  if (nrow(indices) < fast_knn_umap_auto_pilot_min_n()) {
+    return("below auto KNN pilot size threshold")
+  }
   if (ncol(indices) < 10L) return("too few supplied neighbors for a stable pilot")
   "not selected"
 }
 
 fast_knn_umap_auto_pilot_min_n <- function() {
   value <- getOption("fastEmbedR.knn_pilot_min_n", 20000L)
-  value <- suppressWarnings(as.integer(value))
+  value <- integer_scalar(value)
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 50L) {
     return(20000L)
   }
@@ -1150,7 +770,7 @@ fast_knn_umap_auto_pilot_min_n <- function() {
 
 fast_knn_umap_auto_pilot_max_n <- function() {
   value <- getOption("fastEmbedR.knn_pilot_max_n", 2500L)
-  value <- suppressWarnings(as.integer(value))
+  value <- integer_scalar(value)
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 50L) {
     return(2500L)
   }
@@ -1159,7 +779,7 @@ fast_knn_umap_auto_pilot_max_n <- function() {
 
 fast_knn_umap_auto_pilot_max_configs <- function() {
   value <- getOption("fastEmbedR.knn_pilot_max_configs", 4L)
-  value <- suppressWarnings(as.integer(value))
+  value <- integer_scalar(value)
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 1L) {
     return(4L)
   }
@@ -1172,7 +792,11 @@ fast_knn_umap_auto_pilot_use_cache <- function() {
 
 scale_embedding_sdev_r <- function(embedding, target_sdev) {
   target_sdev <- as.numeric(target_sdev)
-  if (length(target_sdev) != 1L || is.na(target_sdev) || !is.finite(target_sdev) || target_sdev <= 0) {
+  invalid_sdev <- length(target_sdev) != 1L ||
+    is.na(target_sdev) ||
+    !is.finite(target_sdev) ||
+    target_sdev <= 0
+  if (invalid_sdev) {
     return(embedding)
   }
   if (nrow(embedding) < 2L) {
@@ -1222,7 +846,7 @@ fast_knn_umap_config <- function(n,
   }
   repulsion_strength <- 1
   learning_rate <- 1
-  cores <- suppressWarnings(parallel::detectCores(logical = FALSE))
+  cores <- parallel::detectCores(logical = FALSE)
   if (length(cores) != 1L || is.na(cores) || !is.finite(cores)) cores <- 1L
   thread_cap <- if (very_large) {
     4L
@@ -1452,7 +1076,7 @@ spectral_knn_init <- function(indices,
   if (is.null(n_neighbors)) n_neighbors <- ncol(indices) - col_start
   n_neighbors <- as.integer(n_neighbors)
   if (is.null(n_threads)) {
-    cores <- suppressWarnings(parallel::detectCores(logical = FALSE))
+    cores <- parallel::detectCores(logical = FALSE)
     if (length(cores) != 1L || is.na(cores) || !is.finite(cores)) cores <- 1L
     n_threads <- max(1L, min(4L, as.integer(cores)))
   } else {
@@ -1474,7 +1098,11 @@ spectral_knn_init <- function(indices,
       stop("CUDA spectral initialization is not available on this system.", call. = FALSE)
     }
     if (as.integer(n_components) != 2L) {
-      stop("CUDA spectral initialization currently supports only `n_components = 2`.", call. = FALSE)
+      stop(
+        "CUDA spectral initialization currently supports only ",
+        "`n_components = 2`.",
+        call. = FALSE
+      )
     }
     out <- spectral_knn_init_cuda_cpp(
       indices,
@@ -1498,7 +1126,11 @@ spectral_knn_init <- function(indices,
       stop("Metal spectral initialization is not available on this system.", call. = FALSE)
     }
     if (as.integer(n_components) != 2L) {
-      stop("Metal spectral initialization currently supports only `n_components = 2`.", call. = FALSE)
+      stop(
+        "Metal spectral initialization currently supports only ",
+        "`n_components = 2`.",
+        call. = FALSE
+      )
     }
     out <- spectral_knn_init_metal_cpp(
       indices,

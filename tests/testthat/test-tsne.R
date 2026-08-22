@@ -248,7 +248,7 @@ test_that("openTSNE GPU optimizers are native and fail clearly when unavailable"
         perplexity = 3,
         early_exaggeration_iter = 1L,
         n_iter = 1L,
-      backend = "metal"
+        backend = "metal"
       ),
       "Native Metal openTSNE optimizer was requested",
       fixed = TRUE

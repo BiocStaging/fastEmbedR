@@ -44,7 +44,7 @@ opentsne_neighbor_policy <- function(n, perplexity = NULL, available = NULL) {
     }
     return(list(perplexity = NULL, n_neighbors = as.integer(n_neighbors)))
   } else {
-    perplexity <- suppressWarnings(as.numeric(perplexity))
+    perplexity <- numeric_scalar(perplexity)
     if (length(perplexity) != 1L || is.na(perplexity) ||
         !is.finite(perplexity) || perplexity <= 0) {
       stop("`perplexity` must be a positive finite number.", call. = FALSE)
@@ -131,7 +131,7 @@ resolve_opentsne_auto_parameters <- function(n,
 
 default_tsne_threads <- function() {
   value <- getOption("fastEmbedR.tsne_threads", 4L)
-  value <- suppressWarnings(as.integer(value))
+  value <- integer_scalar(value)
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 0L) {
     return(4L)
   }
@@ -253,7 +253,7 @@ normalize_opentsne_learning_rate <- function(learning_rate) {
       return(list(auto = TRUE, value = 1))
     }
   }
-  value <- suppressWarnings(as.numeric(learning_rate))
+  value <- numeric_scalar(learning_rate)
   if (length(value) != 1L || is.na(value) || !is.finite(value) || value <= 0) {
     stop("`learning_rate` must be a positive number or \"auto\".", call. = FALSE)
   }
@@ -262,7 +262,7 @@ normalize_opentsne_learning_rate <- function(learning_rate) {
 
 normalize_opentsne_exaggeration <- function(early_exaggeration, exaggeration) {
   normal <- if (is.null(exaggeration)) 1 else {
-    value <- suppressWarnings(as.numeric(exaggeration))
+    value <- numeric_scalar(exaggeration)
     if (length(value) != 1L || is.na(value) || !is.finite(value) || value <= 0) {
       stop("`exaggeration` must be NULL or a positive number.", call. = FALSE)
     }
@@ -273,7 +273,7 @@ normalize_opentsne_exaggeration <- function(early_exaggeration, exaggeration) {
                identical(tolower(early_exaggeration), "auto")) {
     if (is.null(exaggeration)) 12 else max(12, normal)
   } else {
-    value <- suppressWarnings(as.numeric(early_exaggeration))
+    value <- numeric_scalar(early_exaggeration)
     if (length(value) != 1L || is.na(value) || !is.finite(value) || value <= 0) {
       stop("`early_exaggeration` must be a positive number or \"auto\".", call. = FALSE)
     }
@@ -283,7 +283,7 @@ normalize_opentsne_exaggeration <- function(early_exaggeration, exaggeration) {
 }
 
 make_opentsne_random_init <- function(n, n_components, seed) {
-  seed <- suppressWarnings(as.integer(seed))
+  seed <- integer_scalar(seed)
   if (length(seed) != 1L || is.na(seed)) seed <- 5489L
   restore_seed <- set_local_seed(seed)
   on.exit(restore_seed(), add = TRUE)

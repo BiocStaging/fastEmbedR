@@ -43,7 +43,6 @@ make_opentsne_pca_init <- function(x,
     attr(init, "fastEmbedR_init_timing") <- pca$timing
     return(init)
   }
-  cuda_init_reason <- NA_character_
   if (identical(backend, "cuda")) {
     if (!exists("pca_tsvd_cuda_cpp", mode = "function")) {
       stop(
@@ -52,21 +51,17 @@ make_opentsne_pca_init <- function(x,
         call. = FALSE
       )
     }
-    native_cuda <- tryCatch(
+    native_cuda <- capture_error(
       fastembedr_cuda_tsvd_pca(
         x,
         ncomp = n_components,
         center = TRUE,
         scale = FALSE,
         seed = seed
-      ),
-      error = function(e) {
-        cuda_init_reason <<- conditionMessage(e)
-        NULL
-      }
+      )
     )
-    if (!is.null(native_cuda)) {
-      pca <- native_cuda
+    if (!is.null(native_cuda$value)) {
+      pca <- native_cuda$value
       pca$package <- "RAPIDS RAFT TSVD"
       pca$package_version <- NA_character_
       init <- normalize_opentsne_pca_scores(pca$scores, n_components)
@@ -79,7 +74,7 @@ make_opentsne_pca_init <- function(x,
     }
     stop(
       "CUDA PCA initialization failed in native RAPIDS RAFT/cuML TSVD: ",
-      cuda_init_reason,
+      native_cuda$error,
       call. = FALSE
     )
   }

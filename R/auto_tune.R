@@ -26,9 +26,19 @@ auto_tune_embedding_policy <- function(n,
     n_neighbors = n_neighbors,
     landmarks = landmarks,
     quality = quality,
-    k_selected_by = if (is.null(n_neighbors) && !isTRUE(nn_supplied)) "size_rule" else "user_or_supplied",
+    k_selected_by = if (is.null(n_neighbors) && !isTRUE(nn_supplied)) {
+      "size_rule"
+    } else {
+      "user_or_supplied"
+    },
     quality_selected_by = "not_used",
-    landmarks_selected_by = if (identical(mode, "auto") && is.null(landmarks) && !isTRUE(nn_supplied)) "size_rule" else "user_or_mode",
+    landmarks_selected_by = if (identical(mode, "auto") &&
+        is.null(landmarks) &&
+        !isTRUE(nn_supplied)) {
+      "size_rule"
+    } else {
+      "user_or_mode"
+    },
     refinement_selected_by = if (identical(mode, "auto")) "best_default" else "mode",
     epoch_selected_by = "size_rule",
     k_pilot = data.frame(),
@@ -239,10 +249,9 @@ auto_umap_pilot_tune <- function(x,
     idx <- raw_knn$indices[, seq_len(k), drop = FALSE]
     dst <- raw_knn$distances[, seq_len(k), drop = FALSE]
     elapsed <- NA_real_
-    layout <- NULL
-    err <- NA_character_
+    layout_attempt <- NULL
     elapsed <- system.time({
-      layout <- tryCatch(
+      layout_attempt <- capture_error(
         fast_knn_umap_core(
           idx,
           dst,
@@ -256,20 +265,18 @@ auto_umap_pilot_tune <- function(x,
             init_scale = init_scale,
             tuning_source = "pilot"
           )
-        ),
-        error = function(e) {
-          err <<- conditionMessage(e)
-          NULL
-        }
+        )
       )
     })["elapsed"]
+    layout <- layout_attempt$value
+    err <- layout_attempt$error
     if (is.null(layout)) {
       return(auto_umap_failed_pilot_row(
         stage, k, spectral_n_iter, n_epochs, init_scale, elapsed, err
       ))
     }
     primary_k <- as.integer(min(15L, k))
-    structure <- tryCatch(
+    structure_attempt <- capture_error(
       knn_structure_score_cpp(
         layout,
         idx,
@@ -277,16 +284,17 @@ auto_umap_pilot_tune <- function(x,
         primary_k,
         labels_int,
         as.integer(n_label_levels)
-      ),
-      error = function(e) {
-        err <<- conditionMessage(e)
-        rep(NA_real_, 5L)
-      }
+      )
     )
+    structure <- structure_attempt$value
+    if (is.null(structure)) {
+      structure <- rep(NA_real_, 5L)
+      err <- structure_attempt$error
+    }
     proxy_structure <- if (proxy_k == primary_k && ncol(idx) >= proxy_k) {
       structure
     } else {
-      tryCatch(
+      proxy_attempt <- capture_error(
         knn_structure_score_cpp(
           layout,
           raw_knn$indices[, seq_len(proxy_k), drop = FALSE],
@@ -294,12 +302,14 @@ auto_umap_pilot_tune <- function(x,
           as.integer(proxy_k),
           labels_int,
           as.integer(n_label_levels)
-        ),
-        error = function(e) {
-          err <<- conditionMessage(e)
-          rep(NA_real_, 5L)
-        }
+        )
       )
+      if (is.null(proxy_attempt$value)) {
+        err <- proxy_attempt$error
+        rep(NA_real_, 5L)
+      } else {
+        proxy_attempt$value
+      }
     }
     label_scores <- auto_umap_pilot_label_scores(
       layout = layout,
@@ -382,7 +392,8 @@ auto_umap_pilot_tune <- function(x,
     ))
   }
 
-  fixed_k_best <- successful[order(-successful$pilot_score, successful$elapsed), , drop = FALSE][1L, ]
+  best_order <- order(-successful$pilot_score, successful$elapsed)
+  fixed_k_best <- successful[best_order, , drop = FALSE][1L, ]
   best_k <- as.integer(fixed_k_best$k)
   remaining <- max(0L, as.integer(pilot_max_configs) - nrow(scores))
   if (remaining > 0L && length(alternate_k_candidates) > 0L) {
@@ -408,7 +419,8 @@ auto_umap_pilot_tune <- function(x,
 
   successful <- scores[is.finite(scores$pilot_score), , drop = FALSE]
   fixed_success <- successful[successful$k == base_k, , drop = FALSE]
-  fixed_k_best <- fixed_success[order(-fixed_success$pilot_score, fixed_success$elapsed), , drop = FALSE][1L, ]
+  best_order <- order(-fixed_success$pilot_score, fixed_success$elapsed)
+  fixed_k_best <- fixed_success[best_order, , drop = FALSE][1L, ]
   best <- auto_umap_select_pilot_winner(
     successful = successful,
     fixed_k_best = fixed_k_best,
@@ -520,17 +532,33 @@ auto_umap_k_change_has_strong_evidence <- function(base,
                                                    labels_available = FALSE) {
   score_gain <- as.numeric(candidate$pilot_score) - as.numeric(base$pilot_score)
   if (!is.finite(score_gain) || score_gain < 0.02) return(FALSE)
-  if (!auto_umap_metric_not_worse(candidate$knn_preservation_50, base$knn_preservation_50, tolerance = 0.005)) {
+  if (!auto_umap_metric_not_worse(
+    candidate$knn_preservation_50,
+    base$knn_preservation_50,
+    tolerance = 0.005
+  )) {
     return(FALSE)
   }
-  if (!auto_umap_metric_not_worse(candidate$local_continuity_50, base$local_continuity_50, tolerance = 0.005)) {
+  if (!auto_umap_metric_not_worse(
+    candidate$local_continuity_50,
+    base$local_continuity_50,
+    tolerance = 0.005
+  )) {
     return(FALSE)
   }
   if (isTRUE(labels_available)) {
-    if (!auto_umap_metric_not_worse(candidate$embedding_knn_accuracy, base$embedding_knn_accuracy, tolerance = 0.002)) {
+    if (!auto_umap_metric_not_worse(
+      candidate$embedding_knn_accuracy,
+      base$embedding_knn_accuracy,
+      tolerance = 0.002
+    )) {
       return(FALSE)
     }
-    if (!auto_umap_metric_not_worse(candidate$rare_class_recall, base$rare_class_recall, tolerance = 0.01)) {
+    if (!auto_umap_metric_not_worse(
+      candidate$rare_class_recall,
+      base$rare_class_recall,
+      tolerance = 0.01
+    )) {
       return(FALSE)
     }
   }
@@ -778,7 +806,11 @@ auto_umap_dataset_profile <- function(x,
     imbalance_ratio = imbalance_ratio,
     highly_imbalanced = highly_imbalanced,
     avoid_aggressive_k_reduction = avoid,
-    reason = if (length(reasons) == 0L) "high-dimensional balanced data" else paste(reasons, collapse = ", ")
+    reason = if (length(reasons) == 0L) {
+      "high-dimensional balanced data"
+    } else {
+      paste(reasons, collapse = ", ")
+    }
   )
 }
 
@@ -1163,10 +1195,9 @@ auto_umap_knn_pilot_tune <- function(indices,
     idx <- subgraph$indices[, seq_len(k), drop = FALSE]
     dst <- subgraph$distances[, seq_len(k), drop = FALSE]
     elapsed <- NA_real_
-    layout <- NULL
-    err <- NA_character_
+    layout_attempt <- NULL
     elapsed <- system.time({
-      layout <- tryCatch(
+      layout_attempt <- capture_error(
         fast_knn_umap_core(
           idx,
           dst,
@@ -1180,19 +1211,17 @@ auto_umap_knn_pilot_tune <- function(indices,
             init_scale = init_scale,
             tuning_source = "knn_pilot"
           )
-        ),
-        error = function(e) {
-          err <<- conditionMessage(e)
-          NULL
-        }
+        )
       )
     })["elapsed"]
+    layout <- layout_attempt$value
+    err <- layout_attempt$error
     if (is.null(layout)) {
       return(auto_umap_failed_pilot_row(
         stage, k, spectral_n_iter, n_epochs, init_scale, elapsed, err
       ))
     }
-    structure <- tryCatch(
+    structure_attempt <- capture_error(
       knn_structure_score_cpp(
         layout,
         idx,
@@ -1200,12 +1229,13 @@ auto_umap_knn_pilot_tune <- function(indices,
         as.integer(min(50L, k)),
         integer(0L),
         0L
-      ),
-      error = function(e) {
-        err <<- conditionMessage(e)
-        rep(NA_real_, 5L)
-      }
+      )
     )
+    structure <- structure_attempt$value
+    if (is.null(structure)) {
+      structure <- rep(NA_real_, 5L)
+      err <- structure_attempt$error
+    }
     score <- auto_umap_pilot_score(structure, elapsed)
     row <- data.frame(
       stage = stage,
@@ -1269,7 +1299,12 @@ auto_umap_knn_pilot_tune <- function(indices,
     ))
   }
 
-  best <- successful[order(-successful$pilot_score, successful$elapsed, successful$k), , drop = FALSE][1L, ]
+  best_order <- order(
+    -successful$pilot_score,
+    successful$elapsed,
+    successful$k
+  )
+  best <- successful[best_order, , drop = FALSE][1L, ]
   config_override <- list(
     n_neighbors = as.integer(best$k),
     n_epochs = as.integer(best$n_epochs),
@@ -1438,7 +1473,11 @@ auto_select_landmark_policy <- function(method,
   }
 
   if (!identical(mode, "auto")) {
-    stop("Only `mode = \"auto\"` is supported. Use `landmarks` to request landmarking explicitly.", call. = FALSE)
+    stop(
+      "Only `mode = \"auto\"` is supported. ",
+      "Use `landmarks` to request landmarking explicitly.",
+      call. = FALSE
+    )
   }
 
   if (is.null(landmarks) && full_n < auto_landmark_threshold(method)) {

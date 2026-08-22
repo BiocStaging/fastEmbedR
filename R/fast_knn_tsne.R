@@ -104,7 +104,10 @@ opentsne_knn <- function(indices,
       if (length(n_neighbors) != 1L || is.na(n_neighbors) ||
           !is.finite(n_neighbors) || n_neighbors < 1L ||
           n_neighbors > gpu_info$k || n_neighbors >= gpu_info$n) {
-        stop("`n_neighbors` must be a positive integer available in the GPU KNN object.", call. = FALSE)
+        stop(
+          "`n_neighbors` must be a positive integer available in the GPU KNN object.",
+          call. = FALSE
+        )
       }
     }
     if (is.null(perplexity)) perplexity <- policy$perplexity
@@ -581,8 +584,14 @@ opentsne <- function(data,
       if (fastembedr_is_gpu_knn(nn)) {
         nn <- fastembedr_as_gpu_knn(nn)
         gpu_info <- fastembedr_gpu_knn_info(nn)
-        if (gpu_info$n != n || gpu_info$k < n_neighbors || isTRUE(gpu_info$has_self)) {
-          stop("Supplied GPU-resident KNN output is incompatible with openTSNE input.", call. = FALSE)
+        incompatible <- gpu_info$n != n ||
+          gpu_info$k < n_neighbors ||
+          isTRUE(gpu_info$has_self)
+        if (incompatible) {
+          stop(
+            "Supplied GPU-resident KNN output is incompatible with openTSNE input.",
+            call. = FALSE
+          )
         }
         knn_result <- list(
           indices = NULL,

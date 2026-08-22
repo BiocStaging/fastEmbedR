@@ -1,3 +1,10 @@
+# fastEmbedR 0.99.7
+
+- Split KNN-input UMAP and openTSNE orchestration into dedicated policy,
+  initialization, graph or affinity, backend-dispatch, optimizer, and result
+  assembly helpers. This is a behavior-preserving maintainability change;
+  nonlocal assignments and scattered warning suppression were removed.
+
 # fastEmbedR 0.99.6
 
 - Add commit-bound real-hardware CI for CPU, Metal, and CUDA. The self-hosted
