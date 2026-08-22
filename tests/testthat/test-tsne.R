@@ -144,6 +144,9 @@ test_that("opentsne has direct KNN input functions", {
   expect_equal(cfg$method, "opentsne")
   expect_equal(cfg$n_neighbors, 12L)
   expect_equal(cfg$perplexity, 3)
+  expect_type(layout, "double")
+  expect_identical(attr(layout, "precision"), "double")
+  expect_identical(cfg$output_precision, "double")
 
   fit <- opentsne(
     knn,
@@ -158,6 +161,29 @@ test_that("opentsne has direct KNN input functions", {
   expect_equal(fit$metrics$n_neighbors, 3L)
   expect_equal(fit$metrics$preprocess_elapsed, 0)
   expect_equal(fit$metrics$knn_elapsed, 0)
+})
+
+test_that("opentsne_knn preserves the documented float32 return contract", {
+  skip_if_not_installed("float")
+  set.seed(324)
+  x <- float::fl(matrix(rnorm(48L * 5L), 48L, 5L))
+  knn <- precompute_knn(x, k = 12L, backend = "cpu", n.cores = 2L)
+
+  layout <- opentsne_knn(
+    knn,
+    perplexity = 3,
+    early_exaggeration_iter = 1L,
+    n_iter = 2L,
+    n.cores = 2L,
+    seed = 324L
+  )
+
+  expect_s4_class(layout, "float32")
+  expect_identical(attr(layout, "precision"), "float32")
+  expect_identical(
+    attr(layout, "fastEmbedR_config")$output_precision,
+    "float32"
+  )
 })
 
 test_that("native Metal openTSNE runs FFT-grid without CPU fallback", {

@@ -57,15 +57,16 @@ precompute and reuse a PCA initialization.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
-uses package-native HNSW. Metal uses package-native exact or recall-tuned
-IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
-rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
-device pointers directly to native CUDA openTSNE.
-Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
+\item{backend}{Optimizer backend: `"cpu"`, `"cuda"`, or `"metal"`. This
+selects affinity construction and layout optimization only; it does not
+trigger a nearest-neighbor search. Host KNN matrices can be consumed by
+any compiled backend. A CUDA-resident KNN object can be consumed directly
+only by the CUDA backend. Unavailable GPU requests fail without CPU
+fallback.}
 
-\item{n.cores}{Number of CPU cores used by CPU KNN and CPU
-openTSNE optimization. Native GPU optimizers ignore this argument.}
+\item{n.cores}{Number of CPU cores used for CPU affinity construction and
+openTSNE optimization. No KNN search is performed. Metal and CUDA
+optimizers ignore this argument.}
 
 \item{learning_rate}{Positive number or `"auto"`. With `"auto"`, the native
 optimizer uses `n / exaggeration` separately for each phase.}
@@ -102,17 +103,24 @@ C++ opt-SNE-inspired policy. The policy uses `n / early_exaggeration` for
 KLD-based early stopping only on CPU/small exact runs where the monitor is
 not prohibitively expensive. Explicit user-supplied values are respected.}
 
-\item{...}{Additional low-level parameters passed to [opentsne_knn()].}
+\item{...}{Additional low-level optimizer controls, including `theta` and
+`min_gain`.}
 }
 \value{
-A numeric embedding matrix with settings stored in
-  `attr(layout, "fastEmbedR_config")`.
+An embedding matrix with settings stored in
+  `attr(layout, "fastEmbedR_config")`. Float32 KNN distances, including a
+  CUDA-resident KNN object, produce a `float::float32` layout; host double
+  distances produce a standard R double matrix. Native optimization uses
+  float32 in both cases. The exact returned representation is recorded in
+  `attr(layout, "precision")` and in `fastEmbedR_config$output_precision`.
 }
 \description{
 `opentsne_knn()` is the direct KNN-input entry point for the native
 openTSNE-style optimizer. It accepts either a list containing KNN `indices`
-and `distances` or separate KNN index and distance matrices. No neighbor
-search, scaling, or PCA is done inside this function.
+and `distances` or separate KNN index and distance matrices. The supplied
+neighbors are used directly: this function performs no neighbor search or
+input scaling. PCA is computed only when `init_data` is supplied and neither
+`Y_init` nor a reusable initialization is available.
 Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
 the Python package. fastEmbedR defines its own R API, defaults, objects, and
 native optimizer kernels; it does not call or port Python `openTSNE`.

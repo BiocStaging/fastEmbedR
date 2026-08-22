@@ -4,8 +4,10 @@
 #'
 #' `opentsne_knn()` is the direct KNN-input entry point for the native
 #' openTSNE-style optimizer. It accepts either a list containing KNN `indices`
-#' and `distances` or separate KNN index and distance matrices. No neighbor
-#' search, scaling, or PCA is done inside this function.
+#' and `distances` or separate KNN index and distance matrices. The supplied
+#' neighbors are used directly: this function performs no neighbor search or
+#' input scaling. PCA is computed only when `init_data` is supplied and neither
+#' `Y_init` nor a reusable initialization is available.
 #' Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
 #' the Python package. fastEmbedR defines its own R API, defaults, objects, and
 #' native optimizer kernels; it does not call or port Python `openTSNE`.
@@ -23,8 +25,23 @@
 #'   compute PCA initialization for KNN-input runs. It is not used for neighbor
 #'   search or optimization.
 #' @inheritParams opentsne
-#' @return A numeric embedding matrix with settings stored in
-#'   `attr(layout, "fastEmbedR_config")`.
+#' @param backend Optimizer backend: `"cpu"`, `"cuda"`, or `"metal"`. This
+#'   selects affinity construction and layout optimization only; it does not
+#'   trigger a nearest-neighbor search. Host KNN matrices can be consumed by
+#'   any compiled backend. A CUDA-resident KNN object can be consumed directly
+#'   only by the CUDA backend. Unavailable GPU requests fail without CPU
+#'   fallback.
+#' @param n.cores Number of CPU cores used for CPU affinity construction and
+#'   openTSNE optimization. No KNN search is performed. Metal and CUDA
+#'   optimizers ignore this argument.
+#' @param ... Additional low-level optimizer controls, including `theta` and
+#'   `min_gain`.
+#' @return An embedding matrix with settings stored in
+#'   `attr(layout, "fastEmbedR_config")`. Float32 KNN distances, including a
+#'   CUDA-resident KNN object, produce a `float::float32` layout; host double
+#'   distances produce a standard R double matrix. Native optimization uses
+#'   float32 in both cases. The exact returned representation is recorded in
+#'   `attr(layout, "precision")` and in `fastEmbedR_config$output_precision`.
 #' @examples
 #' x <- scale(as.matrix(iris[, 1:4]))
 #' d <- as.matrix(stats::dist(x))
