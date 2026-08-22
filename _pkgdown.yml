@@ -11,7 +11,7 @@ navbar:
 
 home:
   title: fastEmbedR
-  description: Native UMAP and openTSNE-style embeddings from data or precomputed nearest neighbours.
+  description: Native UMAP and openTSNE-style embeddings from data or precomputed nearest neighbors.
 
 articles:
   - title: Start Here
@@ -32,7 +32,7 @@ reference:
       - transform_tsne
       - landmark_tsne
   - title: UMAP Embeddings
-    desc: Native UMAP embedding from data or precomputed nearest neighbours.
+    desc: Native UMAP embedding from data or precomputed nearest neighbors.
     contents:
       - umap
       - umap_knn
@@ -42,6 +42,7 @@ reference:
     desc: Select execution backends and construct package-native initializations.
     contents:
       - fastEmbedR_backend
+      - fastEmbedR_capabilities
       - pca
       - opentsne_pca_init
       - umap_init
