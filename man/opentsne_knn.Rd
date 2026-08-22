@@ -119,8 +119,8 @@ An embedding matrix with settings stored in
 openTSNE-style optimizer. It accepts either a list containing KNN `indices`
 and `distances` or separate KNN index and distance matrices. The supplied
 neighbors are used directly: this function performs no neighbor search or
-input scaling. PCA is computed only when `init_data` is supplied and neither
-`Y_init` nor a reusable initialization is available.
+input scaling. PCA is computed only when `init_data` is supplied and
+`Y_init` is absent.
 Here, "openTSNE-style" describes algorithmic lineage, not compatibility with
 the Python package. fastEmbedR defines its own R API, defaults, objects, and
 native optimizer kernels; it does not call or port Python `openTSNE`.
