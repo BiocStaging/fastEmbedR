@@ -39,7 +39,7 @@ jobs:
         run: bash .github/scripts/run-hardware-validation.sh cpu validation-artifacts/cpu
       - name: Archive CPU evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fastEmbedR-hardware-cpu-${{ github.sha }}
           path: validation-artifacts/cpu
@@ -60,7 +60,7 @@ jobs:
         run: bash .github/scripts/run-hardware-validation.sh metal validation-artifacts/metal
       - name: Archive Metal evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fastEmbedR-hardware-metal-${{ github.sha }}
           path: validation-artifacts/metal
@@ -87,7 +87,7 @@ jobs:
         run: bash .github/scripts/run-hardware-validation.sh cuda validation-artifacts/cuda
       - name: Archive CUDA evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fastEmbedR-hardware-cuda-${{ github.sha }}
           path: validation-artifacts/cuda
