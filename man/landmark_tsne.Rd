@@ -10,6 +10,7 @@ landmark_tsne(
   reference_method = c("opentsne"),
   n_neighbors = NULL,
   perplexity = NULL,
+  affinity_support = c("standard", "compact"),
   n_components = 2L,
   standardize = TRUE,
   pca_dims = NULL,
@@ -38,13 +39,22 @@ accepted in the cleaned package API.}
 
 \item{n_neighbors}{Number of non-self neighbors used to embed the landmark
 reference set. If `NULL`, it follows the same neighbor policy as
-[opentsne()]: `ceiling(perplexity)` when perplexity is supplied.}
+[opentsne()]: `ceiling(3 * perplexity)` under standard support.}
 
 \item{perplexity}{t-SNE perplexity for the landmark reference embedding. If
 `NULL`, the optimizer chooses a safe value from the reference KNN width and
 sample size.}
 
-\item{n_components}{Output dimensionality, from 1 to 3.}
+\item{affinity_support}{Affinity candidate-neighborhood policy. The default
+`"standard"` uses `ceiling(3 * perplexity)` non-self neighbors so the
+Gaussian bandwidth search can produce non-uniform conditional
+probabilities. `"compact"` retains the older
+`ceiling(perplexity)`-neighbor approximation for explicit speed/memory
+experiments; it is not equivalent to conventional sparse t-SNE.}
+
+\item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
+than two use CPU exact repulsion; the current Metal and CUDA
+interpolation/FFT optimizers support only `2L`.}
 
 \item{standardize}{Center and scale columns before KNN. Defaults to `FALSE`
 so one-call results match a KNN object computed from the supplied matrix.}

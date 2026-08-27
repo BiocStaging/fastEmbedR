@@ -102,12 +102,14 @@ mathematics while reducing CSR graph and SGD overhead.
 
 ## Licensing And Acknowledgements
 
-fastEmbedR is licensed as `GPL (>= 3)`. This is the right posture because UMAP
-behaviour and fast-SGD scheduling were intentionally compared against and
-partly adapted from GPL-compatible R implementations such as `uwot`.
+fastEmbedR is licensed under MIT. Its UMAP graph construction, edge sampling,
+negative sampling, random-number generation, learning-rate decay, and
+CPU/Metal/CUDA update kernels are package-owned implementations. `uwot` is a
+GPL-3.0-or-later external benchmark and behavioral reference only; its source
+is not copied, translated, linked, vendored, or required by package core.
 
 Detailed provenance is maintained in `inst/NOTICE` and
-`inst/ALGORITHMIC_REFERENCES.md`. Current acknowledgements include `uwot`,
-`Rtsne`, FAISS, RAPIDS cuML/cuVS, `mlx-vis`, `annembed`, KeOps, TorchDR,
-openTSNE, and t-SNE-CUDA. Optional external backends are not silently relabelled
-as package-native GPU work; unavailable GPU libraries must fail clearly.
+`inst/ALGORITHMIC_REFERENCES.md`, `inst/COPYRIGHTS`, and the machine-readable
+`inst/THIRD_PARTY_DEPENDENCIES.json`. Optional external backends are not
+silently relabelled as package-native GPU work; unavailable GPU libraries must
+fail clearly.

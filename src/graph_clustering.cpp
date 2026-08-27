@@ -1,3 +1,15 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Independent package-native graph construction, Louvain, and Leiden code.
+ * The Leiden phase organization was reviewed against NetworKit commit
+ * 7b74f6af90bc0865c6c0937a206df63df331b712, specifically
+ * include/networkit/community/ParallelLeiden.hpp and
+ * networkit/cpp/community/ParallelLeiden.cpp. No NetworKit source is copied,
+ * linked, or vendored. See inst/NOTICE for the design-reference boundary.
+ */
+
 #include <Rcpp.h>
 
 #include <algorithm>
@@ -12,10 +24,8 @@
 #include <utility>
 #include <vector>
 
-// Native graph storage and modularity optimization. The Leiden phase
-// organization follows Traag et al. (2019) and is informed by NetworKit's
-// MIT-licensed ParallelLeiden implementation; this file uses a package-owned
-// sequential implementation and does not link to NetworKit or cuGraph.
+// Native graph storage and modularity optimization following the published
+// Louvain and Leiden algorithms.
 
 namespace {
 

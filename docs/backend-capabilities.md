@@ -8,12 +8,15 @@ Inspect the capabilities of the installed build through the stable public API:
 
 ```r
 capabilities <- fastEmbedR_capabilities()
-capabilities[, c("backend", "knn_available", "embedding_available",
-                 "clustering_available")]
+capabilities[, c("backend", "available", "device", "precision",
+                 "knn_engine", "runtime_libraries",
+                 "unavailable_reason")]
 ```
 
 The `cuvs` row describes the CUDA nearest-neighbor component; public backend
-arguments continue to accept only `"cpu"`, `"cuda"`, or `"metal"`.
+arguments continue to accept only `"cpu"`, `"cuda"`, or `"metal"`. Device-name
+queries are best effort. The compiled native probes, not `nvidia-smi` or
+`system_profiler`, determine whether a backend is available.
 
 ## Capability Matrix
 
@@ -74,6 +77,21 @@ parallelize. Current CPU priorities are:
 Metal is implemented with Objective-C++ and Metal kernels. Public Metal and CUDA
 UMAP/openTSNE paths do not call Python, Torch, MLX, or `reticulate`.
 
+The build-supported target is Apple Silicon with macOS 14 or newer and a full
+Xcode 15 or newer toolchain. Full Metal performance benchmarking has been
+performed only on an Apple M3 MacBook Pro with macOS 14.5, Xcode 16.2, and
+8 GB unified memory. Other Apple Silicon generations are compatibility targets:
+they require a strict real-device smoke/correctness artifact before being
+called tested, and they do not inherit the M3 performance results. Intel Macs
+are not a supported Metal target. The CPU backend remains available on Intel
+macOS.
+
+UMAP initialization/optimization, openTSNE FFT-grid optimization, and the
+current Metal transformation/refinement routes are two-dimensional. The
+capability matrix labels mixed operations explicitly: Metal KNN followed by
+CPU graph assembly is not described as a fully Metal graph workflow, and CPU
+quality scoring after layout transfer is not reported as Metal computation.
+
 Metal one-call KNN uses exact search below the internal size threshold and
 IVF-Flat above it. Large, high-dimensional IVF searches use a 128-dimensional
 signed float32 projection, four native centroid passes, a four-SIMD-group
@@ -109,6 +127,14 @@ CUDA support is optional at build time. The package can use:
 FAISS, cuVS, CUDA, and cuFFT are not vendored into the package. They must be installed
 on the CUDA machine and matched to the driver/toolkit stack. If CUDA is not
 available, explicit CUDA requests fail clearly.
+
+CUDA evidence is device-specific. A configured architecture or embedded
+`sm_*`/PTX target establishes build-level compatibility only. Strict hardware
+smoke/correctness testing requires execution on the named GPU, and full
+performance validation additionally requires the release-locked scientific
+benchmark. Historical broad benchmarking used an NVIDIA L40S (`sm_89`), while
+the current numerical diagnostic has also executed on an RTX 5060 Ti
+(`sm_120`); neither observation implies performance on an untested CUDA device.
 
 ## External Libraries
 

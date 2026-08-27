@@ -1,22 +1,23 @@
-# Third-party source licenses
+# Third-party license copies
 
-fastEmbedR is distributed under the MIT license. The native nearest-neighbor
-implementation contains permissively licensed derivative work with the
-following provenance:
+This directory contains complete upstream license texts required for source
+that is adapted or redistributed by `fastEmbedR`, plus the cuVS license for an
+important optional linked backend. The exact source files, upstream commits,
+and relationship to fastEmbedR are recorded in `../NOTICE`, `../COPYRIGHTS`,
+and `../THIRD_PARTY_DEPENDENCIES.json`.
 
-- **FAISS 1.14.3**, commit
-  `0ca9df4792b173d573044ee14ca0704780176e82`. Copyright Meta Platforms,
-  Inc. and affiliates. MIT license: `FAISS-LICENSE`.
-- **MLXPorts/Faiss-mlx**, commit
-  `d092af559375144fc719cd88a10e414f92c625fa`. Copyright 2024 Sydney Bach,
-  The Solace Project. Apache License 2.0: `FAISS-MLX-LICENSE`.
-- **RAPIDS cuVS**, linked optionally through its stable C API. Copyright
-  NVIDIA Corporation. Apache License 2.0: `CUVS-LICENSE`. cuVS source and
-  binaries are not bundled in fastEmbedR.
-- **DLPack**, stable C tensor ABI declarations used by the cuVS C interface.
-  Copyright DMLC contributors. Apache License 2.0: `DLPACK-LICENSE`.
+| File | Component | Revision | Relationship |
+|---|---|---|---|
+| `FASTEMBEDR-LICENSE` | fastEmbedR original source | package release | Full MIT text retained in installed/source archives; `LICENSE` remains the R-standard MIT declaration |
+| `FAISS-LICENSE` | FAISS 1.14.3 | `0ca9df4792b173d573044ee14ca0704780176e82` | CPU HNSW and Metal IVF derivative; optional CUDA linkage |
+| `FAISS-MLX-LICENSE` | MLXPorts/Faiss-mlx | `d092af559375144fc719cd88a10e414f92c625fa` | Metal list-scan/top-k derivative |
+| `FAISSR-LICENSE` | faissR 0.99.15 | `f37ea97c5774200025b1480770b8ecbf1d2d7919` | Native CUDA adapter derivative |
+| `DLPACK-LICENSE` | DLPack 1.0 | `bbd2f4d32427e548797929af08cfe2a9cbb3cf12` | Reduced vendored C ABI header |
+| `APPLESILICONFFT-LICENSE` | AppleSiliconFFT | `5d0d51dbd983691ee99822ed74bc3f9a47136511` | Metal 512-point Stockham derivative |
+| `NETWORKIT-LICENSE` | NetworKit | `7b74f6af90bc0865c6c0937a206df63df331b712` | Conservatively retained design-reference notice |
+| `CUVS-LICENSE` | RAPIDS cuVS | build-resolved | Optional linked CUDA dependency; not bundled |
 
-The package source files identify the portions derived from or informed by
-these projects. The package-owned CUDA adapter was distilled from the pinned
-faissR commit recorded in `../COPYRIGHTS`; it calls installed FAISS GPU and
-cuVS libraries directly and does not invoke the faissR R package.
+Dependencies that are only linked from the user's build environment, system
+frameworks, design references, and benchmark-only software are listed with
+their SPDX expression and upstream license URL in the JSON inventory. Their
+source trees and binaries are not redistributed in the R source package.

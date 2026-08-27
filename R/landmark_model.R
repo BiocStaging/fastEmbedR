@@ -113,6 +113,9 @@ normalize_landmark_selection <- function(selection, data) {
 #' @param n_neighbors UMAP neighborhood size. For openTSNE this is the
 #'   precomputed KNN support width; `NULL` derives it from `perplexity`.
 #' @param perplexity openTSNE perplexity.
+#' @param affinity_support openTSNE affinity support policy. `"standard"`
+#'   uses `ceiling(3 * perplexity)` neighbors; `"compact"` is the explicit
+#'   `ceiling(perplexity)` approximation.
 #' @param n_components Embedding dimensionality.
 #' @param metric KNN metric.
 #' @param seed Random seed.
@@ -137,6 +140,7 @@ fit_landmark_model <- function(data,
                                method = c("umap", "opentsne"),
                                n_neighbors = NULL,
                                perplexity = NULL,
+                               affinity_support = c("standard", "compact"),
                                n_components = 2L,
                                metric = c(
                                  "euclidean", "cosine", "correlation",
@@ -152,6 +156,7 @@ fit_landmark_model <- function(data,
   n_threads <- n.cores
   method <- match.arg(method)
   backend <- resolve_embedding_backend(backend)
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   graph_mode <- match.arg(graph_mode)
   metric <- resolve_embedding_metric(metric, data)
   n_components <- validate_n_components(n_components)
@@ -209,13 +214,32 @@ fit_landmark_model <- function(data,
         verbose = verbose
       )
     } else {
+      reference_policy <- opentsne_neighbor_policy(
+        n_reference,
+        perplexity = perplexity,
+        affinity_support = affinity_support
+      )
+      if (is.null(perplexity)) perplexity <- reference_policy$perplexity
       if (is.null(n_neighbors)) {
-        n_neighbors <- opentsne_neighbor_policy(
-          nrow(x),
-          perplexity = perplexity
-        )$n_neighbors
+        n_neighbors <- reference_policy$n_neighbors
+      } else {
+        n_neighbors <- as.integer(n_neighbors)
+        if (length(n_neighbors) != 1L || is.na(n_neighbors) ||
+            n_neighbors < 1L || n_neighbors >= n_reference) {
+          stop(
+            "`n_neighbors` must be a positive integer smaller than the number of landmarks.",
+            call. = FALSE
+          )
+        }
+        required_neighbors <- opentsne_support_width(perplexity, affinity_support)
+        if (n_neighbors < required_neighbors) {
+          stop(
+            "`n_neighbors` is too small for `affinity_support = \"",
+            affinity_support, "\"`; need at least ", required_neighbors, ".",
+            call. = FALSE
+          )
+        }
       }
-      n_neighbors <- as.integer(min(n_neighbors, n_reference - 1L))
       reference_knn <- precompute_knn(
         reference_data,
         k = n_neighbors,
@@ -226,6 +250,7 @@ fit_landmark_model <- function(data,
       fit <- opentsne(
         reference_data,
         perplexity = perplexity,
+        affinity_support = affinity_support,
         n_components = n_components,
         init_data = reference_data,
         standardize = FALSE,
@@ -252,6 +277,7 @@ fit_landmark_model <- function(data,
     n_components = as.integer(n_components),
     n_neighbors = as.integer(n_neighbors),
     perplexity = perplexity,
+    affinity_support = if (identical(method, "opentsne")) affinity_support else NA_character_,
     metric = metric,
     graph_mode = if (identical(method, "umap")) graph_mode else NA_character_,
     backend = backend,
@@ -272,7 +298,13 @@ landmark_query_data <- function(model, data, query_indices = NULL) {
     backend = model$backend
   )
   x <- prepared$data
-  full_input <- is.null(query_indices) && nrow(x) == model$n_total
+  # Automatic reassembly is meaningful only for a model fitted on a strict
+  # landmark subset. An all-reference model must treat every supplied matrix as
+  # new data, including a query matrix with the same row count as the training
+  # matrix.
+  full_input <- is.null(query_indices) &&
+    length(model$selection$query_indices) > 0L &&
+    nrow(x) == model$n_total
   if (full_input) query_indices <- model$selection$query_indices
   if (is.null(query_indices)) {
     query <- x
@@ -526,8 +558,10 @@ project_landmark_tsne <- function(model,
 #' fixed.
 #'
 #' @param model A model returned by [fit_landmark_model()].
-#' @param data The original full data matrix, or a matrix containing only new
-#'   query observations in the same feature space.
+#' @param data The original full data matrix for a model fitted on a strict
+#'   landmark subset, or a matrix containing only new query observations in the
+#'   same feature space. A model fitted with all training rows as references
+#'   always treats `data` as new query observations.
 #' @param query_indices Optional rows of `data` to project.
 #' @param transform_k Number of reference neighbors.
 #' @param refinement_epochs Fixed-reference UMAP refinement epochs.
@@ -540,9 +574,11 @@ project_landmark_tsne <- function(model,
 #' @param n.cores Number of CPU cores.
 #' @param verbose Print optimizer progress.
 #' @param ... Low-level openTSNE transform controls.
-#' @return A `fastEmbedR_embedding`. When `data` is the original full matrix,
-#'   `layout` is reassembled in original row order. Otherwise it contains only
-#'   the supplied query rows.
+#' @return A `fastEmbedR_embedding`. For a strict landmark-subset model, passing
+#'   the original full matrix reassembles `layout` in original row order.
+#'   Otherwise `layout` contains only the supplied query rows. The returned
+#'   parameters record `projection_scope` as `"original_reconstruction"` or
+#'   `"held_out_query"`.
 #' @examples
 #' x <- scale(as.matrix(iris[, 1:4]))
 #' selection <- select_landmarks(x, 0.5, seed = 1)
@@ -569,11 +605,6 @@ project_landmark_model <- function(model,
                                    ...) {
   if (!inherits(model, "fastEmbedR_landmark_model")) {
     stop("`model` must be returned by fit_landmark_model().", call. = FALSE)
-  }
-  if (is.null(query_indices) &&
-      length(model$selection$query_indices) == 0L &&
-      nrow(data) == model$n_total) {
-    return(model$fit)
   }
   initialization <- match.arg(initialization)
   n_threads <- normalize_nn_threads(n.cores %||% model$n.cores)
@@ -686,6 +717,11 @@ project_landmark_model <- function(model,
       projection_knn$method %||%
       attr(projection_knn, "method"),
     projection_backend = projected$backend,
+    projection_scope = if (isTRUE(query_info$full_input)) {
+      "original_reconstruction"
+    } else {
+      "held_out_query"
+    },
     refinement_epochs = if (identical(model$method, "umap")) {
       as.integer(refinement_epochs)
     } else {

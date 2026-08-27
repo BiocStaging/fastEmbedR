@@ -72,8 +72,12 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
   cuda_enabled=1
   cuda_include_flags="-I$cuda_home/include"
   r_home=${R_HOME:-$(R RHOME)}
+  r_cppflags=$(R CMD config --cppflags 2>/dev/null || true)
+  if [ -z "$r_cppflags" ]; then
+    r_cppflags=$(R CMD config CPPFLAGS 2>/dev/null || true)
+  fi
   rcpp_include=$(Rscript -e 'cat(system.file("include", package = "Rcpp"))')
-  cuda_include_flags="$cuda_include_flags -I$r_home/include -I$rcpp_include"
+  cuda_include_flags="$cuda_include_flags $r_cppflags -I$r_home/include -I$rcpp_include"
   cuda_lib_flags="-L$cuda_home/lib64 -L$cuda_home/lib"
   if [ -d "$cuda_home/targets/x86_64-linux/include" ]; then
     cuda_include_flags="$cuda_include_flags -I$cuda_home/targets/x86_64-linux/include"
@@ -249,52 +253,6 @@ if [ "$use_cuda" != "0" ] && [ -n "$nvcc" ] && [ -n "$cuda_home" ]; then
       fi
     done
     libs="$libs -lrmm -lrapids_logger -lcublasLt -lcusparse -lcurand"
-  fi
-  if [ "${FASTEMBEDR_USE_CUML:-0}" = "1" ]; then
-    cuml_home=${CUML_HOME:-}
-    if [ -z "$cuml_home" ]; then
-      echo "FASTEMBEDR_USE_CUML=1 was requested, but CUML_HOME is not set." >&2
-      echo "Set CUML_HOME to a native libcuml prefix containing include/ and lib64/." >&2
-      exit 1
-    fi
-    if [ ! -f "$cuml_home/include/cuml/decomposition/pca.hpp" ]; then
-      echo "Could not find cuml/decomposition/pca.hpp under CUML_HOME=$cuml_home." >&2
-      exit 1
-    fi
-    rapids_cccl_include=""
-    for dep_home in ${RAPIDS_HOME:-} ${RAFT_HOME:-} ${RMM_HOME:-}; do
-      if [ -f "$dep_home/include/rapids/cuda/version" ]; then
-        rapids_cccl_include="$dep_home/include/rapids"
-        break
-      fi
-    done
-    if [ -n "$rapids_cccl_include" ]; then
-      cppflags="-I$rapids_cccl_include $cppflags"
-      cuda_include_flags="-I$rapids_cccl_include $cuda_include_flags"
-    elif [ -d "$cuda_home/targets/x86_64-linux/include/cccl" ]; then
-      cppflags="-I$cuda_home/targets/x86_64-linux/include/cccl $cppflags"
-    fi
-    cppflags="$cppflags -DFASTEMBEDR_HAS_RAFT -DFASTEMBEDR_HAS_CUML -I$cuml_home/include"
-    cuda_include_flags="$cuda_include_flags -DFASTEMBEDR_HAS_RAFT -DFASTEMBEDR_HAS_CUML -I$cuml_home/include"
-    libs="$libs -L$cuml_home/lib64 -L$cuml_home/lib -lcuml"
-    for dep_home in ${RAFT_HOME:-} ${RMM_HOME:-} ${RAPIDS_HOME:-} ${NVFOREST_HOME:-}; do
-      if [ -n "$dep_home" ]; then
-        if [ -d "$dep_home/include" ]; then
-          cppflags="$cppflags -I$dep_home/include"
-          cuda_include_flags="$cuda_include_flags -I$dep_home/include"
-        fi
-        if [ -d "$dep_home/lib64" ]; then
-          libs="$libs -L$dep_home/lib64"
-        fi
-        if [ -d "$dep_home/lib" ]; then
-          libs="$libs -L$dep_home/lib"
-        fi
-      fi
-    done
-    for dep_dir in ${FASTEMBEDR_CUML_LIB_DIRS:-}; do
-      libs="$libs -L$dep_dir"
-    done
-    libs="$libs -lraft -lrmm -lrapids_logger -lnvforest++ -lcublasLt -lcublas -lcusolver -lcusparse -lcurand"
   fi
   cuda_rule="
 .DEFAULT_GOAL := all

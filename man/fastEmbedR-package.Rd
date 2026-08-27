@@ -4,10 +4,11 @@
 \name{fastEmbedR-package}
 \alias{fastEmbedR}
 \alias{fastEmbedR-package}
-\title{fastEmbedR: native UMAP and openTSNE embeddings}
+\title{fastEmbedR: opinionated native UMAP and openTSNE embeddings}
 \description{
-fastEmbedR provides native float32 UMAP and openTSNE-style embeddings from
-data or precomputed nearest-neighbor matrices. Use [umap()] or [opentsne()]
+fastEmbedR provides an opinionated fixed-policy float32 UMAP implementation
+and a configurable native openTSNE-style implementation from data or
+precomputed nearest-neighbor matrices. Use [umap()] or [opentsne()]
 for one-call workflows, [precompute_knn()] to run the package-native CPU,
 Metal, or CUDA search separately, or pass reusable KNN `indices` and
 `distances` to [umap_knn()] or [opentsne_knn()].
@@ -15,8 +16,16 @@ Use [pca()] for reusable backend-native PCA and request
 `opentsne_init = TRUE` when an openTSNE-ready initialization is needed.
 Score embeddings with [evaluate_embedding()]. Optional downstream graph
 utilities are available through [knn_graph()] and [graph_cluster()].
+Use [fastEmbedR_api()] for the complete canonical, advanced, diagnostic,
+secondary, and compatibility API map.
 }
 \details{
+UMAP exposes neighborhood, metric, graph mode, preprocessing, backend, seed,
+output dimension, and CPU thread count. Epochs, minimum distance, spread,
+learning rate, repulsion strength, negative sampling, KNN index tuning, and
+optimizer mode follow the recorded package policy. Users requiring arbitrary
+sweeps of those controls should use a general-purpose UMAP implementation.
+
 The package intentionally does not export the earlier legacy t-SNE,
 InfoTSNE, PaCMAP, TriMap, or LocalMAP reducers.
 }

@@ -12,6 +12,11 @@
 
 This page gives the main KNN-first workflows and the public API.
 
+The normative, machine-readable inventory is returned by
+`fastEmbedR::fastEmbedR_api()`. The corresponding [public API map](api-map.md)
+lists accepted classes, returned classes, CPU/Metal/CUDA support, numerical
+role, device residency, related methods, and lifecycle status for every export.
+
 ## Which Function Should I Use?
 
 | Situation | Use |
@@ -28,6 +33,8 @@ This page gives the main KNN-first workflows and the public API.
 | You want a clustering graph | `knn_graph()` |
 | You want native graph communities | `graph_cluster(graph, method = "leiden")` |
 | You want to inspect compiled backend support | `fastEmbedR_capabilities()` |
+| You want to inspect the stable API and lifecycle tiers | `fastEmbedR_api()` |
+
 
 The recommended workflow is KNN first:
 
@@ -78,6 +85,55 @@ Current metric support is deliberately explicit:
 | `correlation` | native CPU/Metal and compiled CUDA | Rows are centered and normalized internally. |
 | `inner_product` | compiled CUDA only | Unsupported CPU/Metal requests fail explicitly. |
 
+## Parameter Philosophy And Scope
+
+fastEmbedR is deliberately more configurable for openTSNE than for UMAP. The
+openTSNE API exposes perplexity and affinity support, initialization, iteration
+counts, early and normal exaggeration, learning rate, momentum, clipping, and
+exact-versus-FFT repulsion. Set `auto_config = FALSE` and supply explicit
+values when an automatic iteration or stopping rule is not wanted.
+
+UMAP is an opinionated high-throughput implementation, not a general-purpose
+UMAP tuning interface. It exposes
+`n_neighbors`, metric, graph mode, preprocessing, backend, seed, and CPU thread
+count. The current release selects and records the remaining optimizer policy:
+
+| UMAP setting | Public status | Current policy |
+| --- | --- | --- |
+| epochs | internal | 500 below 10,000 rows; 200 for larger ordinary profiles; at least 300 for a high-variability distance profile |
+| `min_dist` | internal | 0.01 normally; 0.1 for the documented wide-shell profile |
+| spread | internal | 1 |
+| learning rate | internal | 1 normally; 1.25 for the wide-shell profile |
+| repulsion strength | internal | 1 |
+| negative-sample rate | internal | 5 |
+| initialization | reusable | package-native graph initialization; use `umap_init()` to compute and reuse it |
+| update mode | internal | backend-native asynchronous/atomic schedule; no synchronous GPU mode |
+
+These settings materially affect compactness, optimization effort, and the
+attraction/repulsion balance. They are fixed to keep one release policy and
+one validated update schedule aligned across CPU, Metal, and CUDA; they are not
+claimed to be universally optimal for every scientific question.
+
+The one-call nearest-neighbor router also hides index parameters. It targets
+recall 0.99 and chooses the validated CPU, Metal, or CUDA route. To control the
+search independently, provide an external KNN object to `umap_knn()` or
+`opentsne_knn()`.
+
+Resolved choices are not hidden from results:
+
+```r
+fit$parameters
+fit$timings
+```
+
+Float32 input, precomputed or GPU-resident KNN, prepared UMAP state, compact
+t-SNE support, and landmarking are the explicit memory/speed choices. Compact
+support and landmarking are approximations and should be reported as such.
+Users needing arbitrary UMAP `min_dist`, spread, epoch, learning-rate,
+negative-sampling, repulsion, or optimizer sweeps
+should use a general-purpose UMAP implementation; fastEmbedR does not claim
+parameter or API interchangeability with those packages.
+
 ## Basic KNN-First UMAP
 
 ```r
@@ -105,6 +161,11 @@ plot(fit)
 ```
 
 ## openTSNE From The Same KNN
+
+The KNN must contain at least `ceiling(3 * perplexity)` non-self columns under
+the default `affinity_support = "standard"` policy. This avoids the
+maximum-entropy degeneracy that occurs when support equals perplexity. Use
+`affinity_support = "compact"` only for an explicitly labeled approximation.
 
 ```r
 Y_init <- opentsne_pca_init(x, seed = 1)

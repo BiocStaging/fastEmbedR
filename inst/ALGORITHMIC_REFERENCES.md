@@ -12,9 +12,11 @@ permissively licensed project.
   well-connected communities. Sci Rep. 2019;9:5233.
 - Pons P, Latapy M. Computing communities in large networks using random
   walks. J Graph Algorithms Appl. 2006;10:191-218.
-- NetworKit repository: <https://github.com/networkit/networkit>
+- NetworKit repository: <https://github.com/networkit/networkit>, commit
+  `7b74f6af90bc0865c6c0937a206df63df331b712`
 - NetworKit license: MIT
-- RAPIDS cuGraph repository: <https://github.com/rapidsai/cugraph>
+- RAPIDS cuGraph repository: <https://github.com/rapidsai/cugraph>, commit
+  `528ddde979df2243bf51c116d89a0ecdf85a39ee`
 - RAPIDS cuGraph license: Apache-2.0
 
 Current use in `fastEmbedR`:
@@ -43,6 +45,7 @@ Current use in `fastEmbedR`:
 ## annembed
 
 - Repository: <https://github.com/jean-pierreBoth/annembed>
+- Commit inspected: `eceda8368d69e8c8790285312a974a865d063a07`
 - Author: Jean-Pierre Both
 - License: MIT OR Apache-2.0
 - Inspected: 2026-06-11
@@ -85,6 +88,7 @@ MIT/Apache-2.0 copyright and license notices.
 ## Rtsne
 
 - Repository: <https://github.com/jkrijthe/Rtsne>
+- Commit inspected: `0e769505ab791fa3c3ac25bd9434ff20e1f0a689`
 - CRAN: <https://cran.r-project.org/package=Rtsne>
 - Version studied locally: 0.17
 - License: BSD-style package license in Rtsne's `LICENSE` file.
@@ -126,6 +130,7 @@ License decision:
   stochastic neighbor embedding improve visualization and analysis of large
   datasets." Nature Communications 10, 5415, 2019.
 - Repository: <https://github.com/omiq-ai/Multicore-opt-SNE>
+- Commit inspected: `c6d15e3d4c0372ea8e7f652014819c98354a3325`
 - License: BSD-3-Clause
 - Current use in `fastEmbedR`: algorithmic behaviour reference for automatic
   openTSNE parameter selection. No Multicore-opt-SNE source files are vendored,
@@ -153,6 +158,7 @@ Implemented locations:
 ## openTSNE
 
 - Repository: <https://github.com/pavlin-policar/openTSNE>
+- Commit inspected: `12b8b7bec3d96ee0bc8930c3c45449a5209ed3e0`
 - License: BSD-3-Clause
 - Current use in `fastEmbedR`: mathematical and workflow reference for native
   C++ t-SNE-from-KNN, openTSNE-style two-phase optimization, and transform
@@ -204,11 +210,13 @@ Implemented native extensions:
 ## AppleSiliconFFT
 
 - Repository: <https://github.com/aminems/AppleSiliconFFT>
+- Commit adapted: `5d0d51dbd983691ee99822ed74bc3f9a47136511`
 - Author: Mohamed Amine Bergach
 - License: MIT
-- Current use in `fastEmbedR`: native Metal 512-point Stockham FFT kernels for
-  the openTSNE/FIt-SNE 512x512 grid path, implemented using AppleSiliconFFT as
-  a permissive design reference.
+- Current use in `fastEmbedR`: the native Metal 512-point Stockham FFT
+  organization for the openTSNE/FIt-SNE 512x512 grid path is adapted from
+  `src/fft_multisize.metal::fft_512_stockham`; the upstream MIT notice is
+  retained in `LICENSES/APPLESILICONFFT-LICENSE`.
 
 Ideas/code behaviour used:
 
@@ -240,7 +248,7 @@ License decision:
 - Paper: Chan DM, Rao R, Huang F, Canny J. "t-SNE-CUDA: GPU-Accelerated
   t-SNE and its Applications to Modern Data." arXiv:1807.11824v1, 2018.
 - Repository: <https://github.com/CannyLab/tsne-cuda>
-- Commit inspected: `44249b6`
+- Commit inspected: `44249b6895a2eb389b8a13390ed6fb125d2040c8`
 - License: BSD-3-Clause
 - Current use in `fastEmbedR`: design reference only. No t-SNE-CUDA source
   files are vendored, linked, called, or copied into the package.
@@ -265,25 +273,23 @@ Implemented location:
   `tsne_global_sum_q`, and `tsne_full_exact_dense_epoch`: native Metal exact
   openTSNE-style optimizer from KNN for moderate datasets.
 - `R/transform_tsne.R::transform_tsne`: explicit `backend = "metal"` dispatch.
-- CUDA full-embedding kernels are intentionally not shipped in the cleaned
-  source until the openTSNE-style CUDA path is implemented and validated.
+- CUDA full-embedding kernels are shipped as package-owned float32 code using
+  installed CUDA/cuFFT primitives. t-SNE-CUDA remains an architecture
+  reference; no source from that repository is bundled or linked.
 
-CUDA notes to keep for later:
+Current CUDA boundary:
 
-- Port the fixed-reference transform first, not full Barnes-Hut t-SNE, because
-  it has a smaller validation surface and reuses the landmark workflow.
-- Reuse the same host contract as the Metal path: row-wise query probabilities,
-  zero-based query-reference KNN, float32 reference/query layout buffers,
-  float2 gains and updates, and exact or sampled reference repulsion.
-- Then port the CannyLab/FIt-SNE large-data split: GPU KNN, GPU perplexity
-  search, device-side probability symmetrization, sparse attractive forces,
-  FFT/N-body repulsive field, and fused momentum/gains update.
-- Do not enable `backend = "cuda"` for `transform_tsne()` until it is tested on
-  a CUDA machine; explicit CUDA requests must not fall back to CPU.
+- Full embedding and fixed-reference transform use package-owned float32 CUDA
+  kernels plus installed CUDA/cuFFT primitives.
+- t-SNE-CUDA remains a design reference; no repository source or binary is
+  copied, linked, or called.
+- Explicit CUDA requests fail if the required compiled backend is unavailable;
+  they do not silently fall back to CPU.
 
 ## uwot / UMAP
 
 - Repository: <https://github.com/jlmelville/uwot>
+- Commit inspected: `4c9c9261ad2944e81aede1f02d1ad01b4add344a`
 - CRAN: <https://cran.r-project.org/package=uwot>
 - License: GPL (>= 3)
 - Current use in `fastEmbedR`: benchmark and behavioural reference for public
@@ -386,9 +392,9 @@ Ideas reviewed:
 - Faiss-mlx license: Apache-2.0
 - Current use in `fastEmbedR`: package-native float32 CPU HNSW distilled from
   FAISS's HNSW organization, plus native Metal exact and IVF-Flat search. The
-  Metal fused list-scan/top-k structure was informed by FAISS and Faiss-mlx.
-  The package does not link the FAISS or MLX libraries for these CPU/Metal
-  paths.
+  Metal fused list-scan/top-k structure was adapted from FAISS and Faiss-mlx.
+  The package does not link FAISS or MLX for CPU/Metal paths; optional CUDA
+  builds may link installed FAISS GPU directly.
 
 Implemented locations:
 
@@ -401,17 +407,18 @@ Implemented locations:
 - `inst/LICENSES/`: full upstream licenses, copyright notices, and pinned
   provenance.
 
-## RAPIDS cuML / cuVS
+## RAPIDS RAFT / cuVS
 
-- cuML repository: <https://github.com/rapidsai/cuml>
 - cuVS repository: <https://github.com/rapidsai/cuvs>
+- RAFT repository: <https://github.com/rapidsai/raft>
 - License: Apache-2.0
 - Current use in `fastEmbedR`: optional CUDA builds link directly to the cuVS
-  C API for exact and IVF-Flat KNN. cuML/cuVS UMAP and RAFT TSVD material were
+  C API for exact and IVF-Flat KNN. cuVS and RAFT TSVD material were
   studied as design references for GPU-resident KNN, decomposition, graph, and
   optimizer pipelines. The native Metal TSVD transfers the resident-workspace
   and block-subspace organization, not RAPIDS source code. fastEmbedR does not
-  vendor RAPIDS source or call cuML UMAP/openTSNE at runtime.
+  vendor RAPIDS source or call cuML UMAP/openTSNE at runtime. The package does
+  not link cuML; CUDA PCA uses RAFT TSVD directly.
 
 Implemented locations:
 

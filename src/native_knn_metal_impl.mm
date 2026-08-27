@@ -1,4 +1,9 @@
 /*
+ * SPDX-FileCopyrightText: 2015-2026 Meta Platforms, Inc. and affiliates
+ * SPDX-FileCopyrightText: 2024 Sydney Bach, The Solace Project
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT AND Apache-2.0
+ *
  * Native Metal IVF-Flat search for fastEmbedR.
  *
  * Search organization is informed by:
@@ -6,6 +11,9 @@
  *   Copyright (c) Meta Platforms, Inc. and affiliates (MIT).
  * - MLXPorts/Faiss-mlx, commit d092af559375144fc719cd88a10e414f92c625fa
  *   Copyright 2024 Sydney Bach, The Solace Project (Apache-2.0).
+ *   Upstream file: python/metalfaiss/faissmlx/kernels/ivf_kernels.py.
+ * - FAISS upstream files: faiss/IndexIVF.{h,cpp} and
+ *   faiss/IndexIVFFlat.{h,cpp}.
  *
  * This file is a new Objective-C++/Metal implementation. FAISS-derived
  * portions remain under the MIT license; portions adapted from the Faiss-mlx
@@ -37,7 +45,10 @@ namespace {
 constexpr int kMaxP = 1024;
 constexpr int kMaxGlobalP = 16384;
 constexpr int kMaxLists = 1024;
-constexpr int kMaxK = 64;
+// Standard sparse t-SNE support uses ceil(3 * perplexity). Keep enough local
+// top-k storage for the common perplexity-30 case (k = 90) without routing an
+// explicit Metal request through a host fallback.
+constexpr int kMaxK = 128;
 constexpr int kMaxProbe = 256;
 constexpr int kMaxShortlistPerGroup = 128;
 constexpr int kInitialShortlistPerGroup = 72;
@@ -52,7 +63,7 @@ constant uint NSG = 4;
 constant uint SIMD_WIDTH = 32;
 constant uint MAX_P = 1024;
 constant uint MAX_Q = 128;
-constant uint MAX_K = 64;
+constant uint MAX_K = 128;
 constant uint MAX_PROBE = 256;
 constant uint MAX_SHORTLIST = 128;
 

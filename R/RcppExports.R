@@ -89,8 +89,8 @@ rsvd_multiply_cuda_cpp <- function(left, right, transpose_left) {
     .Call(`_fastEmbedR_rsvd_multiply_cuda_cpp`, left, right, transpose_left)
 }
 
-cuml_tsvd_init_cuda_cpp <- function(data, n_components) {
-    .Call(`_fastEmbedR_cuml_tsvd_init_cuda_cpp`, data, n_components)
+raft_tsvd_init_cuda_cpp <- function(data, n_components) {
+    .Call(`_fastEmbedR_raft_tsvd_init_cuda_cpp`, data, n_components)
 }
 
 pca_tsvd_cuda_cpp <- function(data, n_components, center, scale) {
@@ -399,6 +399,14 @@ native_cuda_query_knn_cpp <- function(data, query, k, method = "auto", metric = 
 
 native_cuda_knn_to_host_cpp <- function(knn) {
     .Call(`_fastEmbedR_native_cuda_knn_to_host_cpp`, knn)
+}
+
+opentsne_kl_diagnostic_cpp <- function(indices, distances, layout, perplexity, n_threads) {
+    .Call(`_fastEmbedR_opentsne_kl_diagnostic_cpp`, indices, distances, layout, perplexity, n_threads)
+}
+
+opentsne_force_diagnostic_cpp <- function(indices, distances, layout, perplexity, exaggeration, grid_size, n_threads) {
+    .Call(`_fastEmbedR_opentsne_force_diagnostic_cpp`, indices, distances, layout, perplexity, exaggeration, grid_size, n_threads)
 }
 
 tsne_auto_parameters_cpp <- function(n, k, perplexity, perplexity_missing, backend, negative_gradient_method) {

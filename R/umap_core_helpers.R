@@ -113,6 +113,8 @@ apply_umap_thread_override <- function(cfg,
                                        n_threads,
                                        argument = "n_threads") {
   if (is.null(n_threads)) {
+    cfg$n.cores_requested <- cfg$n_threads
+    cfg$n.cores_effective <- cfg$n_threads
     return(cfg)
   }
   n_threads <- as.integer(n_threads)
@@ -126,7 +128,9 @@ apply_umap_thread_override <- function(cfg,
       call. = FALSE
     )
   }
+  cfg$n.cores_requested <- as.integer(n_threads)
   cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
+  cfg$n.cores_effective <- cfg$n_threads
   cfg
 }
 
@@ -483,6 +487,15 @@ run_umap_cpu_host_knn <- function(indices,
                                   verbose) {
   cfg$graph_prep_backend <- "cpu"
   if (n_components != 2L) {
+    graph <- umap_build_csr_graph(
+      indices,
+      distances,
+      as.integer(knn$col_start),
+      as.integer(knn$n_neighbors),
+      as.integer(knn$n_neighbors),
+      as.integer(cfg$n_threads),
+      graph_mode = graph_mode
+    )
     cfg <- add_gpu_transfer_metadata(
       cfg,
       indices,
@@ -491,14 +504,20 @@ run_umap_cpu_host_knn <- function(indices,
       n_components = n_components,
       objective = "umap"
     )
-    cfg$init_backend <- "cpu"
-    cfg$optimizer_mode <- "legacy_range_optimizer_non_2d"
-    layout <- fast_knn_umap_range_cpp(
-      indices,
-      distances,
-      as.integer(knn$col_start),
-      as.integer(knn$n_neighbors),
-      n_components,
+    cfg$init_backend <- paste0("cpu_", graph_mode, "_csr")
+    cfg$graph_prep_backend <- cfg$init_backend
+    cfg$graph_storage <- cfg$graph_prep_backend
+    cfg$graph_nnz <- as.integer(graph$nnz)
+    cfg$graph_max_weight <- as.numeric(graph$max_weight)
+    cfg$graph_cuda_like_width <- graph$cuda_like_width
+    cfg$graph_builder <- graph$graph_builder
+    cfg$optimizer_mode <- "csr_dimension_generic"
+    cfg$optimizer_schedule <- paste0("epochs_per_sample_", graph_mode, "_csr")
+    layout <- fast_knn_umap_csr_cpp(
+      graph$offsets,
+      graph$neighbors,
+      graph$weights,
+      as.integer(n_components),
       as.integer(cfg$n_epochs),
       cfg$min_dist,
       as.integer(cfg$negative_sample_rate),

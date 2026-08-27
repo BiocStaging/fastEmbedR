@@ -1,0 +1,50 @@
+name: Bug report
+description: Report reproducible incorrect behavior or a backend failure
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security vulnerabilities here; follow SECURITY.md.
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Requested backend
+      options: [cpu, metal, cuda, not backend-specific]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproducible example
+      description: Use synthetic or redistributable data when possible.
+      render: R
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities and session
+      description: Include fastEmbedR_capabilities(), packageVersion("fastEmbedR"), and sessionInfo().
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Package commit or release
+      placeholder: Full Git commit or package version
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and additional context
+      description: Remove credentials and private data before posting.

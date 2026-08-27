@@ -46,7 +46,7 @@ make_opentsne_pca_init <- function(x,
   if (identical(backend, "cuda")) {
     if (!exists("pca_tsvd_cuda_cpp", mode = "function")) {
       stop(
-        "CUDA PCA initialization requires native RAPIDS RAFT/cuML TSVD support, ",
+        "CUDA PCA initialization requires native RAPIDS RAFT TSVD support, ",
         "but the package was not built with that backend.",
         call. = FALSE
       )
@@ -73,7 +73,7 @@ make_opentsne_pca_init <- function(x,
       return(init)
     }
     stop(
-      "CUDA PCA initialization failed in native RAPIDS RAFT/cuML TSVD: ",
+      "CUDA PCA initialization failed in native RAPIDS RAFT TSVD: ",
       native_cuda$error,
       call. = FALSE
     )
@@ -111,7 +111,7 @@ make_opentsne_pca_init <- function(x,
 #' as an RDS file; later calls with the same path reuse the saved matrix instead
 #' of recomputing PCA. This is useful when comparing several KNN backends with
 #' exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
-#' native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
+#' native RAPIDS RAFT TSVD support compiled into the CUDA backend and fails
 #' loudly if that backend is unavailable. Metal uses fastEmbedR's native
 #' float32 block-subspace TSVD with native Metal centering/scaling, Metal
 #' Performance Shaders matrix products, and one resident GPU workspace. CPU

@@ -25,6 +25,7 @@ using Rcpp::NumericVector;
 extern "C" {
 bool fastembedr_cuda_available();
 const char* fastembedr_cuda_embedding_last_error();
+int fastembedr_cuda_opentsne_fft_grid_size(int n);
 int fastembedr_cuda_embed(const int* neighbors,
                           const float* weights,
                           const float* init,
@@ -1441,10 +1442,10 @@ NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix data,
 #endif
 }
 
-NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
+NumericMatrix raft_tsvd_init_cuda_impl(NumericMatrix data,
                                        int n_components) {
 #ifndef FASTEMBEDR_HAS_RAFT
-  Rcpp::stop("fastEmbedR was not built with native RAPIDS RAFT/cuML TSVD support.");
+  Rcpp::stop("fastEmbedR was not built with native RAPIDS RAFT TSVD support.");
 #else
   if (!fastembedr_cuda_available()) Rcpp::stop("No CUDA device is available.");
   const int n = data.nrow();
@@ -1583,11 +1584,6 @@ List pca_tsvd_cuda_impl(SEXP data,
     )
   );
 #endif
-}
-
-NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix data,
-                                      int n_components) {
-  return cuml_tsvd_init_cuda_impl(data, n_components);
 }
 
 NumericMatrix spectral_knn_init_cuda_impl(IntegerMatrix indices,
@@ -2216,6 +2212,7 @@ List knn_tsne_opentsne_cuda_impl(IntegerMatrix indices,
       Rcpp::Named("itercost_iterations") = IntegerVector::create(),
       Rcpp::Named("optimizer") = "opentsne_fitsne_fft_grid_native_cuda",
       Rcpp::Named("repulsion") = "fft_grid_cuda_cufft",
+      Rcpp::Named("fft_grid_size") = fastembedr_cuda_opentsne_fft_grid_size(n),
       Rcpp::Named("probabilities") = "symmetric_sparse_knn_cuda",
       Rcpp::Named("n_negatives") = NA_INTEGER,
       Rcpp::Named("n_threads") = NA_INTEGER,
@@ -2352,6 +2349,7 @@ List knn_tsne_opentsne_cuda_float_impl(IntegerMatrix indices,
     Rcpp::Named("itercost_iterations") = IntegerVector::create(),
     Rcpp::Named("optimizer") = "opentsne_fitsne_fft_grid_native_cuda",
     Rcpp::Named("repulsion") = "fft_grid_cuda_cufft",
+    Rcpp::Named("fft_grid_size") = fastembedr_cuda_opentsne_fft_grid_size(n),
     Rcpp::Named("probabilities") = "symmetric_sparse_knn_cuda_float32",
     Rcpp::Named("precision") = "float32",
     Rcpp::Named("n_negatives") = NA_INTEGER,
@@ -2613,6 +2611,7 @@ List knn_tsne_opentsne_cuda_gpu_impl(SEXP gpu_knn,
     Rcpp::Named("itercost_iterations") = IntegerVector::create(),
     Rcpp::Named("optimizer") = "opentsne_fitsne_fft_grid_native_cuda_gpu_knn",
     Rcpp::Named("repulsion") = "fft_grid_cuda_cufft",
+    Rcpp::Named("fft_grid_size") = fastembedr_cuda_opentsne_fft_grid_size(n),
     Rcpp::Named("probabilities") = "symmetric_sparse_knn_cuda_float32_gpu_resident",
     Rcpp::Named("precision") = "float32",
     Rcpp::Named("n_negatives") = NA_INTEGER,

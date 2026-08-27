@@ -24,8 +24,10 @@ project_landmark_model(
 \arguments{
 \item{model}{A model returned by [fit_landmark_model()].}
 
-\item{data}{The original full data matrix, or a matrix containing only new
-query observations in the same feature space.}
+\item{data}{The original full data matrix for a model fitted on a strict
+landmark subset, or a matrix containing only new query observations in the
+same feature space. A model fitted with all training rows as references
+always treats `data` as new query observations.}
 
 \item{query_indices}{Optional rows of `data` to project.}
 
@@ -52,9 +54,11 @@ query observations in the same feature space.}
 \item{...}{Low-level openTSNE transform controls.}
 }
 \value{
-A `fastEmbedR_embedding`. When `data` is the original full matrix,
-  `layout` is reassembled in original row order. Otherwise it contains only
-  the supplied query rows.
+A `fastEmbedR_embedding`. For a strict landmark-subset model, passing
+  the original full matrix reassembles `layout` in original row order.
+  Otherwise `layout` contains only the supplied query rows. The returned
+  parameters record `projection_scope` as `"original_reconstruction"` or
+  `"held_out_query"`.
 }
 \description{
 `project_landmark_model()` computes query-to-reference KNN with the same

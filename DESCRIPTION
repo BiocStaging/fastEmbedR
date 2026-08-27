@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
-Title: Fast Native UMAP and openTSNE Embeddings
-Version: 0.99.7
+Title: Opinionated Native UMAP and openTSNE Embeddings
+Version: 0.99.9
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),
@@ -31,17 +31,22 @@ Author: Moussa Kassim [aut],
     Silvano Piazza [aut],
     Stefano Cacciatore [aut, cre]
 Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
-Copyright: See inst/COPYRIGHTS for the FAISS and Faiss-mlx derived native KNN
-    components.
-Description: Native float32 UMAP and openTSNE-style embeddings from data
+Copyright: See inst/COPYRIGHTS and inst/NOTICE for source-level ownership,
+    adapted components, and optional linked dependencies.
+Description: An opinionated, fixed-policy float32 UMAP implementation and a
+    configurable native openTSNE-style implementation for embeddings from data
     matrices or precomputed nearest-neighbor indices and distances. One-call
     workflows use package-native CPU HNSW and Apple Metal exact or IVF-Flat
     search. Optional CUDA support links directly to FAISS GPU and the RAPIDS
     cuVS C API while retaining nearest-neighbor results on the device.
     Preprocessing, graph or affinity construction, fixed-reference transform,
     and layout optimization use native code with explicit CPU, Metal, and CUDA
-    backend reporting. Optional graph utilities support downstream Louvain,
-    Leiden, and Walktrap community detection.
+    backend reporting. UMAP exposes neighborhood, metric, graph mode, backend,
+    seed, and preprocessing controls, while optimizer controls such as epochs,
+    minimum distance, spread, learning rate, repulsion, and negative sampling
+    follow a recorded release policy rather than a general-purpose sweep API.
+    Optional graph utilities support downstream Louvain, Leiden, and Walktrap
+    community detection.
 License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastEmbedR,
     https://tkcaccia.github.io/fastEmbedR/,
@@ -49,6 +54,7 @@ URL: https://github.com/tkcaccia/fastEmbedR,
 BugReports: https://github.com/tkcaccia/fastEmbedR/issues
 biocViews:
     Software,
+    Infrastructure,
     Preprocessing,
     DimensionReduction,
     Visualization,
@@ -76,10 +82,13 @@ Suggests:
     uwot
 LinkingTo:
     Rcpp
-SystemRequirements: C++17; optional Apple Metal framework on
-    macOS for native Metal embedding backends; optional CUDA Toolkit with
-    FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT, and RAPIDS cuVS C libraries for native
-    CUDA embedding, PCA initialization, and nearest-neighbor backends
+SystemRequirements: C++17; optional Apple Foundation, Accelerate, Metal,
+    Metal Performance Shaders, and Metal Performance Shaders Graph frameworks on Apple Silicon
+    with macOS 14 or later and Xcode 15 or later for native Metal embedding
+    backends; optional CUDA Toolkit with
+    FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT/RMM, compatible NVIDIA
+    CCCL headers, and RAPIDS cuVS C libraries for native CUDA embedding, PCA
+    initialization, and nearest-neighbor backends
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
 Config/testthat/edition: 3

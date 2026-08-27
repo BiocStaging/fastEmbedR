@@ -1,3 +1,13 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Package-owned CUDA embedding, graph, and RAFT-TSVD adapter kernels. The
+ * build consumes installed CUDA/cuFFT, CCCL (CUB/Thrust), and optional RAFT
+ * headers/libraries; none of those dependency sources or binaries is vendored
+ * in fastEmbedR. See inst/THIRD_PARTY_DEPENDENCIES.json.
+ */
+
 #include <cuda_runtime.h>
 #include <cufft.h>
 #include <math_constants.h>
@@ -271,6 +281,10 @@ __device__ float deterministic_unit(unsigned int seed,
   x ^= (col + 1u) * 0x85ebca6bu;
   const unsigned int bits = mix_uint(x);
   return static_cast<float>(bits & 0x00ffffffu) / 8388607.5f - 1.0f;
+}
+
+__device__ __forceinline__ int tsne_sign_component(float value) {
+  return (value > 0.0f) - (value < 0.0f);
 }
 
 __device__ float clip4(float x) {
@@ -817,8 +831,10 @@ __global__ void landmark_tsne_epoch_kernel(const float* reference_layout,
   }
   float2 gain = gains[row];
   float2 update = updates[row];
-  gain.x = ((update.x > 0.0f) != (grad.x > 0.0f)) ? gain.x + 0.2f : gain.x * 0.8f + 0.01f;
-  gain.y = ((update.y > 0.0f) != (grad.y > 0.0f)) ? gain.y + 0.2f : gain.y * 0.8f + 0.01f;
+  gain.x = tsne_sign_component(update.x) != tsne_sign_component(grad.x) ?
+    gain.x + 0.2f : gain.x * 0.8f + 0.01f;
+  gain.y = tsne_sign_component(update.y) != tsne_sign_component(grad.y) ?
+    gain.y + 0.2f : gain.y * 0.8f + 0.01f;
   gain.x = fmaxf(gain.x, 0.01f);
   gain.y = fmaxf(gain.y, 0.01f);
   update.x = p.momentum * update.x - p.learning_rate * gain.x * grad.x;
@@ -2298,7 +2314,8 @@ __global__ void tsne_update_reduce_kernel(float* current,
       const std::size_t pos = base + static_cast<std::size_t>(c);
       const float g = grad[pos];
       const float old_inc = inc[pos];
-      const bool sign_changed = (g > 0.0f) != (old_inc > 0.0f);
+      const bool sign_changed =
+        tsne_sign_component(g) != tsne_sign_component(old_inc);
       float gain = sign_changed ? gains[pos] + 0.2f : gains[pos] * 0.8f;
       gain = fmaxf(gain, 0.01f);
       const float step = momentum * old_inc - eta * gain * g;
@@ -2824,7 +2841,10 @@ __global__ void opentsne_update_reduce_kernel(float* current,
       const std::size_t pos = base + static_cast<std::size_t>(d);
       const float g = grad[pos];
       const float old = update[pos];
-      float gain = ((old < 0.0f) != (g < 0.0f)) ? gains[pos] + 0.2f : gains[pos] * 0.8f + min_gain;
+      const bool sign_changed =
+        tsne_sign_component(old) != tsne_sign_component(g);
+      float gain = sign_changed ?
+        gains[pos] + 0.2f : gains[pos] * 0.8f + min_gain;
       gain = fmaxf(gain, min_gain);
       const float step = momentum * old - learning_rate * gain * g;
       gains[pos] = gain;
@@ -3964,7 +3984,7 @@ extern "C" int fastembedr_cuda_raft_tsvd_pca_init(const double* values,
                                                    float* out) {
   embedding_last_error.clear();
 #ifndef FASTEMBEDR_HAS_RAFT
-  set_embedding_error("fastEmbedR was not built with RAPIDS RAFT/cuML TSVD support.");
+  set_embedding_error("fastEmbedR was not built with RAPIDS RAFT TSVD support.");
   return 1;
 #else
   if (values == nullptr || out == nullptr) {
@@ -5587,6 +5607,25 @@ extern "C" int fastembedr_cuda_umap_optimize_coo(const int* heads,
   return 0;
 }
 
+int resolve_cuda_tsne_fft_grid_size(const int n) {
+  int grid_size = 512;
+  if (n < 20000) grid_size = 256;
+  if (n >= 100000) grid_size = 1024;
+  const char* grid_env = std::getenv("FASTEMBEDR_TSNE_FFT_GRID");
+  if (grid_env != nullptr && grid_env[0] != '\0') {
+    const int requested = std::atoi(grid_env);
+    if (requested == 32 || requested == 64 || requested == 128 ||
+        requested == 256 || requested == 512 || requested == 1024) {
+      grid_size = requested;
+    }
+  }
+  return grid_size;
+}
+
+extern "C" int fastembedr_cuda_opentsne_fft_grid_size(const int n) {
+  return resolve_cuda_tsne_fft_grid_size(n);
+}
+
 template <typename DistanceT>
 int fastembedr_cuda_opentsne_fft_from_knn_impl(const int* indices,
                                                        const DistanceT* distances,
@@ -5631,16 +5670,7 @@ int fastembedr_cuda_opentsne_fft_from_knn_impl(const int* indices,
     return 1;
   }
 
-  int grid_size = 512;
-  if (n < 20000) grid_size = 256;
-  if (n >= 100000) grid_size = 1024;
-  const char* grid_env = std::getenv("FASTEMBEDR_TSNE_FFT_GRID");
-  if (grid_env != nullptr && grid_env[0] != '\0') {
-    const int requested = std::atoi(grid_env);
-    if (requested == 128 || requested == 256 || requested == 512 || requested == 1024) {
-      grid_size = requested;
-    }
-  }
+  const int grid_size = resolve_cuda_tsne_fft_grid_size(n);
   const int fft_size = grid_size << 1;
   const int fft_total = fft_size * fft_size;
   const std::size_t input_items = static_cast<std::size_t>(n) * k;
@@ -5829,7 +5859,7 @@ int fastembedr_cuda_opentsne_fft_from_knn_impl(const int* indices,
     }
   } else if (pca_init_double != nullptr || pca_init_float != nullptr) {
 #ifndef FASTEMBEDR_HAS_RAFT
-    set_embedding_error("CUDA device-resident PCA initialization requires RAPIDS RAFT/cuML TSVD support.");
+    set_embedding_error("CUDA device-resident PCA initialization requires RAPIDS RAFT TSVD support.");
     cleanup();
     return 1;
 #else

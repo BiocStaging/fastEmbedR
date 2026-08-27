@@ -93,6 +93,9 @@ test_that("staged openTSNE uses the ordinary reference optimizer", {
   )
 
   expect_identical(model$fit$method, "opentsne")
+  expect_identical(model$n_neighbors, 12L)
+  expect_identical(model$affinity_support, "standard")
+  expect_identical(model$fit$parameters$affinity_support_k, 12L)
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
   expect_true(all(is.finite(fit$layout)))
   expect_equal(
@@ -125,28 +128,41 @@ test_that("query KNN searches only the fixed reference", {
   expect_identical(found$n_reference, 80L)
 })
 
-test_that("one-call landmark UMAP passes graph mode to its reference fit", {
+test_that("one-call landmark UMAP passes both graph modes to its reference fit", {
   set.seed(614)
   x <- matrix(rnorm(80 * 5), nrow = 80)
   old_refine <- getOption("fastEmbedR.landmark_umap_refine_epochs", NULL)
   on.exit(options(fastEmbedR.landmark_umap_refine_epochs = old_refine))
   options(fastEmbedR.landmark_umap_refine_epochs = 1L)
-  fit <- landmark_umap(
+  for (mode in c("fuzzy", "binary")) {
+    fit <- landmark_umap(
+      x,
+      landmarks = 40L,
+      n_neighbors = 8L,
+      standardize = FALSE,
+      backend = "cpu",
+      n.cores = 2L,
+      graph_mode = mode,
+      seed = 10L
+    )
+
+    expect_identical(fit$parameters$graph_mode, mode)
+    expect_identical(
+      fit$landmarks$reference_fit$parameters$graph_mode,
+      mode
+    )
+  }
+
+  default_fit <- landmark_umap(
     x,
     landmarks = 40L,
     n_neighbors = 8L,
     standardize = FALSE,
     backend = "cpu",
     n.cores = 2L,
-    graph_mode = "fuzzy",
     seed = 10L
   )
-
-  expect_identical(fit$parameters$graph_mode, "fuzzy")
-  expect_identical(
-    fit$landmarks$reference_fit$parameters$graph_mode,
-    "fuzzy"
-  )
+  expect_identical(default_fit$parameters$graph_mode, "fuzzy")
 })
 
 test_that("staged landmark projection preserves float32 layout output", {
@@ -174,4 +190,42 @@ test_that("staged landmark projection preserves float32 layout output", {
   expect_true(inherits(model$reference_data, "float32"))
   expect_true(inherits(fit$layout, "float32"))
   expect_identical(dim(fit$layout), c(60L, 2L))
+})
+
+test_that("all-reference models treat same-sized matrices as held-out queries", {
+  set.seed(616)
+  reference <- rbind(
+    matrix(rnorm(48, 0, 0.2), ncol = 4),
+    matrix(rnorm(48, 3, 0.2), ncol = 4)
+  )
+  query <- reference + matrix(rnorm(length(reference), sd = 0.05), ncol = 4)
+  selection <- select_landmarks(
+    reference,
+    landmarks = seq_len(nrow(reference)),
+    seed = 12L
+  )
+  model <- fit_landmark_model(
+    reference,
+    selection,
+    method = "umap",
+    n_neighbors = 6L,
+    graph_mode = "fuzzy",
+    backend = "cpu",
+    n.cores = 2L,
+    seed = 12L
+  )
+  reference_before <- unname(as.matrix(model$fit$layout))
+  projected <- project_landmark_model(
+    model,
+    query,
+    transform_k = 6L,
+    refinement_epochs = 1L,
+    n.cores = 2L
+  )
+
+  expect_s3_class(projected, "fastEmbedR_embedding")
+  expect_identical(dim(projected$layout), c(nrow(query), 2L))
+  expect_identical(projected$parameters$projection_scope, "held_out_query")
+  expect_false(identical(unname(as.matrix(projected$layout)), reference_before))
+  expect_equal(unname(as.matrix(model$fit$layout)), reference_before)
 })

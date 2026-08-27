@@ -1,9 +1,20 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Package-owned sparse-affinity and openTSNE-style optimization code. The
+ * implementation follows published t-SNE/FIt-SNE mathematics and documented
+ * openTSNE workflow behavior; no openTSNE, FIt-SNE, t-SNE-CUDA, or Rtsne
+ * source is copied, translated, linked, or vendored.
+ */
+
 #include <Rcpp.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <condition_variable>
@@ -390,7 +401,11 @@ std::string tsne_repulsion_mode(const int n,
 }
 
 int tsne_fft_grid_size(const int n) {
-  const int fallback = n >= 50000 ? 256 : (n >= 10000 ? 128 : 64);
+  // The automatic route uses exact repulsion for n <= 3000. When FFT is
+  // requested explicitly on a small problem, 64 cells can satisfy force-level
+  // tolerances yet converge to a measurably worse long-run KL objective. A
+  // minimum of 128 passed the matched common-affinity production trajectory.
+  const int fallback = n >= 50000 ? 256 : 128;
   const int requested = env_positive_int("FASTEMBEDR_TSNE_FFT_GRID", fallback);
   int grid = 32;
   while (grid < requested && grid < 512) grid <<= 1;
@@ -441,6 +456,20 @@ void compute_row_probabilities_flat(const NumericMatrix& distances,
   const int k = distances.ncol();
   std::fill(row_p, row_p + k, 0.0);
 
+  double min_d2 = DBL_MAX;
+  double max_d2 = 0.0;
+  for (int j = 0; j < k; ++j) {
+    const double d2 = distances(row, j) * distances(row, j);
+    min_d2 = std::min(min_d2, d2);
+    max_d2 = std::max(max_d2, d2);
+  }
+  const double spread = max_d2 - min_d2;
+  if (spread <= DBL_EPSILON * std::max(1.0, max_d2)) {
+    const double uniform = 1.0 / static_cast<double>(k);
+    std::fill(row_p, row_p + k, uniform);
+    return;
+  }
+
   bool found = false;
   double beta = 1.0;
   double min_beta = -DBL_MAX;
@@ -452,7 +481,7 @@ void compute_row_probabilities_flat(const NumericMatrix& distances,
     sum_p = DBL_MIN;
     for (int j = 0; j < k; ++j) {
       const double d = distances(row, j);
-      const double d2 = d * d;
+      const double d2 = d * d - min_d2;
       const double p = std::exp(-beta * d2);
       row_p[j] = p;
       sum_p += p;
@@ -461,7 +490,7 @@ void compute_row_probabilities_flat(const NumericMatrix& distances,
     double entropy = 0.0;
     for (int j = 0; j < k; ++j) {
       const double d = distances(row, j);
-      entropy += beta * (d * d * row_p[j]);
+      entropy += beta * ((d * d - min_d2) * row_p[j]);
     }
     entropy = entropy / sum_p + std::log(sum_p);
     const double diff = entropy - std::log(perplexity);
@@ -479,8 +508,23 @@ void compute_row_probabilities_flat(const NumericMatrix& distances,
         beta / 2.0 :
         (beta + min_beta) / 2.0;
     }
+    if (!std::isfinite(beta)) break;
   }
 
+  if (!std::isfinite(sum_p) || sum_p <= DBL_MIN) {
+    int tied = 0;
+    for (int j = 0; j < k; ++j) {
+      const double d2 = distances(row, j) * distances(row, j);
+      if (std::abs(d2 - min_d2) <= DBL_EPSILON * std::max(1.0, min_d2)) ++tied;
+    }
+    const double tied_mass = 1.0 / static_cast<double>(std::max(1, tied));
+    for (int j = 0; j < k; ++j) {
+      const double d2 = distances(row, j) * distances(row, j);
+      row_p[j] = std::abs(d2 - min_d2) <= DBL_EPSILON * std::max(1.0, min_d2) ?
+        tied_mass : 0.0;
+    }
+    return;
+  }
   const double inv_sum_p = 1.0 / sum_p;
   for (int j = 0; j < k; ++j) row_p[j] *= inv_sum_p;
 }
@@ -492,19 +536,34 @@ void compute_row_probabilities_float(const std::vector<float>& distances,
                                      float* row_p) {
   std::fill(row_p, row_p + k, 0.0f);
 
+  const std::size_t row_base = static_cast<std::size_t>(row) * k;
+  float min_d2 = FLT_MAX;
+  float max_d2 = 0.0f;
+  for (int j = 0; j < k; ++j) {
+    const float d = distances[row_base + j];
+    const float d2 = d * d;
+    min_d2 = std::min(min_d2, d2);
+    max_d2 = std::max(max_d2, d2);
+  }
+  const float spread = max_d2 - min_d2;
+  if (spread <= FLT_EPSILON * std::max(1.0f, max_d2)) {
+    const float uniform = 1.0f / static_cast<float>(k);
+    std::fill(row_p, row_p + k, uniform);
+    return;
+  }
+
   bool found = false;
   float beta = 1.0f;
   float min_beta = -FLT_MAX;
   float max_beta = FLT_MAX;
   const float tol = 1e-5f;
   float sum_p = FLT_MIN;
-  const std::size_t row_base = static_cast<std::size_t>(row) * k;
 
   for (int iter = 0; !found && iter < 200; ++iter) {
     sum_p = FLT_MIN;
     for (int j = 0; j < k; ++j) {
       const float d = distances[row_base + j];
-      const float d2 = d * d;
+      const float d2 = d * d - min_d2;
       const float p = std::exp(-beta * d2);
       row_p[j] = p;
       sum_p += p;
@@ -513,7 +572,7 @@ void compute_row_probabilities_float(const std::vector<float>& distances,
     float entropy = 0.0f;
     for (int j = 0; j < k; ++j) {
       const float d = distances[row_base + j];
-      entropy += beta * (d * d * row_p[j]);
+      entropy += beta * ((d * d - min_d2) * row_p[j]);
     }
     entropy = entropy / sum_p + std::log(sum_p);
     const float diff = entropy - static_cast<float>(std::log(perplexity));
@@ -531,8 +590,25 @@ void compute_row_probabilities_float(const std::vector<float>& distances,
         beta * 0.5f :
         (beta + min_beta) * 0.5f;
     }
+    if (!std::isfinite(beta)) break;
   }
 
+  if (!std::isfinite(sum_p) || sum_p <= FLT_MIN) {
+    int tied = 0;
+    for (int j = 0; j < k; ++j) {
+      const float d = distances[row_base + j];
+      const float d2 = d * d;
+      if (std::abs(d2 - min_d2) <= FLT_EPSILON * std::max(1.0f, min_d2)) ++tied;
+    }
+    const float tied_mass = 1.0f / static_cast<float>(std::max(1, tied));
+    for (int j = 0; j < k; ++j) {
+      const float d = distances[row_base + j];
+      const float d2 = d * d;
+      row_p[j] = std::abs(d2 - min_d2) <= FLT_EPSILON * std::max(1.0f, min_d2) ?
+        tied_mass : 0.0f;
+    }
+    return;
+  }
   const float inv_sum_p = 1.0f / sum_p;
   for (int j = 0; j < k; ++j) row_p[j] *= inv_sum_p;
 }
@@ -1080,13 +1156,15 @@ void compute_gradient_fft_grid_f(const SparseProbabilitiesF& p,
                                  const float exaggeration,
                                  const int n_threads,
                                  FftGridWorkspaceT<float>* workspace,
-                                 std::vector<float>& grad) {
+                                 std::vector<float>& grad,
+                                 const int grid_size_override) {
   if (dims != 2) {
     compute_gradient_pair_symmetric_f(p, y, n, dims, exaggeration, n_threads, grad);
     return;
   }
   std::fill(grad.begin(), grad.end(), 0.0f);
-  const int grid_size = tsne_fft_grid_size(n);
+  const int grid_size = grid_size_override > 0 ?
+    grid_size_override : tsne_fft_grid_size(n);
   float min_x = y[0], max_x = y[0], min_y = y[1], max_y = y[1];
   for (int i = 1; i < n; ++i) {
     const std::size_t base = static_cast<std::size_t>(i) * 2u;
@@ -1191,7 +1269,9 @@ void compute_gradient_f(const SparseProbabilitiesF& p,
                         FftGridWorkspaceT<float>* fft_workspace,
                         std::vector<float>& grad) {
   if (repulsion_mode == "fft_grid") {
-    compute_gradient_fft_grid_f(p, y, n, dims, exaggeration, n_threads, fft_workspace, grad);
+    compute_gradient_fft_grid_f(
+      p, y, n, dims, exaggeration, n_threads, fft_workspace, grad, 0
+    );
   } else {
     compute_gradient_pair_symmetric_f(p, y, n, dims, exaggeration, n_threads, grad);
   }
@@ -1569,6 +1649,173 @@ void compute_tsne_transform_gradient_2d_flat(const std::vector<double>& referenc
 
 } // namespace
 
+// Exact post-fit KL diagnostic. This is intentionally separate from the
+// production optimizer timing because evaluating the dense low-dimensional
+// normalization is O(n^2).
+// [[Rcpp::export]]
+double opentsne_kl_diagnostic_cpp(IntegerMatrix indices,
+                                  SEXP distances,
+                                  SEXP layout,
+                                  double perplexity,
+                                  int n_threads) {
+  const std::pair<int, int> knn_dims = distance_sexp_dims(distances);
+  const std::pair<int, int> layout_dims = distance_sexp_dims(layout);
+  if (indices.nrow() != knn_dims.first || indices.ncol() != knn_dims.second) {
+    Rcpp::stop("KNN `indices` and `distances` must have the same dimensions.");
+  }
+  if (layout_dims.first != indices.nrow() || layout_dims.second < 1 ||
+      layout_dims.second > 3) {
+    Rcpp::stop("`layout` must have one row per KNN row and one to three columns.");
+  }
+  if (!std::isfinite(perplexity) || perplexity <= 0.0 ||
+      perplexity > static_cast<double>(indices.ncol())) {
+    Rcpp::stop("`perplexity` must be positive and no larger than the KNN width.");
+  }
+  const int threads = resolve_threads(n_threads, indices.nrow());
+  ParallelExecutor parallel_executor(threads);
+  ParallelExecutorScope parallel_scope(&parallel_executor);
+  std::vector<float> distance_values = copy_distances_float_sexp(distances, threads);
+  SparseProbabilitiesF probabilities = build_tsne_probabilities_float(
+    indices,
+    distance_values,
+    perplexity,
+    threads
+  );
+  std::vector<float> y = copy_distances_float_sexp(layout, threads);
+  return evaluate_kl_f(
+    probabilities,
+    y,
+    indices.nrow(),
+    layout_dims.second,
+    threads
+  );
+}
+
+// Lower-level validation surface for the native float32 t-SNE force kernels.
+// This is intentionally internal: it exposes implementation components for
+// regression tests and release validation, not a second embedding API.
+// [[Rcpp::export]]
+List opentsne_force_diagnostic_cpp(IntegerMatrix indices,
+                                   SEXP distances,
+                                   SEXP layout,
+                                   double perplexity,
+                                   double exaggeration,
+                                   int grid_size,
+                                   int n_threads) {
+  const std::pair<int, int> knn_dims = distance_sexp_dims(distances);
+  const std::pair<int, int> layout_dims = distance_sexp_dims(layout);
+  if (indices.nrow() != knn_dims.first || indices.ncol() != knn_dims.second) {
+    Rcpp::stop("KNN `indices` and `distances` must have the same dimensions.");
+  }
+  if (layout_dims.first != indices.nrow() || layout_dims.second != 2) {
+    Rcpp::stop("`layout` must have one row per KNN row and exactly two columns.");
+  }
+  if (!std::isfinite(perplexity) || perplexity <= 0.0 ||
+      perplexity > static_cast<double>(indices.ncol())) {
+    Rcpp::stop("`perplexity` must be positive and no larger than the KNN width.");
+  }
+  if (!std::isfinite(exaggeration) || exaggeration <= 0.0) {
+    Rcpp::stop("`exaggeration` must be positive and finite.");
+  }
+  if (grid_size < 32 || grid_size > 512 ||
+      (grid_size & (grid_size - 1)) != 0) {
+    Rcpp::stop("`grid_size` must be a power of two between 32 and 512.");
+  }
+
+  const int n = indices.nrow();
+  const int dims = 2;
+  const int threads = resolve_threads(n_threads, n);
+  ParallelExecutor parallel_executor(threads);
+  ParallelExecutorScope parallel_scope(&parallel_executor);
+  std::vector<float> distance_values = copy_distances_float_sexp(distances, threads);
+  SparseProbabilitiesF probabilities = build_tsne_probabilities_float(
+    indices, distance_values, perplexity, threads
+  );
+  std::vector<float> y = copy_distances_float_sexp(layout, threads);
+  if (!std::all_of(y.begin(), y.end(), [](const float value) {
+        return std::isfinite(value);
+      })) {
+    Rcpp::stop("`layout` must contain only finite coordinates.");
+  }
+
+  std::vector<float> attractive(y.size(), 0.0f);
+  add_sparse_attractive_gradient_f(
+    probabilities, y, n, dims, static_cast<float>(exaggeration), threads,
+    attractive
+  );
+
+  std::vector<float> exact_total(y.size(), 0.0f);
+  compute_gradient_pair_symmetric_f(
+    probabilities, y, n, dims, static_cast<float>(exaggeration), threads,
+    exact_total
+  );
+  std::vector<float> exact_repulsive(y.size(), 0.0f);
+  for (std::size_t i = 0; i < y.size(); ++i) {
+    exact_repulsive[i] = exact_total[i] - attractive[i];
+  }
+
+  FftGridWorkspaceT<float> fft_workspace;
+  std::vector<float> fft_total(y.size(), 0.0f);
+  compute_gradient_fft_grid_f(
+    probabilities, y, n, dims, static_cast<float>(exaggeration), threads,
+    &fft_workspace, fft_total, grid_size
+  );
+  std::vector<float> fft_repulsive(y.size(), 0.0f);
+  for (std::size_t i = 0; i < y.size(); ++i) {
+    fft_repulsive[i] = fft_total[i] - attractive[i];
+  }
+
+  auto as_matrix = [&](const std::vector<float>& values, const float scale) {
+    NumericMatrix out(n, dims);
+    for (int row = 0; row < n; ++row) {
+      for (int column = 0; column < dims; ++column) {
+        out(row, column) = static_cast<double>(
+          values[static_cast<std::size_t>(row) * dims + column] * scale
+        );
+      }
+    }
+    return out;
+  };
+  auto l2_norm = [](const std::vector<float>& values) {
+    double sum = 0.0;
+    for (const float value : values) {
+      sum += static_cast<double>(value) * static_cast<double>(value);
+    }
+    return std::sqrt(sum);
+  };
+
+  IntegerVector row_ptr(probabilities.row_ptr.begin(), probabilities.row_ptr.end());
+  IntegerVector col(probabilities.col.size());
+  NumericVector weight(probabilities.val.size());
+  for (std::size_t i = 0; i < probabilities.col.size(); ++i) {
+    col[static_cast<R_xlen_t>(i)] = probabilities.col[i] + 1;
+    weight[static_cast<R_xlen_t>(i)] = static_cast<double>(probabilities.val[i]);
+  }
+
+  return List::create(
+    Rcpp::Named("attractive_force") = as_matrix(attractive, 1.0f),
+    Rcpp::Named("repulsive_force_exact") = as_matrix(exact_repulsive, 1.0f),
+    Rcpp::Named("optimizer_gradient_exact") = as_matrix(exact_total, 1.0f),
+    Rcpp::Named("objective_gradient_exact") = as_matrix(exact_total, 4.0f),
+    Rcpp::Named("repulsive_force_fft") = as_matrix(fft_repulsive, 1.0f),
+    Rcpp::Named("optimizer_gradient_fft") = as_matrix(fft_total, 1.0f),
+    Rcpp::Named("objective_gradient_fft") = as_matrix(fft_total, 4.0f),
+    Rcpp::Named("sum_q") = static_cast<double>(compute_sum_q_f(y, n, dims, threads)),
+    Rcpp::Named("kl") = evaluate_kl_f(probabilities, y, n, dims, threads),
+    Rcpp::Named("attractive_norm") = l2_norm(attractive),
+    Rcpp::Named("repulsive_exact_norm") = l2_norm(exact_repulsive),
+    Rcpp::Named("repulsive_fft_norm") = l2_norm(fft_repulsive),
+    Rcpp::Named("affinity_row_ptr0") = row_ptr,
+    Rcpp::Named("affinity_col1") = col,
+    Rcpp::Named("affinity_weight") = weight,
+    Rcpp::Named("grid_size") = grid_size,
+    Rcpp::Named("perplexity") = perplexity,
+    Rcpp::Named("exaggeration") = exaggeration,
+    Rcpp::Named("precision") = "float32",
+    Rcpp::Named("objective_gradient_scale") = 4.0
+  );
+}
+
 // [[Rcpp::export]]
 List tsne_auto_parameters_cpp(const int n,
                               const int k,
@@ -1593,7 +1840,10 @@ List tsne_auto_parameters_cpp(const int n,
   );
 
   const double early_exaggeration = 12.0;
-  const int needed_k = std::max(1, std::min(n - 1, static_cast<int>(std::ceil(resolved_perplexity))));
+  const int needed_k = std::max(
+    1,
+    std::min(n - 1, static_cast<int>(std::ceil(3.0 * resolved_perplexity)))
+  );
   const bool kld_auto_stop = false;
 
   return List::create(
@@ -1660,6 +1910,7 @@ List knn_tsne_opentsne_float_cpp(IntegerMatrix indices,
   if (theta < 0.0 || theta > 1.0) Rcpp::stop("`theta` must lie in [0, 1].");
 
   const int threads = resolve_threads(n_threads, n);
+  const int requested_threads = n_threads;
   ParallelExecutor parallel_executor(threads);
   ParallelExecutorScope parallel_scope(&parallel_executor);
   if (verbose) {
@@ -1669,9 +1920,11 @@ List knn_tsne_opentsne_float_cpp(IntegerMatrix indices,
                 << ", threads=" << threads << "\n";
   }
 
+  const auto native_start = std::chrono::steady_clock::now();
   std::vector<float> distance_values = copy_distances_float_sexp(distances, threads);
   SparseProbabilitiesF p = build_tsne_probabilities_float(indices, distance_values, perplexity, threads);
   std::vector<float>().swap(distance_values);
+  const auto affinity_end = std::chrono::steady_clock::now();
 
   const std::string repulsion_mode = tsne_repulsion_mode(n, theta, negative_gradient_method);
   std::string optimizer_name = repulsion_mode == "fft_grid" ?
@@ -1828,6 +2081,11 @@ List knn_tsne_opentsne_float_cpp(IntegerMatrix indices,
       layout(i, d) = static_cast<double>(y[static_cast<std::size_t>(i) * n_components + d]);
     }
   }
+  const auto native_end = std::chrono::steady_clock::now();
+  const double affinity_sec =
+    std::chrono::duration<double>(affinity_end - native_start).count();
+  const double optimization_sec =
+    std::chrono::duration<double>(native_end - affinity_end).count();
 
   return List::create(
     Rcpp::Named("Y") = layout,
@@ -1836,8 +2094,14 @@ List knn_tsne_opentsne_float_cpp(IntegerMatrix indices,
     Rcpp::Named("itercost_iterations") = itercost_iterations,
     Rcpp::Named("optimizer") = optimizer_name,
     Rcpp::Named("repulsion") = repulsion_mode,
+    Rcpp::Named("fft_grid_size") = repulsion_mode == "fft_grid" ?
+      tsne_fft_grid_size(n) : NA_INTEGER,
     Rcpp::Named("theta_requested") = theta,
     Rcpp::Named("n_threads") = threads,
+    Rcpp::Named("n_threads_requested") = requested_threads,
+    Rcpp::Named("affinity_elapsed_sec") = affinity_sec,
+    Rcpp::Named("optimization_elapsed_sec") = optimization_sec,
+    Rcpp::Named("native_total_elapsed_sec") = affinity_sec + optimization_sec,
     Rcpp::Named("precision") = "float32",
     Rcpp::Named("learning_rate") = learning_rate_auto ? NA_REAL : learning_rate,
     Rcpp::Named("learning_rate_early") = learning_rate_auto ?

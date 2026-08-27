@@ -44,7 +44,7 @@ An initialization matrix suitable for `Y_init`. Float32 input is
 as an RDS file; later calls with the same path reuse the saved matrix instead
 of recomputing PCA. This is useful when comparing several KNN backends with
 exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
-native RAPIDS RAFT/cuML TSVD support compiled into the CUDA backend and fails
+native RAPIDS RAFT TSVD support compiled into the CUDA backend and fails
 loudly if that backend is unavailable. Metal uses fastEmbedR's native
 float32 block-subspace TSVD with native Metal centering/scaling, Metal
 Performance Shaders matrix products, and one resident GPU workspace. CPU

@@ -433,15 +433,15 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// cuml_tsvd_init_cuda_cpp
-NumericMatrix cuml_tsvd_init_cuda_cpp(NumericMatrix data, int n_components);
-RcppExport SEXP _fastEmbedR_cuml_tsvd_init_cuda_cpp(SEXP dataSEXP, SEXP n_componentsSEXP) {
+// raft_tsvd_init_cuda_cpp
+NumericMatrix raft_tsvd_init_cuda_cpp(NumericMatrix data, int n_components);
+RcppExport SEXP _fastEmbedR_raft_tsvd_init_cuda_cpp(SEXP dataSEXP, SEXP n_componentsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
     Rcpp::traits::input_parameter< int >::type n_components(n_componentsSEXP);
-    rcpp_result_gen = Rcpp::wrap(cuml_tsvd_init_cuda_cpp(data, n_components));
+    rcpp_result_gen = Rcpp::wrap(raft_tsvd_init_cuda_cpp(data, n_components));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1676,6 +1676,38 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// opentsne_kl_diagnostic_cpp
+double opentsne_kl_diagnostic_cpp(IntegerMatrix indices, SEXP distances, SEXP layout, double perplexity, int n_threads);
+RcppExport SEXP _fastEmbedR_opentsne_kl_diagnostic_cpp(SEXP indicesSEXP, SEXP distancesSEXP, SEXP layoutSEXP, SEXP perplexitySEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type indices(indicesSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type distances(distancesSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type layout(layoutSEXP);
+    Rcpp::traits::input_parameter< double >::type perplexity(perplexitySEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(opentsne_kl_diagnostic_cpp(indices, distances, layout, perplexity, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// opentsne_force_diagnostic_cpp
+List opentsne_force_diagnostic_cpp(IntegerMatrix indices, SEXP distances, SEXP layout, double perplexity, double exaggeration, int grid_size, int n_threads);
+RcppExport SEXP _fastEmbedR_opentsne_force_diagnostic_cpp(SEXP indicesSEXP, SEXP distancesSEXP, SEXP layoutSEXP, SEXP perplexitySEXP, SEXP exaggerationSEXP, SEXP grid_sizeSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type indices(indicesSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type distances(distancesSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type layout(layoutSEXP);
+    Rcpp::traits::input_parameter< double >::type perplexity(perplexitySEXP);
+    Rcpp::traits::input_parameter< double >::type exaggeration(exaggerationSEXP);
+    Rcpp::traits::input_parameter< int >::type grid_size(grid_sizeSEXP);
+    Rcpp::traits::input_parameter< int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(opentsne_force_diagnostic_cpp(indices, distances, layout, perplexity, exaggeration, grid_size, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 // tsne_auto_parameters_cpp
 List tsne_auto_parameters_cpp(const int n, const int k, const double perplexity, const bool perplexity_missing, const std::string backend, const std::string negative_gradient_method);
 RcppExport SEXP _fastEmbedR_tsne_auto_parameters_cpp(SEXP nSEXP, SEXP kSEXP, SEXP perplexitySEXP, SEXP perplexity_missingSEXP, SEXP backendSEXP, SEXP negative_gradient_methodSEXP) {
@@ -1796,7 +1828,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_knn_structure_score_cuda_cpp", (DL_FUNC) &_fastEmbedR_knn_structure_score_cuda_cpp, 6},
     {"_fastEmbedR_silhouette_score_cuda_cpp", (DL_FUNC) &_fastEmbedR_silhouette_score_cuda_cpp, 3},
     {"_fastEmbedR_rsvd_multiply_cuda_cpp", (DL_FUNC) &_fastEmbedR_rsvd_multiply_cuda_cpp, 3},
-    {"_fastEmbedR_cuml_tsvd_init_cuda_cpp", (DL_FUNC) &_fastEmbedR_cuml_tsvd_init_cuda_cpp, 2},
+    {"_fastEmbedR_raft_tsvd_init_cuda_cpp", (DL_FUNC) &_fastEmbedR_raft_tsvd_init_cuda_cpp, 2},
     {"_fastEmbedR_pca_tsvd_cuda_cpp", (DL_FUNC) &_fastEmbedR_pca_tsvd_cuda_cpp, 4},
     {"_fastEmbedR_embedding_metal_available_cpp", (DL_FUNC) &_fastEmbedR_embedding_metal_available_cpp, 0},
     {"_fastEmbedR_spectral_knn_init_metal_cpp", (DL_FUNC) &_fastEmbedR_spectral_knn_init_metal_cpp, 5},
@@ -1874,6 +1906,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastEmbedR_native_cuda_knn_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_cpp, 6},
     {"_fastEmbedR_native_cuda_query_knn_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_query_knn_cpp, 7},
     {"_fastEmbedR_native_cuda_knn_to_host_cpp", (DL_FUNC) &_fastEmbedR_native_cuda_knn_to_host_cpp, 1},
+    {"_fastEmbedR_opentsne_kl_diagnostic_cpp", (DL_FUNC) &_fastEmbedR_opentsne_kl_diagnostic_cpp, 5},
+    {"_fastEmbedR_opentsne_force_diagnostic_cpp", (DL_FUNC) &_fastEmbedR_opentsne_force_diagnostic_cpp, 7},
     {"_fastEmbedR_tsne_auto_parameters_cpp", (DL_FUNC) &_fastEmbedR_tsne_auto_parameters_cpp, 6},
     {"_fastEmbedR_knn_tsne_opentsne_float_cpp", (DL_FUNC) &_fastEmbedR_knn_tsne_opentsne_float_cpp, 24},
     {"_fastEmbedR_transform_tsne_cpp", (DL_FUNC) &_fastEmbedR_transform_tsne_cpp, 21},

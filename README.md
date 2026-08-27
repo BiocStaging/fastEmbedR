@@ -8,12 +8,17 @@
 [Examples](docs/examples.md) |
 [Benchmarks](docs/benchmarks.md) |
 [API](docs/usage-api.md) |
+[API Map](docs/api-map.md) |
 [Reproducibility](docs/reproducibility.md) |
+[Development](docs/development.md) |
 [References](docs/references.md) |
 [Benchmark repository](https://github.com/tkcaccia/fastEmbedR-benchmark)
 
 `fastEmbedR` is a native R/C++ package for fast dimensionality reduction from
-nearest-neighbor graphs. Its primary contributions are:
+nearest-neighbor graphs. Its UMAP implementation is deliberately opinionated:
+it provides one recorded optimizer policy validated across CPU, Metal, and
+CUDA, rather than a drop-in interface for arbitrary UMAP parameter sweeps. Its
+primary contributions are:
 
 - UMAP from KNN input;
 - openTSNE-style t-SNE from KNN input;
@@ -28,13 +33,25 @@ affinities, two-phase t-SNE optimization, FIt-SNE interpolation/FFT repulsion,
 and fixed-reference transformation. It does not mean that fastEmbedR wraps,
 ports, or is API-compatible with the Python `openTSNE` package. fastEmbedR
 defines its own R API, defaults, objects, float32 storage, and native
-CPU/Metal/CUDA kernels.
+CPU/Metal/CUDA kernels. The production default uses
+`affinity_support = "standard"`, corresponding to
+`ceiling(3 * perplexity)` non-self candidate neighbors. The older
+`"compact"` policy uses only `ceiling(perplexity)` and is exposed solely as an
+explicit speed/memory approximation.
 
 Publication benchmark scripts, dataset manifests, HPC launchers, and data
 acquisition instructions are maintained separately in
 [`tkcaccia/fastEmbedR-benchmark`](https://github.com/tkcaccia/fastEmbedR-benchmark).
 The package repository does not distribute benchmark datasets or manuscript
 files.
+
+Hardware evidence is reported at three distinct levels: full benchmark
+validation, strict real-device smoke/correctness testing, and build-level
+architectural compatibility. Metal performance has been benchmarked only on
+one Apple M3 system; other Apple Silicon systems are compatibility targets and
+do not inherit the M3 performance results. CUDA architecture flags and a
+successful build likewise do not constitute runtime or performance evidence
+for an untested GPU. See the [hardware evidence contract](docs/backend-validation.md).
 
 The intended workflow is:
 
@@ -89,6 +106,13 @@ y_from_knn <- fastEmbedR::umap_knn(knn, backend = "cpu", seed = 1)
 
 `umap()` and `umap_knn()` use the standard fuzzy UMAP graph by default. Set
 `graph_mode = "binary"` only for the explicit adjacency-only sensitivity mode.
+The public UMAP API exposes `n_neighbors`, metric, graph mode, preprocessing,
+backend, seed, output dimension, and CPU thread count. Epochs, `min_dist`,
+spread, learning rate, repulsion strength, negative-sample rate, KNN index
+tuning, and optimizer mode follow the package policy and are recorded in
+`fit$parameters`; they are not public sweep arguments. Users whose analysis
+depends on varying those controls should use a general-purpose implementation
+such as `uwot` or `umap-learn`.
 
 When a one-call function receives a `float::float32` matrix, its returned
 `layout` remains float32 to reduce host memory. Plot the embedding object
@@ -96,6 +120,10 @@ directly with `plot(fit)`; fastEmbedR decodes the compact payload for graphics
 and quality metrics without changing the stored layout.
 
 ## Main Functions
+
+The complete class, backend, residency, method, and lifecycle inventory is
+available from `fastEmbedR::fastEmbedR_api()` and in the
+[public API map](docs/api-map.md).
 
 | Function | Purpose |
 | --- | --- |
@@ -130,7 +158,10 @@ For the development version:
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/fastEmbedR")
+# Reproducible source installation: replace with the reviewed release tag or
+# full 40-character commit recorded by the release manifest.
+ref <- "REPLACE_WITH_FROZEN_TAG_OR_COMMIT"
+remotes::install_github(paste0("tkcaccia/fastEmbedR@", ref))
 ```
 
 See [Installation](docs/installation.md) for `fastEmbedR` CPU, Metal, and CUDA
@@ -146,3 +177,11 @@ are used only as optional external benchmark/reference tools, not as required
 runtime dependencies or vendored source. Native KNN derivatives and optional
 linked libraries retain the FAISS MIT, Faiss-mlx Apache-2.0, and RAPIDS cuVS
 Apache-2.0 notices under `inst/LICENSES/`.
+
+Source-level provenance is auditable in [`inst/NOTICE`](inst/NOTICE),
+[`inst/COPYRIGHTS`](inst/COPYRIGHTS), and the machine-readable
+[`inst/THIRD_PARTY_DEPENDENCIES.json`](inst/THIRD_PARTY_DEPENDENCIES.json).
+These files distinguish adapted or vendored code from optional linked
+libraries, Apple system frameworks, design references, and benchmark-only
+software. Every adapted/vendored component is pinned to an upstream commit and
+mapped to both package and upstream source files.

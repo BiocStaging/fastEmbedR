@@ -2,11 +2,16 @@
 #define FASTEMBEDR_DLPACK_DLPACK_H_
 
 /*
+ * SPDX-FileCopyrightText: Copyright DMLC contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Minimal DLPack C ABI header for the optional RAPIDS cuVS backend.
  *
- * This header follows the stable public DLPack tensor structs and enum names
- * from dmlc/dlpack (Apache-2.0). fastEmbedR uses only these ABI definitions
- * to pass dense matrices to cuVS through its C API.
+ * Reduced from dmlc/dlpack v1.0 commit
+ * bbd2f4d32427e548797929af08cfe2a9cbb3cf12,
+ * include/dlpack/dlpack.h. fastEmbedR retains only the stable tensor structs
+ * and enum names needed to pass dense matrices through the cuVS C API. The
+ * complete Apache-2.0 license is installed as LICENSES/DLPACK-LICENSE.
  */
 
 #include <stdint.h>

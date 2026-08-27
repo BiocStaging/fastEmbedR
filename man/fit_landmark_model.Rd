@@ -10,6 +10,7 @@ fit_landmark_model(
   method = c("umap", "opentsne"),
   n_neighbors = NULL,
   perplexity = NULL,
+  affinity_support = c("standard", "compact"),
   n_components = 2L,
   metric = c("euclidean", "cosine", "correlation", "inner_product"),
   seed = 4L,
@@ -34,6 +35,10 @@ indices.}
 precomputed KNN support width; `NULL` derives it from `perplexity`.}
 
 \item{perplexity}{openTSNE perplexity.}
+
+\item{affinity_support}{openTSNE affinity support policy. `"standard"`
+uses `ceiling(3 * perplexity)` neighbors; `"compact"` is the explicit
+`ceiling(perplexity)` approximation.}
 
 \item{n_components}{Embedding dimensionality.}
 

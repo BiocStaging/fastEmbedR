@@ -21,6 +21,27 @@ repository.
 Runner registration and custom labels follow GitHub's
 [self-hosted runner guidance](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow).
 
+## Evidence Levels
+
+Hardware statements use three non-interchangeable labels:
+
+| Evidence level | What it establishes | What it does not establish |
+|---|---|---|
+| Full benchmark validation | Release-locked runtime, memory, and quality on the named machine and dataset suite, with repetitions and complete manifests | Performance on another processor, GPU generation, operating system, or release |
+| Hardware smoke/correctness testing | The exact commit builds, executes the requested backend without fallback, passes numerical checks, and completes package tests on the named device | Representative throughput or scalability |
+| Build-level architectural compatibility | The toolchain accepts the target and package plus linked libraries contain compatible device code | Successful execution, numerical correctness, or performance on that device |
+
+At the current manuscript freeze, Metal performance evidence is limited to
+seven datasets on one Apple M3 system. No performance claim is transferred to
+another Apple Silicon generation. Other Apple Silicon configurations meeting
+the documented macOS/Xcode contract are compatibility targets until strict
+device evidence is archived. For CUDA, the historical broad benchmark used an
+NVIDIA L40S (`sm_89`), and a current numerical diagnostic executed on an RTX
+5060 Ti (`sm_120`). User-selected `FASTEMBEDR_CUDA_ARCH` values and linked
+library architecture lists remain build-level claims until the corresponding
+GPU executes the strict workflow; scientific performance requires the full
+benchmark separately.
+
 ## Evidence Contract
 
 Each hardware run records:
@@ -29,6 +50,8 @@ Each hardware run records:
 - UTC timestamp and backend requested;
 - `fastEmbedR_capabilities()` and `sessionInfo()`;
 - whether the requested backend was available;
+- the evidence class, explicitly marked as hardware smoke/correctness rather
+  than a full performance benchmark;
 - the backend actually recorded by PCA, KNN, one-call UMAP, openTSNE, and
   Leiden results;
 - elapsed smoke-test times;

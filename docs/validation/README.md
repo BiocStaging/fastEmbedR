@@ -1,8 +1,16 @@
 # Real-Hardware Evidence
 
-Release evidence is produced by `.github/workflows/hardware-validation.yaml`.
+Strict hardware smoke/correctness evidence is produced by
+`.github/workflows/hardware-validation.yaml`.
 CPU, Metal, and CUDA each produce a separate artifact bound to the exact Git
 commit in the artifact name and in `identity.csv`.
+
+These artifacts demonstrate execution and numerical/backend identity on the
+named device. They are not full scientific performance benchmarks. A full
+benchmark claim additionally requires the release-locked dataset suite,
+repetitions, memory and quality measurements, and manifests from the separate
+benchmark repository. A compiled architecture that has not executed the
+workflow is only a build-level compatibility target.
 
 Every accepted artifact contains:
 
@@ -11,6 +19,8 @@ Every accepted artifact contains:
   installed `fastEmbedR` shared library;
 - `SHA256SUMS` covering every retained evidence file;
 - `hardware.txt`, `sessionInfo.txt`, and `capabilities.csv`;
+- `evidence-scope.csv`, which labels the artifact as strict hardware
+  smoke/correctness evidence rather than a performance benchmark;
 - build and installation logs;
 - the complete installed-package test log;
 - `hardware-benchmark.csv` for PCA, KNN, UMAP, openTSNE, and Leiden; and

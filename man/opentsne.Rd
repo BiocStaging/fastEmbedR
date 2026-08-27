@@ -7,6 +7,7 @@
 opentsne(
   data,
   perplexity = NULL,
+  affinity_support = c("standard", "compact"),
   n_components = 2L,
   init_data = NULL,
   Y_init = NULL,
@@ -37,11 +38,19 @@ opentsne(
 \item{data}{Numeric matrix/data frame with observations in rows, or a list
 containing KNN `indices` and `distances`.}
 
-\item{perplexity}{t-SNE perplexity. The one-call API uses
-`ceiling(perplexity)` non-self neighbors internally. If `NULL`, uses the
-largest safe value up to 30 that is available for the input.}
+\item{perplexity}{t-SNE perplexity. If `NULL`, uses the largest safe value
+up to 30 that is available for the input and selected affinity support.}
 
-\item{n_components}{Output dimensionality, from 1 to 3.}
+\item{affinity_support}{Affinity candidate-neighborhood policy. The default
+`"standard"` uses `ceiling(3 * perplexity)` non-self neighbors so the
+Gaussian bandwidth search can produce non-uniform conditional
+probabilities. `"compact"` retains the older
+`ceiling(perplexity)`-neighbor approximation for explicit speed/memory
+experiments; it is not equivalent to conventional sparse t-SNE.}
+
+\item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
+than two use CPU exact repulsion; the current Metal and CUDA
+interpolation/FFT optimizers support only `2L`.}
 
 \item{init_data}{Optional original high-dimensional data matrix used only to
 compute PCA initialization with [opentsne_pca_init()]. It is not used for
@@ -125,6 +134,19 @@ requested backend is unavailable.
 "openTSNE-style" describes the published sparse-affinity,
 interpolation-based t-SNE workflow, not Python API, object, default, or
 coordinate compatibility. No Python `openTSNE` code is called.
+}
+\details{
+Unlike the more opinionated UMAP API, openTSNE exposes the principal
+scientifically consequential optimizer controls: perplexity and candidate
+support, initialization, iteration counts, early and normal exaggeration,
+learning rate, momentum, clipping, and exact-versus-FFT repulsion. Setting
+`auto_config = FALSE` disables automatic iteration and stopping choices;
+explicit values always override automatic values. The matrix-input function
+deliberately does not expose a nearest-neighbor index type or tuning
+parameters: it uses the backend router with target recall 0.99. Supply an
+externally generated KNN object to [opentsne_knn()] when search policy or
+affinity support must be controlled independently. The resolved settings
+are returned in `fit$parameters`.
 }
 \examples{
 fit <- opentsne(

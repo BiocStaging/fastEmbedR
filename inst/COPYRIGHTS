@@ -1,49 +1,60 @@
+Source-file copyright and license map
+
 Files: src/native_knn_hnsw.cpp
 Copyright: Meta Platforms, Inc. and affiliates
            Stefano Cacciatore
 License: MIT
-Comment: Distilled from the HNSW organization in FAISS 1.14.3, commit
-         0ca9df4792b173d573044ee14ca0704780176e82. The complete upstream
-         license is installed as LICENSES/FAISS-LICENSE.
+Upstream: FAISS 1.14.3 commit
+          0ca9df4792b173d573044ee14ca0704780176e82
+License file: LICENSES/FAISS-LICENSE
 
 Files: src/native_knn_metal_impl.mm
 Copyright: Meta Platforms, Inc. and affiliates
            Sydney Bach, The Solace Project
            Stefano Cacciatore
-License: MIT and Apache-2.0
-Comment: Native Objective-C++/Metal implementation informed by FAISS 1.14.3
-         and MLXPorts/Faiss-mlx commit
-         d092af559375144fc719cd88a10e414f92c625fa. Complete upstream licenses
-         are installed under LICENSES/.
+License: MIT AND Apache-2.0
+Upstream: FAISS commit 0ca9df4792b173d573044ee14ca0704780176e82;
+          MLXPorts/Faiss-mlx commit
+          d092af559375144fc719cd88a10e414f92c625fa
+License files: LICENSES/FAISS-LICENSE
+               LICENSES/FAISS-MLX-LICENSE
 
 Files: src/native_knn_cuda_impl.cpp
-       src/embedding_cuda_kernels.cpp
 Copyright: Stefano Cacciatore
 License: MIT
-Comment: Package-owned adapter and postprocessing kernels call the installed
-         FAISS GPU and RAPIDS cuVS C APIs. The adapter was distilled from faissR commit
-         f37ea97c5774200025b1480770b8ecbf1d2d7919. No cuVS source is vendored. RAPIDS cuVS is
-         Copyright NVIDIA Corporation and licensed under Apache-2.0; the full
-         upstream license is installed as LICENSES/CUVS-LICENSE.
+Upstream: adapted from faissR commit
+          f37ea97c5774200025b1480770b8ecbf1d2d7919
+License file: LICENSES/FAISSR-LICENSE
+Comment: Calls installed FAISS GPU and cuVS libraries; those libraries are not
+         redistributed in the package.
 
 Files: src/dlpack/dlpack.h
 Copyright: DMLC contributors
 License: Apache-2.0
-Comment: Minimal stable DLPack C ABI declarations required by the optional
-         RAPIDS cuVS C headers. The full upstream license is installed as
-         LICENSES/DLPACK-LICENSE.
+Upstream: DLPack 1.0 commit
+          bbd2f4d32427e548797929af08cfe2a9cbb3cf12
+License file: LICENSES/DLPACK-LICENSE
 
-Files: src/graph_clustering.cpp
-Copyright: NetworKit contributors
+Files: src/embedding_metal_impl.mm
+Copyright: Mohamed Amine Bergach
            Stefano Cacciatore
 License: MIT
-Comment: The native Leiden local-move, refinement, and aggregation phase
-         organization is informed by NetworKit's MIT-licensed ParallelLeiden
-         implementation and by Traag et al. (2019). The package code uses its
-         own compact graph representation and does not link to NetworKit. The
-         complete upstream license is installed as LICENSES/NETWORKIT-LICENSE.
+Upstream: AppleSiliconFFT commit
+          5d0d51dbd983691ee99822ed74bc3f9a47136511
+License file: LICENSES/APPLESILICONFFT-LICENSE
+Comment: Only the identified 512-point Stockham organization is adapted;
+         remaining Objective-C++/Metal implementation is package-owned.
 
-Files: src/graph_clustering_accel_common.h
+Files: src/graph_clustering.cpp
+Copyright: Stefano Cacciatore
+License: MIT
+Comment: Independently implemented. NetworKit commit
+         7b74f6af90bc0865c6c0937a206df63df331b712 was a design reference;
+         no NetworKit source is copied or linked.
+
+Files: src/embedding_cuda_kernels.cpp
+       src/embedding_cuda_impl.cpp
+       src/graph_clustering_accel_common.h
        src/graph_clustering_cuda_api.h
        src/graph_clustering_cuda_bridge.cpp
        src/graph_clustering_cuda_kernels.cu
@@ -52,13 +63,16 @@ Files: src/graph_clustering_accel_common.h
        src/graph_clustering_metal_bridge.cpp
        src/graph_clustering_metal_impl.mm
        src/graph_clustering_metal_stub.cpp
+       src/fast_knn_umap.cpp
+       src/tsne_neighbors.cpp
+       src/walktrap.cpp
 Copyright: Stefano Cacciatore
 License: MIT
-Comment: Independent package-native CUDA and Metal graph-clustering
-         implementation. RAPIDS cuGraph public documentation informed the
-         parallel CSR design, but no cuGraph source or binary is included,
-         linked, or called.
+Comment: Package-owned implementations. External SDK headers/libraries and
+         design references are itemized in THIRD_PARTY_DEPENDENCIES.json.
 
 Files: *
 Copyright: Stefano Cacciatore
 License: MIT
+Comment: This default applies only where a more specific entry above or an
+         individual source-file notice does not apply.

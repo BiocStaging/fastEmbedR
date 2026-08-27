@@ -1,6 +1,9 @@
 name: Real hardware validation
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       backend:
@@ -23,7 +26,7 @@ concurrency:
 
 jobs:
   cpu:
-    if: ${{ inputs.backend == 'all' || inputs.backend == 'cpu' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.backend == 'all' || inputs.backend == 'cpu' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -47,7 +50,7 @@ jobs:
           retention-days: 90
 
   metal:
-    if: ${{ inputs.backend == 'all' || inputs.backend == 'metal' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.backend == 'all' || inputs.backend == 'metal' }}
     runs-on: [self-hosted, macOS, ARM64, fastembedr-metal]
     timeout-minutes: 60
     steps:
@@ -68,7 +71,7 @@ jobs:
           retention-days: 90
 
   cuda:
-    if: ${{ inputs.backend == 'all' || inputs.backend == 'cuda' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.backend == 'all' || inputs.backend == 'cuda' }}
     runs-on: [self-hosted, Linux, X64, fastembedr-cuda]
     timeout-minutes: 90
     steps:

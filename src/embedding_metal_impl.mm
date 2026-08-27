@@ -1,3 +1,16 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Mohamed Amine Bergach
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Package-owned Objective-C++/Metal embedding implementation. The 512-point
+ * radix-4 Stockham organization in opentsne_fft_stockham512_core and its row
+ * and column kernels is adapted from AppleSiliconFFT commit
+ * 5d0d51dbd983691ee99822ed74bc3f9a47136511, principally
+ * src/fft_multisize.metal::fft_512_stockham. The upstream MIT notice is
+ * retained in inst/LICENSES/APPLESILICONFFT-LICENSE.
+ */
+
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -3952,7 +3965,10 @@ int metal_tsne_fft_grid_size(const int n) {
   // MNIST-scale data, 128 cells is too coarse, while 512 costs too much without
   // improving the plot once Metal uses stable step clipping. Use 256 for large
   // runs by default; FASTEMBEDR_TSNE_FFT_GRID remains an explicit override.
-  const int fallback = n >= 50000 ? 256 : (n >= 10000 ? 256 : 64);
+  // Match the CPU accuracy floor for explicit small-data FFT runs. The
+  // automatic small-data route remains exact, so this does not penalize its
+  // normal execution path.
+  const int fallback = n >= 50000 ? 256 : (n >= 10000 ? 256 : 128);
   const int requested = metal_env_positive_int("FASTEMBEDR_TSNE_FFT_GRID", fallback);
   int grid = 32;
   while (grid < requested && grid < 512) grid <<= 1;
@@ -6627,6 +6643,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
         Rcpp::Named("optimizer") = "opentsne_fitsne_fft_grid_native_metal",
         Rcpp::Named("repulsion") = use_mpsgraph_convolution ?
           "fft_grid_mpsgraph_metal" : "fft_grid_metal",
+        Rcpp::Named("fft_grid_size") = static_cast<int>(grid_n),
         Rcpp::Named("probabilities") = "symmetric_sparse_knn_cpu_prepared_for_metal",
         Rcpp::Named("precision") = "float32",
         Rcpp::Named("n_threads") = NA_INTEGER,
@@ -6760,6 +6777,7 @@ List knn_tsne_opentsne_metal_impl(IntegerMatrix indices,
       Rcpp::Named("itercosts") = NumericVector(0),
       Rcpp::Named("optimizer") = "opentsne_exact_sparse_native_metal",
       Rcpp::Named("repulsion") = "exact_metal",
+      Rcpp::Named("fft_grid_size") = NA_INTEGER,
       Rcpp::Named("probabilities") = "symmetric_sparse_knn_cpu_prepared_for_metal",
       Rcpp::Named("precision") = "float32",
       Rcpp::Named("n_threads") = NA_INTEGER,

@@ -68,9 +68,17 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
   expect_length(fastEmbedR:::embedding_cuda_available_cpp(), 1L)
   info <- fastEmbedR_capabilities()
   expect_s3_class(info, "data.frame")
-  expect_true(all(c("backend", "available", "knn_available", "embedding_available") %in% names(info)))
+  expect_true(all(c(
+    "backend", "available", "knn_available", "embedding_available",
+    "device", "knn_engine", "precision", "runtime_libraries",
+    "unavailable_reason"
+  ) %in% names(info)))
   expect_true(all(c("cpu", "cuvs", "cuda", "metal") %in% info$backend))
   expect_true(isTRUE(info$available[info$backend == "cpu"]))
+  expect_match(info$knn_engine[info$backend == "cpu"], "HNSW")
+  expect_match(info$precision[info$backend == "cpu"], "float32")
+  expect_false(is.na(info$device[info$backend == "cpu"]))
+  expect_true(all(is.na(info$unavailable_reason[info$available])))
   expect_identical(info, fastEmbedR:::backend_info())
 
   knn <- test_exact_knn(x, backend = "cpu")

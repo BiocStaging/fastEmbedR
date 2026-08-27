@@ -1,6 +1,6 @@
 \name{umap}
 \alias{umap}
-\title{Run UMAP from data or precomputed KNN}
+\title{Run opinionated fixed-policy UMAP from data or precomputed KNN}
 \usage{
 umap(
   data,
@@ -24,7 +24,9 @@ umap(
 \item{n_neighbors}{Number of non-self neighbors. \code{NULL} chooses the
 package default for the data size.}
 
-\item{n_components}{Output dimensionality.}
+\item{n_components}{Output dimensionality. The CPU backend supports positive
+dimensions, including three-dimensional embeddings. The current Metal and
+CUDA optimizers support only \code{2L}.}
 
 \item{standardize}{Center and scale columns before KNN when \code{data} is a
 matrix. Defaults to \code{FALSE} so one-call results match a KNN object computed
@@ -59,6 +61,28 @@ A \code{fastEmbedR_embedding} object.
 \code{umap()} computes or reuses a nearest-neighbor graph and then calls
 \code{\link{umap_knn}}. Quality metrics are computed explicitly with
 \code{\link{evaluate_embedding}} rather than inside the embedding call.
+}
+\details{
+\code{umap()} is an opinionated high-throughput implementation rather than a
+drop-in interface for every UMAP hyperparameter. The public API exposes
+neighborhood size, distance metric, graph weighting, output dimension,
+preprocessing, backend, seed, and CPU thread count. Epochs, minimum distance,
+spread, learning rate, repulsion strength, negative-sample rate, spectral
+iterations, and asynchronous update mode are selected internally and recorded
+in \code{fit$parameters}.
+
+The current policy uses 500 epochs below 10,000 observations and 200 for larger
+ordinary profiles, increasing to at least 300 for high-variability profiles;
+five negative samples, spread 1, and repulsion strength 1 are fixed. Minimum
+distance is normally 0.01 and becomes 0.1 only under the wide-shell profile;
+learning rate is correspondingly 1 or 1.25. Use \code{\link{umap_init}} to
+reuse package-native initial coordinates or \code{\link{umap_knn}} to supply an
+externally controlled KNN graph. These controls are scientifically
+consequential; fixing them is a scope decision made to keep one tested
+objective and update schedule aligned across CPU, Metal, and CUDA, not a claim
+that the values are universally optimal. Users requiring arbitrary UMAP
+parameter sweeps should use a general-purpose implementation; fastEmbedR does not claim
+API or parameter interchangeability with those packages.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

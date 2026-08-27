@@ -1,4 +1,4 @@
-#' Run UMAP from a data matrix or precomputed KNN
+#' Run opinionated fixed-policy UMAP from data or precomputed KNN
 #'
 #' `umap()` is a small convenience wrapper. If `data` is already a list of KNN
 #' `indices` and `distances`, it calls [umap_knn()] directly. Otherwise it
@@ -9,7 +9,9 @@
 #'   and `distances`.
 #' @param n_neighbors Number of non-self neighbors. `NULL` chooses the package
 #'   default for the data size.
-#' @param n_components Output dimensionality.
+#' @param n_components Output dimensionality. The CPU backend supports positive
+#'   dimensions, including three-dimensional embeddings. The current Metal and
+#'   CUDA optimizers support only `2L`.
 #' @param standardize Center and scale columns before KNN when `data` is a
 #'   matrix. Defaults to `FALSE` so one-call results match a KNN object computed
 #'   from the supplied matrix.
@@ -32,6 +34,30 @@
 #'   as an adjacency-only sensitivity approximation; it is not standard UMAP
 #'   or necessarily faster.
 #' @param verbose Print progress.
+#' @details
+#' `umap()` is an opinionated high-throughput UMAP implementation rather than
+#' a drop-in interface for every UMAP hyperparameter. The public matrix-input
+#' API exposes neighborhood size, distance metric, graph weighting, output
+#' dimension, preprocessing, backend, seed, and CPU thread count. In the
+#' current release, epochs, minimum distance, spread, learning rate, repulsion
+#' strength, negative-sample rate, spectral iteration count, and asynchronous
+#' update mode are selected internally. The resolved values and rule names are
+#' stored in `fit$parameters`.
+#'
+#' The default policy uses 500 epochs below 10,000 observations and 200 epochs
+#' for larger inputs, increasing to 300 for high-variability distance profiles;
+#' five negative samples, spread 1, and repulsion strength 1 are fixed. Minimum
+#' distance is normally 0.01 and becomes 0.1 only under the documented
+#' wide-shell profile; learning rate is correspondingly 1 or 1.25. Use
+#' [umap_init()] to precompute and reuse package-native initial coordinates,
+#' or [umap_knn()] to supply an externally controlled KNN graph. Users needing
+#' These controls are scientifically consequential; fixing them is a scope
+#' decision made to keep one tested objective and update schedule aligned across
+#' CPU, Metal, and CUDA, not a claim that the values are universally optimal.
+#' Arbitrary `min_dist`, `spread`, epoch, learning-rate, negative-sampling, or
+#' optimizer-mode sweeps should use a
+#' general-purpose UMAP implementation; fastEmbedR does not claim API or
+#' parameter interchangeability with those packages.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
 #' x <- scale(as.matrix(iris[, 1:4]))
@@ -55,6 +81,13 @@ umap <- function(data,
   backend <- resolve_embedding_backend(backend)
   graph_mode <- match.arg(graph_mode)
   n_components <- validate_n_components(n_components)
+  if (n_components != 2L && backend %in% c("metal", "cuda")) {
+    stop(
+      "Native Metal and CUDA UMAP optimizers currently support only ",
+      "`n_components = 2`.",
+      call. = FALSE
+    )
+  }
   keep_knn <- isTRUE(keep_knn)
   input_is_float32 <- is_float32_matrix(data)
 
@@ -246,7 +279,9 @@ umap <- function(data,
 #'   non-landmark observations. Defaults to `n_neighbors`.
 #' @param graph_mode Graph weighting mode passed unchanged to the reference
 #'   [umap()] fit. `"fuzzy"` (the default) uses standard UMAP fuzzy graph
-#'   weights; `"binary"` uses a symmetric unit-weight sensitivity graph.
+#'   weights; `"binary"` uses a symmetric unit-weight sensitivity graph. The
+#'   fixed-reference projection algorithm is shared, but the fitted reference
+#'   layout and its recorded metadata retain the selected graph mode.
 #' @export
 landmark_umap <- function(data,
                           landmarks = 0.5,

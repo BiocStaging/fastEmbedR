@@ -103,8 +103,22 @@ cat > "$out_dir/identity.csv" <<EOF
 "$backend","$(cat "$out_dir/git-commit.txt")","$source_sha256","$package_sha256","$dll_sha256","$dll_path"
 EOF
 
+cat > "$out_dir/evidence-scope.csv" <<EOF
+"evidence_class","backend","performance_claim","description"
+"hardware_smoke_and_correctness","$backend",FALSE,"Strict execution, backend identity, numerical checks, and package tests on the named device; not a full scientific performance benchmark"
+EOF
+
 Rscript .github/scripts/validate-hardware.R "$backend" "$out_dir" \
   > "$out_dir/runtime-validation.log" 2>&1
+
+numerical_backends="cpu"
+if [[ "$backend" != "cpu" ]]; then
+  numerical_backends="cpu,$backend"
+fi
+Rscript tools/validate_tsne_numerics.R \
+  --backends="$numerical_backends" \
+  --out-dir="$out_dir/tsne-numerical-validation" \
+  > "$out_dir/tsne-numerical-validation.log" 2>&1
 
 Rscript -e 'testthat::test_dir("tests/testthat", reporter = "summary", package = "fastEmbedR", load_package = "installed", stop_on_failure = TRUE)' \
   > "$out_dir/testthat.log" 2>&1

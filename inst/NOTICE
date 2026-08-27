@@ -1,185 +1,192 @@
-fastEmbedR third-party provenance notice
+fastEmbedR third-party provenance and attribution notice
 
-fastEmbedR is being cleaned for permissive distribution. This notice documents
-third-party libraries, papers, and implementations reviewed or optionally linked
-by the package.
+Scope
+-----
 
-This notice documents code provenance and design references for the cleaned
-package. The public API is focused on native UMAP and openTSNE-style embeddings
-from data matrices or precomputed KNN matrices. CPU and Metal one-call
-workflows use package-native nearest-neighbor implementations. Optional CUDA
-builds link directly to the installed RAPIDS cuVS C API. The earlier
-legacy t-SNE, InfoTSNE, PaCMAP, TriMap, and LocalMAP reducers were removed from
-the exported package API.
+fastEmbedR original source is distributed under the MIT license in LICENSE and
+LICENSE.md. This notice records every known adapted, vendored, linked, or
+implementation-reference component used by the package. The authoritative
+machine-readable mapping is THIRD_PARTY_DEPENDENCIES.json; source-level
+copyright ownership is summarized in COPYRIGHTS.
 
-Nearest-neighbor ownership and GPU design references
------------------------------------------------------
+The terms used below are deliberately distinct:
 
-fastEmbedR contains a compact CPU HNSW implementation distilled from FAISS
-1.14.3 and native Metal exact and IVF-Flat implementations. CPU HNSW retains
-FAISS-style hierarchical level sampling, greedy upper-level descent,
-ef-construction expansion, diversity pruning, reciprocal links, and parallel
-query evaluation. Metal IVF uses a 128-dimensional signed float32 coarse
-projection, four native Metal centroid passes, four-SIMD-group fused list
-selection, and a two-stage projected-shortlist/exact-rerank search. Four
-deterministic pilot strata select `nprobe` and expand the shortlist from 288 to
-384 or 512 candidates when needed. Direct Metal reranking is retained as a
-safety fallback. Returned neighbors are always ranked with the original
-full-dimensional distance.
+* adapted source: fastEmbedR contains a permissively licensed derivative and
+  preserves the upstream notice and license;
+* vendored header: upstream declarations are redistributed in the package;
+* optional linked dependency: configure locates an installed SDK/library, but
+  fastEmbedR does not redistribute that source or binary;
+* design reference: public source or documentation was studied, but no source,
+  binary, or runtime dependency was copied, linked, or bundled;
+* benchmark only: an optional package or program is used outside production
+  code for comparison.
 
-The Metal list-scan/top-k organization was also informed by the fused
-`ivf_list_topk_l2` and batched top-k pattern in MLXPorts/Faiss-mlx. fastEmbedR
-implements the design directly in Objective-C++/Metal and does not call Python
-or MLX. The FAISS MIT license, Faiss-mlx Apache-2.0 license, exact source
-commits, and copyright notices are installed under `LICENSES/`.
+Adapted or vendored source
+--------------------------
 
-`src/native_knn_cuda_impl.cpp` was distilled from the pinned faissR commit
-recorded in `COPYRIGHTS`, but is now owned and invoked inside fastEmbedR. It
-calls installed FAISS GPU `bfKnn` for exact search and the installed RAPIDS
-cuVS C API for IVF-Flat. It owns
-package-specific device buffers and passes them directly to the embedding
-kernels. FAISS/cuVS source and binaries are not vendored in fastEmbedR; their
-MIT and Apache-2.0 licenses are retained under `LICENSES/`.
+1. FAISS 1.14.3
 
-Native Metal PCA design
+   Repository: https://github.com/facebookresearch/faiss
+   Commit: 0ca9df4792b173d573044ee14ca0704780176e82
+   License: MIT
+   Copyright: Meta Platforms, Inc. and affiliates
+   Package files: src/native_knn_hnsw.cpp,
+                  src/native_knn_metal_impl.mm
+   Upstream files: faiss/impl/HNSW.{h,cpp}, faiss/IndexHNSW.{h,cpp},
+                   faiss/IndexIVF.{h,cpp}, faiss/IndexIVFFlat.{h,cpp}
+   Boundary: the CPU HNSW organization and Metal IVF organization are adapted
+             into native fastEmbedR source. The optional CUDA exact route
+             calls an installed FAISS GPU bfKnn API. FAISS source and binaries
+             are not bundled.
+   License copy: LICENSES/FAISS-LICENSE
+
+2. MLXPorts/Faiss-mlx
+
+   Repository: https://github.com/MLXPorts/Faiss-mlx
+   Commit: d092af559375144fc719cd88a10e414f92c625fa
+   License: Apache-2.0
+   Copyright: 2024 Sydney Bach, The Solace Project
+   Package file: src/native_knn_metal_impl.mm
+   Upstream file: python/metalfaiss/faissmlx/kernels/ivf_kernels.py
+   Boundary: the fused ivf_list_topk_l2 and batched list-scan/top-k
+             organization was adapted to package-native Objective-C++/Metal.
+             No MLX or Python source/runtime is bundled or called.
+   License copy: LICENSES/FAISS-MLX-LICENSE
+
+3. faissR
+
+   Repository: https://github.com/tkcaccia/faissR
+   Commit: f37ea97c5774200025b1480770b8ecbf1d2d7919
+   Version at commit: 0.99.15
+   License: MIT
+   Copyright: Stefano Cacciatore
+   Package file: src/native_knn_cuda_impl.cpp
+   Upstream files: src/nn_cuvs_impl.cpp, src/nn_cuda_impl.cpp,
+                   src/nn_cuda_kernels.cpp
+   Boundary: CUDA adapter, buffer-ownership, and tuning organization was
+             distilled into fastEmbedR. The faissR R package is not imported,
+             linked, or called by fastEmbedR production code.
+   License copy: LICENSES/FAISSR-LICENSE
+
+4. DLPack 1.0
+
+   Repository: https://github.com/dmlc/dlpack
+   Commit: bbd2f4d32427e548797929af08cfe2a9cbb3cf12
+   License: Apache-2.0
+   Copyright: DMLC contributors
+   Package file: src/dlpack/dlpack.h
+   Upstream file: include/dlpack/dlpack.h
+   Boundary: a reduced stable C ABI header is redistributed to pass dense
+             device matrices through the optional cuVS C API.
+   License copy: LICENSES/DLPACK-LICENSE
+
+5. AppleSiliconFFT
+
+   Repository: https://github.com/aminems/AppleSiliconFFT
+   Commit: 5d0d51dbd983691ee99822ed74bc3f9a47136511
+   License: MIT
+   Copyright: 2026 Mohamed Amine Bergach
+   Package file: src/embedding_metal_impl.mm
+   Upstream file: src/fft_multisize.metal (fft_512_stockham)
+   Boundary: radix-4 Stockham autosort stages, threadgroup staging, and the
+             512-point row/column organization were adapted for the native
+             openTSNE FFT-grid path.
+   License copy: LICENSES/APPLESILICONFFT-LICENSE
+
+Optional linked or compile-time dependencies
+--------------------------------------------
+
+The source package does not redistribute the following dependency trees or
+shared libraries. configure enables them only when their installed headers and
+libraries are found or explicitly requested. Exact installed versions belong
+in the build and hardware-validation manifest.
+
+* FAISS GPU (MIT): optional libfaiss linkage for bfKnn exact CUDA search.
+* RAPIDS cuVS (Apache-2.0): optional libcuvs_c/libcuvs linkage for CUDA
+  IVF-Flat search. License copy: LICENSES/CUVS-LICENSE.
+* RAPIDS RAFT (Apache-2.0): optional installed TSVD headers and runtime
+  dependencies for resident CUDA PCA initialization.
+* RAPIDS RMM and rapids-logger (Apache-2.0): linked only with the optional
+  RAFT route.
+* NVIDIA CCCL CUB/Thrust headers: supplied by the CUDA toolkit or RAPIDS
+  environment and compiled into CUDA translation units under their upstream
+  Apache-2.0/LLVM-exception, BSD, and Boost terms.
+* NVIDIA CUDA Toolkit: external cudart, cuFFT, cuBLAS, cuSOLVER, cuSPARSE,
+  cuRAND, and nvJitLink libraries under the NVIDIA CUDA Toolkit license.
+
+No cuML or cuGraph library, Python module, or runtime symbol is linked or
+called by the installed package.
+
+Apple system frameworks
 -----------------------
 
-Metal PCA and openTSNE initialization use a package-native float32
-block-subspace TSVD. The heavy forward and transpose matrix products run with
-Apple Metal Performance Shaders in a single resident unified-memory workspace.
-Only the small projected Gram matrix is handled by fastEmbedR's float32 Jacobi
-eigensolver on the CPU. The resident workspace and block-subspace organization
-were informed by RAPIDS RAFT TSVD, but no RAPIDS source is copied, vendored, or
-called by the Metal implementation. CPU and public CUDA PCA use fastEmbedR's
-package-native RSVD implementation; resident CUDA openTSNE initialization uses
-native RAPIDS RAFT TSVD when compiled.
+On supported Apple Silicon systems, configure links Foundation, Accelerate,
+Metal, MetalPerformanceShaders, and MetalPerformanceShadersGraph from the
+installed macOS/Xcode SDK. These Apple system frameworks are not redistributed
+in fastEmbedR. The package does not redistribute MPS or MPSGraph binaries.
 
-The GPU-resident pipeline architecture was informed by:
+Independently implemented code with pinned design references
+-------------------------------------------------------------
 
-  mlx-vis
-  Author: Han Xiao
-  Repository: https://github.com/hanxiao/mlx-vis
-  License: Apache-2.0
+The following repositories were inspected as behavioral, mathematical, or
+architecture references. They are not copied, linked, vendored, or called.
 
-  annembed
-  Author: Jean-Pierre Both
-  Repository: https://github.com/jean-pierreBoth/annembed
-  License: MIT OR Apache-2.0
+* NetworKit, commit 7b74f6af90bc0865c6c0937a206df63df331b712,
+  MIT. The ParallelLeiden phase organization was reviewed while implementing
+  package-owned graph storage and community detection. The full upstream
+  notice is retained as LICENSES/NETWORKIT-LICENSE.
+* RAPIDS cuGraph, commit 528ddde979df2243bf51c116d89a0ecdf85a39ee,
+  Apache-2.0. Public CSR/parallel-processing documentation informed the
+  independent CUDA/Metal clustering design; cuGraph is not a dependency.
+* openTSNE, commit 12b8b7bec3d96ee0bc8930c3c45449a5209ed3e0,
+  BSD-3-Clause. Mathematical and workflow reference for native sparse
+  affinities, two-stage optimization, and fixed-reference transformation.
+* FIt-SNE, commit 47ff14f1defc1ff3a8065c8b7baaf45c33e7e0b2,
+  mixed file-specific BSD-4-Clause, MIT, Apache-2.0, and GPL-2.0-or-later
+  terms. Only the published interpolation/FFT decomposition is referenced;
+  no repository source is reused.
+* t-SNE-CUDA, commit 44249b6895a2eb389b8a13390ed6fb125d2040c8,
+  BSD-3-Clause. GPU-resident sparse-attraction/interpolated-repulsion
+  architecture reference.
+* umap-learn, commit f6dcf3e261bcf78aa3366d60c2a8fc4b75bf58c4,
+  BSD-3-Clause. UMAP mathematical/reference-behavior comparison; no Python
+  implementation source is used.
+* Multicore-opt-SNE, commit c6d15e3d4c0372ea8e7f652014819c98354a3325,
+  BSD-3-Clause. Automatic t-SNE parameter-policy reference.
+* mlx-vis, commit 06c8a75ad007820b35185937f83c03e09ab6bd5b,
+  Apache-2.0. GPU-resident buffer and kernel-organization reference.
+* annembed, commit eceda8368d69e8c8790285312a974a865d063a07,
+  MIT OR Apache-2.0. Landmarking and resident-buffer architecture reference.
+* Rtsne, commit 0e769505ab791fa3c3ac25bd9434ff20e1f0a689,
+  mixed file-specific BSD-4-Clause and BSD-3-Clause terms. Public KNN-input
+  behavior and validation are references; no Barnes-Hut implementation source
+  is present in fastEmbedR.
 
-The transferred ideas are architectural: retain accelerator buffers across
-iterations, organize interpolation-grid scatter/gather as contiguous kernels,
-and minimize synchronization between optimizer stages. The implementation is
-native R/C++/Metal/CUDA code for fastEmbedR. It does not vendor mlx-vis or
-annembed source files, link to those projects, or call Python/MLX at runtime.
+The UMAP power approximation is a package-local implementation of the
+IEEE-754 exponent-interpolation idea described by Schraudolph (1999). It was
+not copied from uwot or a third-party code snippet.
 
-Native graph construction and community detection
--------------------------------------------------
+Benchmark-only software and repository licensing
+------------------------------------------------
 
-`knn_graph()` and `graph_cluster()` are package-native C++ implementations.
-The installed package does not call igraph, cuGraph, NetworKit, or another
-clustering implementation at run time. igraph is used only in optional
-validation tests.
+Rtsne, uwot, umap, igraph, Python openTSNE, FIt-SNE, umap-learn, and RAPIDS
+cuML may be used by external benchmark/validation scripts. They are not
+production dependencies. In particular, GPL-3.0-or-later uwot source is not
+copied, linked, translated, or required by fastEmbedR.
 
-The Louvain implementation follows the multilevel local-moving and aggregation
-method of Blondel et al. The Leiden implementation follows the local-moving,
-refinement, and aggregation phases of Traag et al. Its phase organization was
-also informed by:
+The separate benchmark repository is
+https://github.com/tkcaccia/fastEmbedR-benchmark and is licensed under MIT.
+Its benchmark scripts do not relicense datasets or third-party programs;
+dataset-specific terms remain with the original providers.
 
-  NetworKit
-  Repository: https://github.com/networkit/networkit
-  License: MIT
+Compliance files
+----------------
 
-fastEmbedR uses its own compact graph storage and CPU, CUDA, and Metal
-optimizers. CUDA and Metal use package-owned float32 CSR kernels for seeded
-local moving and Leiden refinement; package-owned C++ performs graph
-compaction and coarsening between levels. The accelerator organization was
-informed by the public RAPIDS cuGraph documentation, but no cuGraph source,
-library, Python module, or runtime symbol is copied, vendored, linked, or
-called. fastEmbedR also does not vendor or link NetworKit. The full NetworKit
-MIT notice is installed as `LICENSES/NETWORKIT-LICENSE`.
+* LICENSE and LICENSE.md: fastEmbedR original-source MIT license.
+* COPYRIGHTS: source-file ownership and source-specific license map.
+* LICENSES/: complete notices for redistributed/adapted components.
+* THIRD_PARTY_DEPENDENCIES.json: machine-readable dependency and provenance
+  inventory, including repositories, revisions, relationships, and files.
+* ALGORITHMIC_REFERENCES.md: scientific and algorithmic provenance.
 
-Walktrap independently implements the random-walk distance and
-adjacent-community agglomeration described by Pons and Latapy. No igraph
-Walktrap source is copied. The implementation is validated against igraph in
-guarded package tests.
-
-The native Metal UMAP backend receives the package's host-prepared CSR fuzzy or
-binary graph, packs its active row-neighbor schedule into float32/int32 Metal
-buffers once, and keeps layout updates on the GPU for all epochs. Graph
-construction time remains labelled separately from Metal optimization. It does
-not call Python or MLX.
-
-Native Metal FFT design reference
----------------------------------
-
-The package-native Metal openTSNE FFT-grid path includes a validated 512x512
-Stockham FFT kernel implemented using design ideas from:
-
-  AppleSiliconFFT
-  Author: Mohamed Amine Bergach
-  Repository: https://github.com/aminems/AppleSiliconFFT
-  License: MIT
-
-The transferred ideas are radix-4 Stockham autosort stages, threadgroup-memory
-staging, and row/column 512-point transform structure. The implementation is
-kept inside fastEmbedR's Objective-C++/Metal source, with MIT-compatible
-attribution retained here, and is used only for validated 512x512 openTSNE FFT
-grids. Other FFT grid sizes use fastEmbedR's generic package-native Metal
-Cooley-Tukey kernels.
-
-openTSNE design reference
--------------------------
-
-The native openTSNE-style full t-SNE optimizer and the fixed-reference
-transform used by `transform_tsne()` and `landmark_tsne()` were informed by:
-
-  openTSNE
-  Repository: https://github.com/pavlin-policar/openTSNE
-  License: BSD-3-Clause
-
-For `opentsne_knn()`, `embed_knn(method = "opentsne")`, and `opentsne()`,
-fastEmbedR implements a native C++ two-phase optimizer matching openTSNE's
-high-level contract: early exaggeration followed by normal optimization,
-automatic learning rate `n / exaggeration`, momentum/gain updates,
-max-step clipping, sparse positive KNN forces, and native `"fft"` or `"exact"`
-negative-gradient choices. The older Barnes-Hut route was removed after the
-MNIST 70k benchmarks showed the FFT-grid path was the useful CPU standard.
-
-On macOS with Metal, `opentsne_knn(..., backend = "metal")` receives
-host-prepared sparse symmetric affinities and has a native Objective-C++/Metal
-exact path for moderate datasets. The exact repulsion, global normalization,
-gains/momentum updates, and final layout run in Metal kernels; exact repulsion
-is O(n^2) in time. Large-data Metal openTSNE uses a native
-FFT/FIt-SNE-style negative-gradient path: interpolation-grid scatter, padded
-grid FFT convolution, grid gather, sparse attractive forces, and
-gain/momentum updates run in Objective-C++/Metal kernels. CUDA uses package
-CUDA kernels plus cuFFT for the corresponding FFT-grid path. The earlier
-sampled full-embedding GPU repulsion path is not exposed as openTSNE because it
-changes the optimization mathematics.
-
-The implementation is fastEmbedR C++ code and does not vendor, link to, or
-call openTSNE's Python or Cython implementation. CPU
-`negative_gradient_method = "fft"` is a native grid approximation inspired
-by FIt-SNE/openTSNE/t-SNE-CUDA. CPU uses C++ grid FFTs. Metal uses package-native
-Objective-C++/Metal grid scatter, FFT convolution, gather, and optimizer
-kernels. CUDA uses package-native grid scatter/gather, sparse attractive
-forces, gain/momentum kernels, and cuFFT convolution.
-
-t-SNE-CUDA design reference
----------------------------
-
-The native fixed-reference transform design and CPU grid-FFT negative-gradient
-path use architectural ideas described in:
-
-  Chan DM, Rao R, Huang F, Canny J. t-SNE-CUDA: GPU-Accelerated t-SNE and its
-  Applications to Modern Data. arXiv:1807.11824v1, 2018.
-
-  CannyLab/tsne-cuda
-  Repository: https://github.com/CannyLab/tsne-cuda
-  License: BSD-3-Clause
-
-The transferred ideas are architectural: keep reference coordinates, query
-coordinates, gains, updates, and repulsive-force state resident on the
-accelerator during fixed-reference projection; and split t-SNE optimization
-into sparse attractive forces plus interpolated/grid negative forces.
-fastEmbedR does not vendor, copy, link to, or call t-SNE-CUDA source code.
+This notice is a provenance record, not legal advice.

@@ -6,7 +6,9 @@
 #'   present it is removed automatically.
 #' @param distances Numeric matrix matching `indices`. Leave as `NULL` when
 #'   `indices` is a KNN list.
-#' @param n_components Output dimensionality.
+#' @param n_components Output dimensionality. The CPU backend supports positive
+#'   dimensions, including three-dimensional embeddings. The current Metal and
+#'   CUDA optimizers support only `2L`.
 #' @param seed Integer random seed.
 #' @param verbose Print progress from C++.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
@@ -107,6 +109,7 @@ fast_knn_umap_core <- function(indices,
     graph_mode,
     seed
   )
+  cfg$n_components <- as.integer(n_components)
   if (cfg$backend %in% c("cuda", "metal")) {
     return(run_umap_gpu_host_knn(
       indices,
@@ -156,6 +159,7 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
     k = gpu_info$k,
     backend = "cuda"
   )
+  cfg$n_components <- as.integer(n_components)
   cfg$auto_parameter_backend <- "r_size_rule_gpu_resident_knn"
   cfg$auto_parameter_reason <- paste(
     "KNN distances stay on the CUDA device;",
@@ -170,7 +174,12 @@ fast_knn_umap_cuda_gpu_core <- function(gpu_knn,
     if (invalid_threads) {
       stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
     }
+    cfg$n.cores_requested <- as.integer(n_threads)
     cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
+    cfg$n.cores_effective <- cfg$n_threads
+  } else {
+    cfg$n.cores_requested <- cfg$n_threads
+    cfg$n.cores_effective <- cfg$n_threads
   }
   if (!is.null(n_epochs)) {
     cfg$n_epochs <- validate_epoch_count(n_epochs)
@@ -315,7 +324,12 @@ prepare_umap_knn <- function(indices,
     if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
       stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
     }
+    cfg$n.cores_requested <- as.integer(n_threads)
     cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
+    cfg$n.cores_effective <- cfg$n_threads
+  } else {
+    cfg$n.cores_requested <- cfg$n_threads
+    cfg$n.cores_effective <- cfg$n_threads
   }
   cfg$input_had_self <- isTRUE(knn$has_self)
   cfg$knn_col_start <- as.integer(knn$col_start)
@@ -372,6 +386,7 @@ fast_knn_umap_prepared_core <- function(prepared,
   backend <- resolve_embedding_backend(backend)
   n_components <- validate_n_components(n_components)
   cfg <- prepared$config
+  cfg$n_components <- as.integer(n_components)
   graph <- prepared$graph
   knn <- prepared$knn
   indices <- knn$indices
@@ -385,7 +400,12 @@ fast_knn_umap_prepared_core <- function(prepared,
     if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) || n_threads < 1L) {
       stop("`n_threads` must be NULL or a positive integer.", call. = FALSE)
     }
+    cfg$n.cores_requested <- as.integer(n_threads)
     cfg$n_threads <- as.integer(max(1L, min(4L, n_threads)))
+    cfg$n.cores_effective <- cfg$n_threads
+  } else {
+    cfg$n.cores_requested <- cfg$n_threads
+    cfg$n.cores_effective <- cfg$n_threads
   }
   if (!is.null(n_epochs)) {
     cfg$n_epochs <- validate_epoch_count(n_epochs)
@@ -1161,7 +1181,9 @@ spectral_knn_init <- function(indices,
 #'   column is removed automatically.
 #' @param distances Numeric matrix matching `indices`. Leave as `NULL` when
 #'   `indices` is a KNN object.
-#' @param n_components Output dimensionality.
+#' @param n_components Output dimensionality. The CPU backend supports positive
+#'   dimensions, including three-dimensional embeddings. The current Metal and
+#'   CUDA optimizers support only `2L`.
 #' @param seed Integer random seed.
 #' @param verbose Print native optimizer progress.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
@@ -1170,6 +1192,16 @@ spectral_knn_init <- function(indices,
 #' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses
 #'   standard UMAP fuzzy graph weights. `"binary"` uses a symmetric
 #'   unit-weight sensitivity graph.
+#' @details
+#' This KNN-input function exposes the same deliberately constrained optimizer
+#' policy as [umap()]. It reuses the supplied neighbors but still selects
+#' epochs, minimum distance, spread, learning rate, repulsion strength,
+#' negative-sample rate, spectral iterations, and backend update mode
+#' internally. The resolved configuration is attached as
+#' `attr(layout, "fastEmbedR_config")`. Pass an object from [umap_init()] to
+#' reuse both the prepared graph and package-native initialization. This API is
+#' intended for fixed-boundary comparisons and repeated seeds, not arbitrary
+#' UMAP hyperparameter sweeps.
 #' @return A numeric embedding matrix with `nrow(indices)` rows and
 #'   `n_components` columns.
 #' @export

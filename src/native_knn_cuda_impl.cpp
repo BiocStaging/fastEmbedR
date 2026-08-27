@@ -1,7 +1,14 @@
-// Native CUDA KNN provider distilled from faissR commit
-// f37ea97c5774200025b1480770b8ecbf1d2d7919 (MIT). Exact search uses the
-// installed FAISS GPU bfKnn API when available; IVF uses the installed cuVS C
-// API. No FAISS or RAPIDS implementation source is copied into fastEmbedR.
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Native CUDA KNN provider adapted from faissR commit
+ * f37ea97c5774200025b1480770b8ecbf1d2d7919 (MIT), principally
+ * src/nn_cuvs_impl.cpp, src/nn_cuda_impl.cpp, and src/nn_cuda_kernels.cpp.
+ * Exact search calls the installed FAISS GPU bfKnn API; IVF-Flat calls the
+ * installed RAPIDS cuVS C API. No FAISS, cuVS, or RAFT source or binary is
+ * redistributed by fastEmbedR. See inst/NOTICE and inst/LICENSES/.
+ */
 
 #include <Rcpp.h>
 

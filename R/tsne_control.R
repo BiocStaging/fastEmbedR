@@ -21,11 +21,53 @@ auto_tsne_k <- function(n, perplexity = NULL) {
   if (is.null(perplexity)) {
     perplexity <- min(30, floor((n - 1L) / 3L))
   }
-  k <- as.integer(floor(3 * as.numeric(perplexity)))
+  k <- as.integer(ceiling(3 * as.numeric(perplexity)))
   max(1L, min(n - 1L, k))
 }
 
-opentsne_neighbor_policy <- function(n, perplexity = NULL, available = NULL) {
+normalize_opentsne_affinity_support <- function(affinity_support) {
+  match.arg(affinity_support, c("standard", "compact"))
+}
+
+opentsne_support_width <- function(perplexity, affinity_support) {
+  multiplier <- if (identical(affinity_support, "standard")) 3 else 1
+  as.integer(ceiling(multiplier * as.numeric(perplexity)))
+}
+
+classify_opentsne_affinity_support <- function(k, perplexity) {
+  k <- as.integer(k)
+  perplexity <- as.numeric(perplexity)
+  standard_k <- as.integer(ceiling(3 * perplexity))
+  compact_k <- as.integer(ceiling(perplexity))
+  if (k >= standard_k) {
+    if (k == standard_k) "standard" else "expanded"
+  } else if (k == compact_k) {
+    "compact"
+  } else {
+    "custom_truncated"
+  }
+}
+
+annotate_opentsne_affinity_support <- function(layout,
+                                               k,
+                                               perplexity,
+                                               requested_policy) {
+  cfg <- attr(layout, "fastEmbedR_config")
+  cfg$affinity_support <- classify_opentsne_affinity_support(k, perplexity)
+  cfg$affinity_support_policy <- as.character(requested_policy)
+  cfg$affinity_support_k <- as.integer(k)
+  cfg$affinity_support_multiplier <- as.numeric(k) / as.numeric(perplexity)
+  cfg$conventional_affinity_support <- as.integer(k) >=
+    as.integer(ceiling(3 * as.numeric(perplexity)))
+  attr(layout, "fastEmbedR_config") <- cfg
+  layout
+}
+
+opentsne_neighbor_policy <- function(n,
+                                     perplexity = NULL,
+                                     available = NULL,
+                                     affinity_support = c("standard", "compact")) {
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   n <- as.integer(n)
   if (length(n) != 1L || is.na(n) || n < 2L) {
     stop("`data` must contain at least two rows.", call. = FALSE)
@@ -38,11 +80,14 @@ opentsne_neighbor_policy <- function(n, perplexity = NULL, available = NULL) {
     }
   }
   if (is.null(perplexity)) {
-    n_neighbors <- max(1L, min(15L, n - 1L))
-    if (!is.null(available)) {
-      n_neighbors <- min(n_neighbors, available)
+    max_from_support <- if (is.null(available)) {
+      max_perplexity
+    } else if (identical(affinity_support, "standard")) {
+      floor(available / 3L)
+    } else {
+      available
     }
-    return(list(perplexity = NULL, n_neighbors = as.integer(n_neighbors)))
+    perplexity <- as.numeric(max(1L, min(30L, max_perplexity, max_from_support)))
   } else {
     perplexity <- numeric_scalar(perplexity)
     if (length(perplexity) != 1L || is.na(perplexity) ||
@@ -56,15 +101,22 @@ opentsne_neighbor_policy <- function(n, perplexity = NULL, available = NULL) {
       call. = FALSE
     )
   }
-  n_neighbors <- as.integer(ceiling(perplexity))
+  n_neighbors <- opentsne_support_width(perplexity, affinity_support)
   n_neighbors <- max(1L, min(n - 1L, n_neighbors))
   if (!is.null(available) && n_neighbors > available) {
     stop(
-      "The supplied KNN object has fewer non-self columns than `ceiling(perplexity)`.",
+      "The supplied KNN object has fewer non-self columns than required by ",
+      "`affinity_support = \"", affinity_support, "\"` (need ", n_neighbors,
+      ", have ", available, ").",
       call. = FALSE
     )
   }
-  list(perplexity = as.numeric(perplexity), n_neighbors = n_neighbors)
+  list(
+    perplexity = as.numeric(perplexity),
+    n_neighbors = n_neighbors,
+    affinity_support = affinity_support,
+    affinity_support_multiplier = if (identical(affinity_support, "standard")) 3 else 1
+  )
 }
 
 resolve_opentsne_auto_parameters <- function(n,
@@ -206,9 +258,7 @@ check_tsne_neighbor_params <- function(n,
                                        Y_init,
                                        momentum,
                                        final_momentum) {
-  if (!is_whole_number(n_components) || n_components < 1L || n_components > 3L) {
-    stop("`n_components` should be 1, 2, or 3.", call. = FALSE)
-  }
+  n_components <- validate_opentsne_n_components(n_components)
   if (!is_whole_number(max_iter) || max_iter <= 0L) {
     stop("Total optimization iterations must be positive.", call. = FALSE)
   }
@@ -244,6 +294,21 @@ check_tsne_neighbor_params <- function(n,
     momentum = as.numeric(momentum),
     final_momentum = as.numeric(final_momentum)
   )
+}
+
+validate_opentsne_n_components <- function(n_components, backend = NULL) {
+  if (!is_whole_number(n_components) || n_components < 1L || n_components > 3L) {
+    stop("`n_components` should be 1, 2, or 3.", call. = FALSE)
+  }
+  n_components <- as.integer(n_components)
+  if (!is.null(backend) && n_components != 2L && backend %in% c("metal", "cuda")) {
+    stop(
+      "Native Metal and CUDA openTSNE optimizers currently support only ",
+      "`n_components = 2`.",
+      call. = FALSE
+    )
+  }
+  n_components
 }
 
 normalize_opentsne_learning_rate <- function(learning_rate) {

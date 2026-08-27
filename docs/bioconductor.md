@@ -17,9 +17,8 @@ submission of `fastEmbedR`.
 
 `fastEmbedR` is under review in
 [BiocContributions issue 142](https://github.com/Bioconductor/BiocContributions/issues/142).
-For the last public review build, version 0.99.5, the source and Linux, macOS,
-Windows, WebAssembly, Intel, and ARM platform builds pass. Its remaining
-BiocCheck summary is 0 errors, 1 warning, and 10 notes. The warning is:
+The version 0.99.7 review build completed with 0 errors, 1 warning, and 5 notes.
+The warning was:
 
 > No Bioconductor dependencies detected. Note that some infrastructure
 > packages may not have Bioconductor dependencies.
@@ -32,7 +31,10 @@ deliberately standalone, however, and no Bioconductor package provides a
 legitimate mandatory runtime API dependency. An artificial dependency will
 therefore not be added merely to silence the check. Eligibility and any
 required scope clarification should be decided with the assigned
-Bioconductor reviewer.
+Bioconductor reviewer. Version 0.99.9 therefore declares the accurate
+`Infrastructure` biocView. BiocCheck treats dependency-independent
+infrastructure packages as a note rather than a warning; no artificial package
+dependency is added.
 
 The accompanying notes are triaged as follows:
 
@@ -124,7 +126,7 @@ LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 R CMD build .
 
 LC_ALL=C \
-FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.6.tar.gz
+FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.9.tar.gz
 ```
 
 GPU-enabled builds should be validated separately on machines with the relevant
@@ -136,10 +138,10 @@ The local submission preflight used for this repository is:
 ```sh
 LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 \
-R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.6.tar.gz
+R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.9.tar.gz
 
 LC_ALL=C \
-Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.6.tar.gz", `quit-with-status`=FALSE)'
+Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.9.tar.gz", `quit-with-status`=FALSE)'
 ```
 
 The `--no-build-vignettes` check mode is useful during development, but it

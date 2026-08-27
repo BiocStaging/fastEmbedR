@@ -247,21 +247,33 @@ fast_knn_opentsne_core <- function(indices,
 prepare_opentsne_knn <- function(indices,
                                  distances = NULL,
                                  n_neighbors = NULL,
-                                 perplexity = NULL) {
+                                 perplexity = NULL,
+                                 affinity_support = c("standard", "compact")) {
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   knn0 <- coerce_knn_input(indices, distances)
   policy <- opentsne_neighbor_policy(
     nrow(knn0$indices),
     perplexity = perplexity,
-    available = knn0$n_neighbors
+    available = knn0$n_neighbors,
+    affinity_support = affinity_support
   )
   if (is.null(n_neighbors)) {
     n_neighbors <- policy$n_neighbors
+  }
+  required_k <- opentsne_support_width(policy$perplexity, affinity_support)
+  if (n_neighbors < required_k) {
+    stop(
+      "`n_neighbors` is too small for `affinity_support = \"",
+      affinity_support, "\"`; need at least ", required_k, ".",
+      call. = FALSE
+    )
   }
   knn <- normalize_opentsne_knn_input(indices, distances, n_neighbors)
   out <- list(
     knn = knn,
     perplexity = policy$perplexity,
     n_neighbors = as.integer(n_neighbors),
+    affinity_support = affinity_support,
     affinity_state = "knn_materialized_affinity_builder_internal"
   )
   class(out) <- c("fastEmbedR_opentsne_prepared", "list")

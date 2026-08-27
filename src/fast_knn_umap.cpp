@@ -1,3 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Package-owned UMAP graph construction and optimization. The implementation
+ * follows the published UMAP mathematics; no uwot or umap-learn source is
+ * copied, translated, linked, or vendored.
+ */
+
 #include <Rcpp.h>
 #include <algorithm>
 #include <atomic>

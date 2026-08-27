@@ -77,7 +77,9 @@ Or install the development source from R:
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/fastEmbedR")
+# Use the exact release tag or full commit recorded in the build manifest.
+ref <- "REPLACE_WITH_FROZEN_TAG_OR_COMMIT"
+remotes::install_github(paste0("tkcaccia/fastEmbedR@", ref))
 ```
 
 The configuration summary printed during installation must report
@@ -86,8 +88,14 @@ clustering are package-native.
 
 ## Apple Metal Installation
 
-The Metal backend is built automatically on macOS. The tested configuration is
-Apple Silicon with a current Xcode installation. Verify the toolchain and SDK:
+The build-supported Metal target is Apple Silicon with macOS 14 or newer. The source
+requires an SDK exposing the macOS 14 MPSGraph FFT declarations, so use a full
+Xcode 15 or newer installation. Full performance benchmarking is limited to an
+Apple M3 MacBook Pro, macOS 14.5, Xcode 16.2, and 8 GB unified memory. Other
+Apple Silicon generations are compatibility targets until a strict real-device
+artifact is archived, and no M3 speed claim transfers to them. Intel Macs are
+not a supported Metal target and should use the CPU backend. Verify the
+toolchain and SDK:
 
 ```sh
 xcode-select -p
@@ -136,8 +144,7 @@ A complete native CUDA build needs compatible installations of:
 - RAPIDS cuVS and its C API for recall-tuned IVF-Flat search;
 - RAPIDS RAFT, RMM, and compatible CCCL headers for CUDA PCA/TSVD.
 
-The optional native cuML compilation branch is not required for the standard
-fastEmbedR CUDA UMAP/openTSNE implementation.
+The CUDA PCA route uses RAFT TSVD directly and does not link or call cuML.
 
 The CUDA host compiler must be supported by the selected CUDA toolkit and ABI
 compatible with the compiler used to build R. Set `CUDAHOSTCXX` explicitly in

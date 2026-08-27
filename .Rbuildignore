@@ -11,6 +11,9 @@
 ^\.r-lib-test/
 ^LICENSE[.]md$
 ^LICENSE-IMPLICATIONS[.]md$
+^CONTRIBUTING[.]md$
+^CODE_OF_CONDUCT[.]md$
+^SECURITY[.]md$
 ^BENCHMARK_SUMMARY[.]md$
 ^cran-comments[.]md$
 ^_pkgdown[.]yml$

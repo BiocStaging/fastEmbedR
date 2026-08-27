@@ -200,14 +200,12 @@ NumericMatrix rsvd_multiply_cuda_impl(NumericMatrix left,
                                       bool transpose_left);
 NumericMatrix cuda_pca_init_cuda_impl(NumericMatrix data,
                                       int n_components);
-NumericMatrix cuml_tsvd_init_cuda_impl(NumericMatrix data,
+NumericMatrix raft_tsvd_init_cuda_impl(NumericMatrix data,
                                        int n_components);
 List pca_tsvd_cuda_impl(SEXP data,
                         int n_components,
                         bool center,
                         bool scale);
-NumericMatrix cuml_pca_init_cuda_impl(NumericMatrix data,
-                                      int n_components);
 
 // [[Rcpp::export]]
 bool embedding_cuda_available_cpp() {
@@ -665,9 +663,9 @@ NumericMatrix rsvd_multiply_cuda_cpp(NumericMatrix left,
 }
 
 // [[Rcpp::export]]
-NumericMatrix cuml_tsvd_init_cuda_cpp(NumericMatrix data,
+NumericMatrix raft_tsvd_init_cuda_cpp(NumericMatrix data,
                                       int n_components) {
-  return cuml_tsvd_init_cuda_impl(data, n_components);
+  return raft_tsvd_init_cuda_impl(data, n_components);
 }
 
 // [[Rcpp::export]]

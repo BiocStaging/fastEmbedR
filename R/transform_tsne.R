@@ -737,7 +737,7 @@ resident_projection_result <- function(backend, k) {
 #'   projection-only landmarking with no transform refinement.
 #' @param n_neighbors Number of non-self neighbors used to embed the landmark
 #'   reference set. If `NULL`, it follows the same neighbor policy as
-#'   [opentsne()]: `ceiling(perplexity)` when perplexity is supplied.
+#'   [opentsne()]: `ceiling(3 * perplexity)` under standard support.
 #' @param perplexity t-SNE perplexity for the landmark reference embedding. If
 #'   `NULL`, the optimizer chooses a safe value from the reference KNN width and
 #'   sample size.
@@ -764,6 +764,7 @@ landmark_tsne <- function(data,
                           reference_method = c("opentsne"),
                           n_neighbors = NULL,
                           perplexity = NULL,
+                          affinity_support = c("standard", "compact"),
                           n_components = 2L,
                           standardize = TRUE,
                           pca_dims = NULL,
@@ -783,6 +784,7 @@ landmark_tsne <- function(data,
   dots <- list(...)
   reference_method <- match.arg(reference_method)
   initialization <- match.arg(initialization)
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   backend <- resolve_embedding_backend(backend)
   preprocess_time <- system.time({
     prepared <- prepare_embedding_data(
@@ -795,12 +797,7 @@ landmark_tsne <- function(data,
   })
   x <- prepared$data
   n <- nrow(x)
-  if (is.null(n_neighbors)) {
-    n_neighbors <- opentsne_neighbor_policy(
-      n,
-      perplexity = perplexity
-    )$n_neighbors
-  } else {
+  if (!is.null(n_neighbors)) {
     n_neighbors <- as.integer(n_neighbors)
     if (length(n_neighbors) != 1L || is.na(n_neighbors) || n_neighbors < 1L || n_neighbors >= n) {
       stop("`n_neighbors` must be a positive integer smaller than `nrow(data)`.", call. = FALSE)
@@ -818,6 +815,7 @@ landmark_tsne <- function(data,
     return(opentsne(
       x,
       perplexity = perplexity,
+      affinity_support = affinity_support,
       n_components = n_components,
       standardize = FALSE,
       pca_dims = NULL,
@@ -840,7 +838,32 @@ landmark_tsne <- function(data,
   x_landmarks <- partition$landmarks
   x_query <- partition$query
   n_landmarks <- nrow(x_landmarks)
-  landmark_neighbors <- min(n_neighbors, n_landmarks - 1L)
+  reference_policy <- opentsne_neighbor_policy(
+    n_landmarks,
+    perplexity = perplexity,
+    affinity_support = affinity_support
+  )
+  if (is.null(perplexity)) perplexity <- reference_policy$perplexity
+  if (is.null(n_neighbors)) {
+    landmark_neighbors <- reference_policy$n_neighbors
+  } else {
+    if (n_neighbors >= n_landmarks) {
+      stop(
+        "`n_neighbors` must be smaller than the number of selected landmarks.",
+        call. = FALSE
+      )
+    }
+    required_neighbors <- opentsne_support_width(perplexity, affinity_support)
+    if (n_neighbors < required_neighbors) {
+      stop(
+        "`n_neighbors` is too small for `affinity_support = \"",
+        affinity_support, "\"`; need at least ", required_neighbors, ".",
+        call. = FALSE
+      )
+    }
+    landmark_neighbors <- n_neighbors
+  }
+  n_neighbors <- landmark_neighbors
   reference_time <- system.time({
     reference_knn <- landmark_reference_knn(
       x_landmarks,
@@ -852,6 +875,7 @@ landmark_tsne <- function(data,
       reference_knn,
       n_neighbors = landmark_neighbors,
       perplexity = perplexity,
+      affinity_support = affinity_support,
       n_components = n_components,
       init_data = x_landmarks,
       seed = seed,
@@ -1206,6 +1230,12 @@ landmark_tsne <- function(data,
       p = ncol(x),
       n_neighbors = n_neighbors,
       k = n_neighbors + 1L,
+      perplexity = reference_params$perplexity,
+      affinity_support = reference_params$affinity_support,
+      affinity_support_policy = reference_params$affinity_support_policy,
+      affinity_support_k = reference_params$affinity_support_k,
+      affinity_support_multiplier = reference_params$affinity_support_multiplier,
+      conventional_affinity_support = reference_params$conventional_affinity_support,
       n_components = as.integer(n_components),
       seed = as.integer(seed),
       nn_backend = reference_params$nn_backend,

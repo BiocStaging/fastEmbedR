@@ -43,7 +43,8 @@ non-landmark observations. Defaults to \code{n_neighbors}.}
 \item{graph_mode}{Graph weighting mode passed unchanged to the reference
 \code{\link{umap}} fit. \code{"fuzzy"} (the default) uses standard UMAP fuzzy
 graph weights; \code{"binary"} uses a symmetric unit-weight sensitivity
-graph.}
+graph. The fixed-reference projection algorithm is shared, but the fitted
+reference layout and its recorded metadata retain the selected graph mode.}
 \item{verbose}{Print progress.}
 }
 \value{

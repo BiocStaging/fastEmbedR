@@ -138,7 +138,12 @@ umap_init <- function(x,
         requested_threads < 1L) {
       stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
     }
+    cfg$n.cores_requested <- as.integer(requested_threads)
     cfg$n_threads <- max(1L, min(4L, requested_threads))
+    cfg$n.cores_effective <- cfg$n_threads
+  } else {
+    cfg$n.cores_requested <- cfg$n_threads
+    cfg$n.cores_effective <- cfg$n_threads
   }
   if (n_components != 2L && backend %in% c("cuda", "metal")) {
     stop(

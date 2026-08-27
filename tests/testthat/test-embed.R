@@ -430,7 +430,7 @@ test_that("CUDA openTSNE keeps native fastEmbedR GPU KNN on device", {
       layout = "column_major_query_by_k",
       exclude_self = TRUE,
       n_query = 8L,
-      k = 3L
+      k = 9L
     ),
     class = "fastEmbedR_gpu_knn"
   )
@@ -440,7 +440,7 @@ test_that("CUDA openTSNE keeps native fastEmbedR GPU KNN on device", {
       captured$distances_null <- is.null(distances)
       out <- matrix(0, 8L, 2L)
       attr(out, "fastEmbedR_config") <- list(
-        n_neighbors = 3L,
+        n_neighbors = 9L,
         perplexity = 3,
         knn_residency = "cuda_device"
       )
@@ -515,7 +515,7 @@ test_that("one-call CUDA embeddings use the intended KNN residency policy", {
       layout = "column_major_query_by_k",
       exclude_self = TRUE,
       n_query = 8L,
-      k = 3L
+      k = 6L
     ),
     class = "fastEmbedR_gpu_knn"
   )
@@ -556,8 +556,8 @@ test_that("one-call CUDA embeddings use the intended KNN residency policy", {
       captured$tsne_distances_null <- is.null(distances)
       out <- matrix(0, 8L, 2L)
       attr(out, "fastEmbedR_config") <- list(
-        n_neighbors = 3L,
-        perplexity = 3,
+        n_neighbors = 6L,
+        perplexity = 2,
         knn_residency = "cuda_device"
       )
       out
@@ -797,6 +797,59 @@ test_that("high-level embeddings avoid retaining KNN matrices by default", {
   )
 
   expect_null(compact$knn)
-  expect_equal(dim(retained$knn$indices), c(nrow(x), 1L))
-  expect_equal(dim(retained$knn$distances), c(nrow(x), 1L))
+  expect_equal(dim(retained$knn$indices), c(nrow(x), 3L))
+  expect_equal(dim(retained$knn$distances), c(nrow(x), 3L))
+})
+
+test_that("CPU UMAP and openTSNE return genuine three-dimensional layouts", {
+  x <- scale(as.matrix(iris[, 1:4]))
+
+  umap_fit <- umap(
+    x,
+    n_neighbors = 15L,
+    n_components = 3L,
+    backend = "cpu",
+    n.cores = 2L,
+    seed = 4L
+  )
+  tsne_fit <- opentsne(
+    x,
+    perplexity = 5,
+    affinity_support = "standard",
+    n_components = 3L,
+    backend = "cpu",
+    n.cores = 2L,
+    seed = 4L,
+    early_exaggeration_iter = 5L,
+    n_iter = 10L,
+    auto_config = FALSE
+  )
+
+  expect_equal(dim(umap_fit$layout), c(nrow(x), 3L))
+  expect_equal(dim(tsne_fit$layout), c(nrow(x), 3L))
+  expect_identical(umap_fit$parameters$n_components, 3L)
+  expect_identical(tsne_fit$parameters$n_components, 3L)
+  expect_identical(tsne_fit$parameters$negative_gradient_method, "exact")
+  expect_true(all(is.finite(umap_fit$layout)))
+  expect_true(all(is.finite(tsne_fit$layout)))
+})
+
+test_that("UMAP reports requested and validated effective CPU workers", {
+  set.seed(911)
+  x <- matrix(rnorm(240 * 5), nrow = 240)
+  d <- as.matrix(stats::dist(x))
+  diag(d) <- Inf
+  k <- 15L
+  indices <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+  distances <- matrix(
+    d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
+    nrow = nrow(d), byrow = TRUE
+  )
+  prepared <- prepare_umap_knn(
+    indices, distances, backend = "cpu", n.cores = 8,
+    graph_mode = "fuzzy"
+  )
+  expect_identical(prepared$config$n.cores_requested, 8L)
+  expect_identical(prepared$config$n.cores_effective, 4L)
+  expect_identical(prepared$config$n_threads, 4L)
 })

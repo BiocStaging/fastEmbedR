@@ -94,7 +94,11 @@ test_that("one-call and KNN openTSNE agree with a shared initialization", {
     seed = 13L
   )
 
-  expect_equal(full$layout, from_knn, tolerance = 1e-7)
+  expect_equal(
+    as.vector(full$layout),
+    as.vector(from_knn),
+    tolerance = 1e-7
+  )
 })
 
 test_that("evaluate_embedding accepts float32 data and layouts", {

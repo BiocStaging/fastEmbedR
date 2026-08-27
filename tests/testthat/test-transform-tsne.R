@@ -205,7 +205,6 @@ test_that("landmark_tsne returns a compact full embedding object", {
     x,
     landmarks = 20L,
     reference_method = "opentsne",
-    n_neighbors = 12L,
     perplexity = 4,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
@@ -221,6 +220,8 @@ test_that("landmark_tsne returns a compact full embedding object", {
   expect_equal(fit$parameters$method, "landmark_tsne")
   expect_true(isTRUE(fit$parameters$landmark))
   expect_equal(fit$parameters$n_landmarks, 20L)
+  expect_equal(fit$parameters$n_neighbors, 12L)
+  expect_equal(fit$parameters$affinity_support_k, 12L)
   expect_equal(fit$parameters$transform_optimizer, "opentsne_style_fixed_reference_transform")
   expect_true(is.list(fit$landmarks$projection_knn))
 })

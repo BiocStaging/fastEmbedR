@@ -65,7 +65,7 @@ test_that("precompute_knn exposes the native CPU policy without self neighbors",
 
   tsne_layout <- opentsne_knn(
     observed,
-    perplexity = 5,
+    perplexity = 4,
     init_data = x,
     backend = "cpu",
     n.cores = 2L,
@@ -191,6 +191,27 @@ test_that("native Metal exact search supports high-dimensional rows", {
   )
   expect_identical(dim(query_result$indices), c(5L, 6L))
   expect_true(all(is.finite(query_result$distances)))
+})
+
+test_that("native Metal top-k supports standard t-SNE affinity width", {
+  skip_if_not(isTRUE(native_metal_knn_available_cpp()), "Metal is unavailable")
+  set.seed(42)
+  reference <- matrix(rnorm(140 * 12), nrow = 140)
+  query <- matrix(rnorm(20 * 12), nrow = 20)
+  observed <- native_metal_query_knn_cpp(
+    reference, query, 90L, "exact", "euclidean", 1
+  )
+  truth <- t(vapply(seq_len(nrow(query)), function(i) {
+    difference <- sweep(reference, 2L, query[i, ], "-")
+    distance <- sqrt(rowSums(difference^2))
+    order(distance)[seq_len(90L)]
+  }, integer(90L)))
+  recall <- mean(vapply(seq_len(nrow(query)), function(i) {
+    length(intersect(observed$indices[i, ], truth[i, ])) / 90
+  }, numeric(1)))
+
+  expect_identical(dim(observed$indices), c(20L, 90L))
+  expect_equal(recall, 1, tolerance = 1e-8)
 })
 
 test_that("native Metal query IVF is recall-gated against exact query KNN", {

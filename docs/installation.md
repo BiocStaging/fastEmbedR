@@ -18,7 +18,10 @@ KNN graph construction, and native community detection.
 
 ```r
 install.packages("remotes")
-remotes::install_github("tkcaccia/fastEmbedR")
+# Use the exact release tag or full commit recorded in the publication or
+# analysis manifest; do not use a moving branch for a reproducible analysis.
+ref <- "REPLACE_WITH_FROZEN_TAG_OR_COMMIT"
+remotes::install_github(paste0("tkcaccia/fastEmbedR@", ref))
 ```
 
 Suggested benchmark/reference packages:
@@ -84,8 +87,16 @@ and `89` covers an L40S.
 
 ## Apple Metal
 
-On Apple Silicon, `fastEmbedR` builds native Objective-C++/Metal embedding
-kernels for:
+The build-supported Metal target is Apple Silicon. The source requires an SDK that
+exposes the macOS 14 MPSGraph FFT declarations, so use macOS 14 or newer and a
+full Xcode 15 or newer toolchain. Full performance benchmarking is currently
+limited to a MacBook Pro with an Apple M3, macOS 14.5, Xcode 16.2, and 8 GB
+unified memory. Other Apple Silicon systems are compatibility targets, not
+performance-validated configurations. Intel Macs are not a supported Metal
+target; use `backend = "cpu"` on those systems.
+
+On a build-supported Apple Silicon system, `fastEmbedR` builds native
+Objective-C++/Metal embedding kernels for:
 
 - exact and recall-tuned IVF-Flat KNN;
 - UMAP layout optimization from KNN;
@@ -94,6 +105,14 @@ kernels for:
 
 No Python, Torch, MLX, or `reticulate` call is required for the public Metal
 embedding paths.
+
+Metal feature parity is explicit rather than inferred from a backend label.
+Core KNN, PCA, two-dimensional UMAP/openTSNE, transformation, and landmark
+paths are native. `knn_graph()` uses Metal for neighbor search but constructs
+the graph object on CPU; `evaluate_embedding()` computes metrics on CPU after
+the final layout transfer; and Walktrap clustering is CPU-only. See the
+[backend capability matrix](backend-capabilities.md) for dimensional and
+metric limits.
 
 ## Backend Check
 

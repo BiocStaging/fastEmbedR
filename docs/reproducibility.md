@@ -96,7 +96,10 @@ GPU-specific test evidence follows the
 [real-hardware backend validation contract](backend-validation.md). The
 release commands fail when Metal or CUDA is unavailable, when a result records
 a backend different from the one requested, or when a backend-specific test
-fails.
+fails. These artifacts are strict hardware smoke/correctness evidence; full
+performance validation is a separate release-locked benchmark, and configured
+device architectures without execution are only build-level compatibility
+targets.
 
 ## Benchmark Commands
 

@@ -38,6 +38,7 @@ test_that("openTSNE auto configuration exposes opt-SNE policy metadata", {
     "exact"
   )
   expect_equal(policy$perplexity, 10)
+  expect_equal(policy$n_neighbors, 30L)
   expect_equal(policy$learning_rate, 150 / policy$early_exaggeration)
   expect_false(policy$auto_kld_stop)
   expect_equal(policy$auto_iter_end, 5000)
@@ -52,6 +53,7 @@ test_that("openTSNE auto configuration exposes opt-SNE policy metadata", {
     "fft"
   )
   expect_equal(large_fft$perplexity, 30)
+  expect_equal(large_fft$n_neighbors, 90L)
   expect_false(large_fft$auto_kld_stop)
 })
 
@@ -144,6 +146,9 @@ test_that("opentsne has direct KNN input functions", {
   expect_equal(cfg$method, "opentsne")
   expect_equal(cfg$n_neighbors, 12L)
   expect_equal(cfg$perplexity, 3)
+  expect_equal(cfg$affinity_support, "expanded")
+  expect_equal(cfg$affinity_support_multiplier, 4)
+  expect_true(cfg$conventional_affinity_support)
   expect_type(layout, "double")
   expect_identical(attr(layout, "precision"), "double")
   expect_identical(cfg$output_precision, "double")
@@ -158,9 +163,79 @@ test_that("opentsne has direct KNN input functions", {
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
   expect_equal(fit$parameters$input, "knn")
-  expect_equal(fit$metrics$n_neighbors, 3L)
+  expect_equal(fit$metrics$n_neighbors, 9L)
+  expect_equal(fit$parameters$affinity_support, "standard")
+  expect_equal(fit$parameters$affinity_support_k, 9L)
+  expect_equal(fit$parameters$affinity_support_multiplier, 3)
+  expect_true(fit$parameters$conventional_affinity_support)
   expect_equal(fit$metrics$preprocess_elapsed, 0)
   expect_equal(fit$metrics$knn_elapsed, 0)
+
+  compact <- opentsne(
+    knn,
+    perplexity = 3,
+    affinity_support = "compact",
+    early_exaggeration_iter = 2L,
+    n_iter = 3L,
+    seed = 322L
+  )
+  expect_equal(compact$metrics$n_neighbors, 3L)
+  expect_equal(compact$parameters$affinity_support, "compact")
+  expect_equal(compact$parameters$affinity_support_k, 3L)
+  expect_equal(compact$parameters$affinity_support_multiplier, 1)
+  expect_false(compact$parameters$conventional_affinity_support)
+})
+
+test_that("openTSNE standard support rejects a compact precomputed KNN", {
+  set.seed(323)
+  x <- matrix(rnorm(60L * 5L), 60L, 5L)
+  compact_knn <- test_exact_knn(x, k = 6L, backend = "cpu")
+
+  expect_error(
+    opentsne_knn(
+      compact_knn,
+      perplexity = 5,
+      early_exaggeration_iter = 1L,
+      n_iter = 2L
+    ),
+    "fewer non-self columns"
+  )
+
+  layout <- opentsne_knn(
+    compact_knn,
+    perplexity = 5,
+    affinity_support = "compact",
+    early_exaggeration_iter = 1L,
+    n_iter = 2L
+  )
+  cfg <- attr(layout, "fastEmbedR_config")
+  expect_equal(cfg$affinity_support, "compact")
+  expect_false(cfg$conventional_affinity_support)
+})
+
+test_that("post-fit KL diagnostic matches the optimizer's exact final KL", {
+  set.seed(325)
+  x <- matrix(rnorm(80L * 6L), 80L, 6L)
+  knn <- test_exact_knn(x, k = 16L, backend = "cpu")
+  layout <- opentsne_knn(
+    knn,
+    perplexity = 5,
+    early_exaggeration_iter = 1L,
+    n_iter = 2L,
+    record_costs = TRUE,
+    n.cores = 2L,
+    seed = 325L
+  )
+  recorded <- tail(attr(layout, "itercosts"), 1L)
+  normalized <- fastEmbedR:::normalize_opentsne_knn_input(knn, NULL, 15L)
+  diagnostic <- fastEmbedR:::opentsne_kl_diagnostic_cpp(
+    normalized$indices,
+    normalized$distances,
+    layout,
+    5,
+    2L
+  )
+  expect_equal(diagnostic, recorded, tolerance = 1e-6)
 })
 
 test_that("opentsne_knn preserves the documented float32 return contract", {
@@ -295,5 +370,36 @@ test_that("opentsne rejects low-level KNN backend names", {
       backend = "cuda_cuvs_bruteforce"
     ),
     "must be one of"
+  )
+})
+
+test_that("CPU openTSNE reports native affinity and optimization timings", {
+  set.seed(910)
+  x <- matrix(rnorm(180 * 6), nrow = 180)
+  d <- as.matrix(stats::dist(x))
+  diag(d) <- Inf
+  k <- 15L
+  indices <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+  distances <- matrix(
+    d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
+    nrow = nrow(d), byrow = TRUE
+  )
+  layout <- opentsne_knn(
+    indices, distances, perplexity = 5, affinity_support = "standard",
+    Y_init = matrix(rnorm(360, sd = 1e-4), ncol = 2),
+    backend = "cpu", n.cores = 2,
+    early_exaggeration_iter = 2, n_iter = 3, auto_config = FALSE
+  )
+  cfg <- attr(layout, "fastEmbedR_config")
+  expect_identical(cfg$n.cores_requested, 2L)
+  expect_identical(cfg$n.cores, 2L)
+  expect_true(is.finite(cfg$affinity_elapsed_sec))
+  expect_true(is.finite(cfg$optimization_elapsed_sec))
+  expect_gt(cfg$affinity_elapsed_sec, 0)
+  expect_gt(cfg$optimization_elapsed_sec, 0)
+  expect_equal(
+    cfg$native_total_elapsed_sec,
+    cfg$affinity_elapsed_sec + cfg$optimization_elapsed_sec,
+    tolerance = 1e-12
   )
 })

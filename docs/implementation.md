@@ -370,6 +370,16 @@ openTSNE/FIt-SNE workflows [3-4]:
    rate, update clipping, and recentering.
 6. Return the layout with parameters, timing, and backend metadata.
 
+The production matrix-input policy supplies
+`ceiling(3 * perplexity)` non-self candidate neighbors to the bandwidth
+search. This larger-than-perplexity support lets distances determine
+non-uniform conditional probabilities and follows conventional sparse t-SNE
+practice. `affinity_support = "compact"` instead supplies only
+`ceiling(perplexity)` neighbors. That mode reduces sparse work but drives the
+target entropy toward the maximum available entropy, so it is documented and
+reported as an approximation rather than a standard t-SNE configuration.
+`opentsne_knn()` records the exact support width and support/perplexity ratio.
+
 The public `opentsne()` function is now only a convenience wrapper around this
 KNN implementation. If a KNN object is supplied through `nn`, then
 `opentsne(data, nn = knn)` calls the same path as `opentsne_knn(knn)` and
@@ -401,6 +411,36 @@ public benchmark surface because the FFT-grid path is the intended standard
 for MNIST70k-scale data; Barnes-Hut remains an important historical reference
 for tree-based t-SNE acceleration [2].
 
+Automatic small-data execution uses exact repulsion. If FFT is requested
+explicitly, CPU and Metal use a minimum 128-cell grid. A matched long-run
+diagnostic showed that the former 64-cell setting could pass first-step force
+tests yet exceed the final common-affinity KL gate after a complete trajectory.
+The 128-cell floor restored CPU/Metal KL, trustworthiness, and Preserve@30
+eligibility without changing KNN input, initialization, optimizer schedule,
+momentum, clipping, or stopping. The fitted object's
+`fastEmbedR_config$fft_grid_size` field records the resolution actually used.
+
+Numerical correctness is tested below the final-layout level. An independent
+dense float64 reference evaluates affinities, exact attractive and repulsive
+forces, the KL objective, and central finite differences. The production
+float32 kernels are checked against that oracle; FFT-grid repulsion is checked
+against exact repulsion over increasing grid sizes; and available accelerator
+backends are compared with CPU after one update from identical coordinates and
+through common-affinity KL trajectories. The same tests cover compact,
+standard, and expanded candidate support plus duplicated observations, zero
+distances, disconnected KNN graphs, coincident coordinates, and extreme finite
+coordinates through every available public backend. The initial real-CUDA
+first-step check exposed a zero-sign discrepancy in adaptive gains; after the
+CUDA update adopted the CPU/Metal three-state sign rule, CPU-CUDA first-step
+relative error fell from `2.10e-3` to `3.68e-8` without relaxing the
+predeclared `2e-3` threshold. Identity-bound real-hardware validation reports
+an unavailable backend as unavailable rather than passing it by fallback.
+Final-layout eligibility additionally requires common-affinity KL no greater
+than 1.05 times the named matched reference, trustworthiness no more than 0.01
+below that reference, and Preserve@30 no more than 0.01 below it. Procrustes
+and embedding-neighborhood agreement are reported as diagnostics rather than
+used alone as gates for the non-convex t-SNE objective.
+
 ### CPU, Metal, and CUDA
 
 | Backend | Native implementation |
@@ -430,13 +470,23 @@ interpolation/transform steps, and records projection/transform time
 separately. Landmarking is not used silently inside full `opentsne()` or
 `umap()` calls.
 
-## Autotuning
+## Parameter Policy And Autotuning
 
-The API asks for few parameters, but selected defaults are saved in the output.
-For openTSNE-style t-SNE, the native helper follows opt-SNE-inspired rules for
-learning rate and iteration defaults [6]. For UMAP, the code uses the supplied
-KNN and data size to choose internal initialization effort and optimizer
-defaults without silently changing the supplied neighbor graph [7,13].
+The configurability is deliberately asymmetric. openTSNE exposes perplexity
+and support, initialization, iteration counts, exaggeration, learning rate,
+momentum, clipping, and exact-versus-FFT repulsion. Its native helper supplies
+opt-SNE-inspired learning-rate and iteration defaults only when values are
+omitted [6], and `auto_config = FALSE` disables automatic iteration/stopping
+choices.
+
+UMAP preserves one package-owned policy across CPU, Metal, and CUDA. The user
+selects neighbors, metric, graph mode, backend, seed, and preprocessing; the
+distance profile and data size select epochs, minimum distance, learning rate,
+and initialization effort. Spread, repulsion strength, and negative-sample
+rate are fixed at 1, 1, and 5. These choices never alter a supplied KNN graph
+and are all stored in the returned configuration [7,13]. The package is
+therefore an opinionated high-throughput UMAP implementation, not a drop-in API
+for arbitrary UMAP hyperparameter sweeps.
 
 ## License Boundary
 

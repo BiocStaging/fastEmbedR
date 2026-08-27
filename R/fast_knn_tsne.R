@@ -18,9 +18,17 @@
 #'   `NULL` when `indices` is a KNN list.
 #' @param n_neighbors Optional number of non-self neighbor columns to use from
 #'   the supplied KNN graph. This lets you compute a wide KNN once and reuse
-#'   its first columns for comparable tests.
+#'   its first columns for comparable tests. If omitted, `affinity_support`
+#'   determines the width. An explicit value must be at least the width implied
+#'   by `affinity_support`.
 #' @param perplexity t-SNE perplexity. If `NULL`, the optimizer chooses a safe
 #'   value from the supplied KNN width and sample size.
+#' @param affinity_support Affinity candidate-neighborhood policy. `"standard"`
+#'   (default) uses `ceiling(3 * perplexity)` non-self neighbors, matching the
+#'   conventional sparse t-SNE support rule. `"compact"` uses only
+#'   `ceiling(perplexity)` neighbors and is an explicit approximation with
+#'   nearly uniform conditional probabilities when the support equals the
+#'   target perplexity.
 #' @param init_data Optional original high-dimensional data matrix used only to
 #'   compute PCA initialization for KNN-input runs. It is not used for neighbor
 #'   search or optimization.
@@ -57,6 +65,7 @@ opentsne_knn <- function(indices,
                          distances = NULL,
                          n_neighbors = NULL,
                          perplexity = NULL,
+                         affinity_support = c("standard", "compact"),
                          n_components = 2L,
                          init_data = NULL,
                          Y_init = NULL,
@@ -76,8 +85,11 @@ opentsne_knn <- function(indices,
                           record_costs = FALSE,
                           auto_config = TRUE,
                           ...) {
+  affinity_support_missing <- missing(affinity_support)
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
+  n_components <- validate_opentsne_n_components(n_components, backend)
   if (fastembedr_is_gpu_knn(indices) && identical(backend, "cuda")) {
     indices <- fastembedr_as_gpu_knn(indices)
     if (!is.null(distances)) {
@@ -95,7 +107,8 @@ opentsne_knn <- function(indices,
     policy <- opentsne_neighbor_policy(
       gpu_info$n,
       perplexity = perplexity,
-      available = gpu_info$k
+      available = gpu_info$k,
+      affinity_support = affinity_support
     )
     if (is.null(n_neighbors)) {
       n_neighbors <- policy$n_neighbors
@@ -111,6 +124,14 @@ opentsne_knn <- function(indices,
       }
     }
     if (is.null(perplexity)) perplexity <- policy$perplexity
+    required_k <- opentsne_support_width(perplexity, affinity_support)
+    if (n_neighbors < required_k) {
+      stop(
+        "`n_neighbors` is too small for `affinity_support = \"",
+        affinity_support, "\"`; need at least ", required_k, ".",
+        call. = FALSE
+      )
+    }
     Y_init <- resolve_opentsne_y_init(Y_init, gpu_info$n, n_components)
     cuda_init_data <- NULL
     if (is.null(Y_init) && !is.null(init_data)) {
@@ -120,7 +141,7 @@ opentsne_knn <- function(indices,
       }
       cuda_init_data <- init_check
     }
-    return(fast_knn_opentsne_materialized(
+    layout <- fast_knn_opentsne_materialized(
       NULL,
       NULL,
       n_components = n_components,
@@ -148,6 +169,9 @@ opentsne_knn <- function(indices,
       gpu_k = as.integer(n_neighbors),
       cuda_init_data = cuda_init_data,
       ...
+    )
+    return(annotate_opentsne_affinity_support(
+      layout, n_neighbors, perplexity, affinity_support
     ))
   }
   if (inherits(indices, "fastEmbedR_opentsne_prepared")) {
@@ -156,16 +180,29 @@ opentsne_knn <- function(indices,
     }
     knn <- indices$knn
     if (is.null(perplexity)) perplexity <- indices$perplexity
+    if (isTRUE(affinity_support_missing) && !is.null(indices$affinity_support)) {
+      affinity_support <- indices$affinity_support
+    }
+    if (is.null(n_neighbors)) n_neighbors <- indices$n_neighbors
   } else {
     knn0 <- coerce_knn_input(indices, distances)
     policy <- opentsne_neighbor_policy(
       nrow(knn0$indices),
       perplexity = perplexity,
-      available = knn0$n_neighbors
+      available = knn0$n_neighbors,
+      affinity_support = affinity_support
     )
     if (is.null(n_neighbors)) n_neighbors <- policy$n_neighbors
     if (is.null(perplexity)) perplexity <- policy$perplexity
     knn <- normalize_opentsne_knn_input(indices, distances, n_neighbors)
+  }
+  required_k <- opentsne_support_width(perplexity, affinity_support)
+  if (knn$n_neighbors < required_k) {
+    stop(
+      "`n_neighbors` is too small for `affinity_support = \"",
+      affinity_support, "\"`; need at least ", required_k, ".",
+      call. = FALSE
+    )
   }
   Y_init <- resolve_opentsne_y_init(Y_init, knn$n, n_components)
   if (is.null(Y_init) && !is.null(init_data)) {
@@ -179,7 +216,7 @@ opentsne_knn <- function(indices,
       n_threads = n_threads
     )
   }
-  fast_knn_opentsne_materialized(
+  layout <- fast_knn_opentsne_materialized(
     knn$indices,
     knn$distances,
     n_components = n_components,
@@ -204,6 +241,9 @@ opentsne_knn <- function(indices,
     input_backend = knn$input_backend,
     ...
   )
+  annotate_opentsne_affinity_support(
+    layout, knn$n_neighbors, perplexity, affinity_support
+  )
 }
 
 #' Run native openTSNE-style t-SNE from a data matrix
@@ -219,10 +259,17 @@ opentsne_knn <- function(indices,
 #'
 #' @param data Numeric matrix/data frame with observations in rows, or a list
 #'   containing KNN `indices` and `distances`.
-#' @param perplexity t-SNE perplexity. The one-call API uses
-#'   `ceiling(perplexity)` non-self neighbors internally. If `NULL`, uses the
-#'   largest safe value up to 30 that is available for the input.
-#' @param n_components Output dimensionality, from 1 to 3.
+#' @param perplexity t-SNE perplexity. If `NULL`, uses the largest safe value
+#'   up to 30 that is available for the input and selected affinity support.
+#' @param affinity_support Affinity candidate-neighborhood policy. The default
+#'   `"standard"` uses `ceiling(3 * perplexity)` non-self neighbors so the
+#'   Gaussian bandwidth search can produce non-uniform conditional
+#'   probabilities. `"compact"` retains the older
+#'   `ceiling(perplexity)`-neighbor approximation for explicit speed/memory
+#'   experiments; it is not equivalent to conventional sparse t-SNE.
+#' @param n_components Output dimensionality, from 1 to 3. Dimensions other
+#'   than two use CPU exact repulsion; the current Metal and CUDA
+#'   interpolation/FFT optimizers support only `2L`.
 #' @param init_data Optional original high-dimensional data matrix used only to
 #'   compute PCA initialization with [opentsne_pca_init()]. It is not used for
 #'   neighbor search or optimization.
@@ -270,6 +317,18 @@ opentsne_knn <- function(indices,
 #'   KLD-based early stopping only on CPU/small exact runs where the monitor is
 #'   not prohibitively expensive. Explicit user-supplied values are respected.
 #' @param ... Additional low-level parameters passed to [opentsne_knn()].
+#' @details
+#' Unlike the more opinionated UMAP API, openTSNE exposes the principal
+#' scientifically consequential optimizer controls: perplexity and candidate
+#' support, initialization, iteration counts, early and normal exaggeration,
+#' learning rate, momentum, clipping, and exact-versus-FFT repulsion. Setting
+#' `auto_config = FALSE` disables automatic iteration and stopping choices;
+#' explicit values always override automatic values. The matrix-input function
+#' deliberately does not expose a nearest-neighbor index type or tuning
+#' parameters: it uses the backend router with target recall 0.99. Supply an
+#' externally generated KNN object to [opentsne_knn()] when search policy or
+#' affinity support must be controlled independently. The resolved settings
+#' are returned in `fit$parameters`.
 #' @return A `fastEmbedR_embedding` object.
 #' @examples
 #' fit <- opentsne(
@@ -280,6 +339,7 @@ opentsne_knn <- function(indices,
 #' @export
 opentsne <- function(data,
                      perplexity = NULL,
+                     affinity_support = c("standard", "compact"),
                      n_components = 2L,
                      init_data = NULL,
                      Y_init = NULL,
@@ -304,8 +364,10 @@ opentsne <- function(data,
                       record_costs = FALSE,
                       auto_config = TRUE,
                       ...) {
+  affinity_support <- normalize_opentsne_affinity_support(affinity_support)
   n_threads <- n.cores
   backend <- resolve_embedding_backend(backend)
+  n_components <- validate_opentsne_n_components(n_components, backend)
   input_is_float32 <- is_float32_matrix(data)
   dots <- list(...)
   if ("init" %in% names(dots)) {
@@ -317,8 +379,8 @@ opentsne <- function(data,
   }
   if ("n_neighbors" %in% names(dots)) {
     stop(
-      "`n_neighbors` is not an argument of `opentsne()`; use `perplexity`, ",
-      "which also determines the internal non-self KNN width.",
+      "`n_neighbors` is not an argument of `opentsne()`; use `perplexity` ",
+      "and `affinity_support` to determine the internal non-self KNN width.",
       call. = FALSE
     )
   }
@@ -333,6 +395,7 @@ opentsne <- function(data,
         data,
         n_components = n_components,
         perplexity = perplexity,
+        affinity_support = affinity_support,
         init_data = init_data,
         Y_init = Y_init,
         seed = seed,
@@ -418,7 +481,8 @@ opentsne <- function(data,
     neighbor_policy <- opentsne_neighbor_policy(
       n,
       perplexity = perplexity,
-      available = full_knn$n_neighbors
+      available = full_knn$n_neighbors,
+      affinity_support = affinity_support
     )
     perplexity <- neighbor_policy$perplexity
     knn_result <- normalize_opentsne_knn_input(
@@ -445,6 +509,7 @@ opentsne <- function(data,
         n_neighbors = knn_result$n_neighbors,
         n_components = n_components,
         perplexity = perplexity,
+        affinity_support = affinity_support,
         init_data = init_data,
         Y_init = Y_init,
         seed = seed,
@@ -538,7 +603,11 @@ opentsne <- function(data,
   x <- prepared$data
   metric <- resolve_embedding_metric(metric, x)
   n <- nrow(x)
-  neighbor_policy <- opentsne_neighbor_policy(n, perplexity = perplexity)
+  neighbor_policy <- opentsne_neighbor_policy(
+    n,
+    perplexity = perplexity,
+    affinity_support = affinity_support
+  )
   perplexity <- neighbor_policy$perplexity
   n_neighbors <- neighbor_policy$n_neighbors
 
@@ -665,6 +734,7 @@ opentsne <- function(data,
       n_neighbors = knn_result$n_neighbors,
       n_components = n_components,
       perplexity = perplexity,
+      affinity_support = affinity_support,
       init_data = cuda_init_data %||% init_data,
       Y_init = Y_init,
       seed = seed,

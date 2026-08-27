@@ -1,0 +1,38 @@
+name: Software quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-coverage:
+    name: Host-side component coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::covr
+            any::testthat
+          needs: coverage
+      - name: Generate component coverage evidence
+        run: Rscript tools/report_test_coverage.R --output-dir coverage-evidence/host
+      - name: Archive coverage evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: fastEmbedR-host-coverage-${{ github.sha }}
+          path: coverage-evidence/host
+          if-no-files-found: error
+          retention-days: 90

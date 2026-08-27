@@ -1,3 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stefano Cacciatore
+ * SPDX-License-Identifier: MIT
+ *
+ * Independent implementation of the Pons-Latapy random-walk community
+ * algorithm. No igraph Walktrap source is copied, linked, or vendored; igraph
+ * is used only as an optional validation reference.
+ */
+
 #include <Rcpp.h>
 
 #include <algorithm>

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: mailto:tkcaccia@gmail.com
+    about: Report suspected vulnerabilities privately.
+  - name: User documentation
+    url: https://tkcaccia.github.io/fastEmbedR/
+    about: Read installation, backend, and API documentation.

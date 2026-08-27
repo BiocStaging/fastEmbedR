@@ -315,20 +315,29 @@ The package separates:
 - projection or transform time for non-landmark points;
 - quality metrics for the final full layout.
 
-## Autotuning
+## Parameter policy and autotuning
 
-The default API asks for few parameters, but the code records what it chose.
-
-openTSNE uses opt-SNE-style rules:
+The APIs intentionally expose different levels of control. openTSNE exposes
+the principal scientific optimizer settings and uses opt-SNE-style rules only
+for omitted values:
 
 - automatic learning rate is `n / early_exaggeration`;
 - iteration defaults are chosen by a native helper;
 - CPU/small exact runs can use KLD-based stopping;
 - large FFT/GPU runs do not hide an expensive CPU KLD monitor.
 
-UMAP uses the KNN distance profile to choose internal defaults such as
-initialization effort and optimizer settings. If a KNN object is supplied, the
-KNN graph itself is not silently changed.
+UMAP is an opinionated fixed-policy implementation. It exposes neighbors,
+metric, graph mode, preprocessing, backend, and seed,
+while the KNN distance profile chooses internal epochs, minimum distance,
+learning rate, and initialization effort. Spread, repulsion strength, and
+negative-sample rate are fixed at 1, 1, and 5. If a KNN object is supplied, its
+graph is not silently changed. All resolved values are recorded. This is an
+opinionated validated policy, not API compatibility with every UMAP parameter
+configuration. These parameters influence compactness, convergence effort, and
+the attraction/repulsion balance. The fixed policy keeps the same tested
+mathematics and schedule across backends; it is not claimed to be optimal for
+all scientific goals. Use a general-purpose UMAP implementation for arbitrary
+parameter sweeps.
 
 ## Backend Honesty
 

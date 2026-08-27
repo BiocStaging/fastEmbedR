@@ -54,7 +54,9 @@ resolve_opentsne_gradient_method <- function(method,
                                              n,
                                              n_components) {
   if (identical(method, "auto")) {
-    method <- if (identical(optimizer_backend, "cuda")) {
+    method <- if (n_components != 2L) {
+      "exact"
+    } else if (identical(optimizer_backend, "cuda")) {
       "fft"
     } else if (n <= 3000L) {
       "exact"
@@ -409,6 +411,7 @@ finalize_opentsne_native_result <- function(out,
     initialization = init_info$method,
     initialization_spectral_n_iter = init_info$spectral_n_iter,
     negative_gradient_method = negative_gradient_method,
+    fft_grid_size = out$fft_grid_size %||% NA_integer_,
     auto_config = isTRUE(auto_params$auto_config),
     auto_config_rule = auto_params$auto_rule,
     auto_kld_stop = isTRUE(out$auto_kld_stop %||% FALSE),
@@ -424,6 +427,10 @@ finalize_opentsne_native_result <- function(out,
     probabilities = probabilities,
     n_negatives = n_negatives,
     n.cores = out$n_threads,
+    n.cores_requested = out$n_threads_requested %||% out$n_threads,
+    affinity_elapsed_sec = out$affinity_elapsed_sec %||% NA_real_,
+    optimization_elapsed_sec = out$optimization_elapsed_sec %||% NA_real_,
+    native_total_elapsed_sec = out$native_total_elapsed_sec %||% NA_real_,
     input_had_self = isTRUE(input_had_self),
     knn_backend = input_backend,
     knn_residency = if (isTRUE(gpu_resident_knn)) {

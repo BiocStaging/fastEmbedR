@@ -9,6 +9,7 @@ opentsne_knn(
   distances = NULL,
   n_neighbors = NULL,
   perplexity = NULL,
+  affinity_support = c("standard", "compact"),
   n_components = 2L,
   init_data = NULL,
   Y_init = NULL,
@@ -39,12 +40,23 @@ KNN index matrix.}
 
 \item{n_neighbors}{Optional number of non-self neighbor columns to use from
 the supplied KNN graph. This lets you compute a wide KNN once and reuse
-its first columns for comparable tests.}
+its first columns for comparable tests. If omitted, `affinity_support`
+determines the width. An explicit value must be at least the width implied
+by `affinity_support`.}
 
 \item{perplexity}{t-SNE perplexity. If `NULL`, the optimizer chooses a safe
 value from the supplied KNN width and sample size.}
 
-\item{n_components}{Output dimensionality, from 1 to 3.}
+\item{affinity_support}{Affinity candidate-neighborhood policy. `"standard"`
+(default) uses `ceiling(3 * perplexity)` non-self neighbors, matching the
+conventional sparse t-SNE support rule. `"compact"` uses only
+`ceiling(perplexity)` neighbors and is an explicit approximation with
+nearly uniform conditional probabilities when the support equals the
+target perplexity.}
+
+\item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
+than two use CPU exact repulsion; the current Metal and CUDA
+interpolation/FFT optimizers support only `2L`.}
 
 \item{init_data}{Optional original high-dimensional data matrix used only to
 compute PCA initialization for KNN-input runs. It is not used for neighbor

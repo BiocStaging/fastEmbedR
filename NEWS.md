@@ -1,3 +1,49 @@
+# fastEmbedR 0.99.9
+
+- Classify the package under the Bioconductor `Infrastructure` view. The core
+  CPU implementation deliberately remains independent of other Bioconductor
+  software packages; no artificial runtime dependency is introduced merely to
+  suppress a submission check.
+
+# fastEmbedR 0.99.8
+
+- Make `n_components = 3L` operational for CPU UMAP and openTSNE. Non-2D UMAP
+  now uses the float32-compatible dimension-generic CSR optimizer, and non-2D
+  openTSNE resolves to exact repulsion. Metal and CUDA requests remain
+  explicitly limited to two output dimensions and never fall back to CPU.
+- Add a source-level provenance and licensing audit: exact upstream commits,
+  adapted and vendored file mappings, SPDX source headers, complete required
+  license copies, linked-versus-redistributed dependency boundaries, and a
+  machine-readable `inst/THIRD_PARTY_DEPENDENCIES.json` inventory validated by
+  `tools/check_provenance_inventory.R`. Remove the unused cuML build switch;
+  CUDA PCA links RAFT TSVD directly.
+- Document the public parameter philosophy explicitly. openTSNE exposes its
+  principal scientific controls, whereas UMAP retains one package-owned,
+  backend-validated optimizer policy and reports every resolved choice in the
+  returned metadata. The manuals and vignettes now distinguish exposed,
+  reusable, internal, and approximation controls and state that fastEmbedR is
+  not a drop-in API for arbitrary UMAP hyperparameter sweeps.
+- Make conventional sparse t-SNE affinity support the production default:
+  `opentsne()` now supplies `ceiling(3 * perplexity)` non-self neighbors to
+  the Gaussian bandwidth search. The previous `ceiling(perplexity)` policy is
+  retained only as the explicit `affinity_support = "compact"` approximation.
+  KNN-input and landmark workflows record the actual support width, support
+  ratio, and whether the supplied support meets the conventional rule.
+- Add an independent float64 t-SNE reference harness and commit-bound CPU,
+  Metal, and CUDA numerical gates for exact attractive/repulsive forces,
+  finite-difference gradients, FFT-grid convergence, identical-state first
+  steps, common-affinity KL trajectories, support-width sweeps, and
+  pathological inputs. Equal-distance rows now resolve explicitly to their
+  mathematically correct uniform conditional distribution instead of allowing
+  the bandwidth precision to become nonfinite.
+- Align CUDA openTSNE adaptive-gain sign handling with the CPU and Metal
+  implementations, including the zero-update first iteration. Explicit CUDA
+  FFT-grid overrides now also accept the 32- and 64-cell diagnostic grids used
+  by the cross-backend numerical tests.
+- Make custom NVCC compilation inherit `R CMD config --cppflags`, so CUDA builds
+  find R headers on distributions where the configured include directory is
+  outside `R_HOME/include` (for example, Debian and Ubuntu).
+
 # fastEmbedR 0.99.7
 
 - Split KNN-input UMAP and openTSNE orchestration into dedicated policy,
