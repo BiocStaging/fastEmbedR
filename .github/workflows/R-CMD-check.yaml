@@ -11,8 +11,34 @@ permissions:
   contents: read
 
 jobs:
+  source-package:
+    name: Build canonical source package
+    runs-on: ubuntu-latest
+    env:
+      _R_CHECK_CRAN_INCOMING_REMOTE_: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-pandoc@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+      - name: Build source package
+        run: R CMD build . --compact-vignettes=gs+qpdf
+      - name: Archive source package
+        uses: actions/upload-artifact@v7
+        with:
+          name: fastEmbedR-source-${{ github.sha }}
+          path: fastEmbedR_*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   R-CMD-check:
     name: ${{ matrix.config.os }} / R ${{ matrix.config.r }} (CPU build)
+    needs: source-package
     runs-on: ${{ matrix.config.os }}
     env:
       # CRAN's remote incoming lookup is an external network probe. Keep all
@@ -39,9 +65,26 @@ jobs:
           extra-packages: |
             any::rcmdcheck
           needs: check
+      - name: Download canonical source package
+        uses: actions/download-artifact@v8
+        with:
+          name: fastEmbedR-source-${{ github.sha }}
+          path: source-package
       - name: Validate hardware-test drivers
         run: |
           bash -n .github/scripts/run-hardware-validation.sh
           Rscript -e 'parse(file = ".github/scripts/validate-hardware.R")'
       - name: Check
-        run: Rscript -e 'rcmdcheck::rcmdcheck(args = c("--no-manual", "--as-cran"), error_on = "warning")'
+        shell: Rscript {0}
+        run: |
+          tarballs <- list.files(
+            "source-package",
+            pattern = "[.]tar[.]gz$",
+            full.names = TRUE
+          )
+          stopifnot(length(tarballs) == 1L)
+          rcmdcheck::rcmdcheck(
+            tarballs[[1L]],
+            args = c("--no-manual", "--as-cran"),
+            error_on = "warning"
+          )

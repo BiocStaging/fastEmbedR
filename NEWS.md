@@ -1,3 +1,10 @@
+# fastEmbedR 0.99.12
+
+- Build one canonical source tarball on Linux and check that identical archive
+  on Linux, macOS, and Windows. This preserves the executable mode of the
+  package `configure` script and matches the source-package boundary used by
+  Bioconductor and r-universe.
+
 # fastEmbedR 0.99.11
 
 - Keep `R CMD check --as-cran` in the cross-platform CI matrix while disabling
