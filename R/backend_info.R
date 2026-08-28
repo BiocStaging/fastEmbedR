@@ -213,17 +213,29 @@ cpu_summary <- function() {
   }
 }
 
+device_query_executable <- function(command) {
+  Sys.which(command)
+}
+
+device_query_output <- function(executable, arguments) {
+  system2(
+    executable,
+    arguments,
+    stdout = TRUE,
+    stderr = FALSE
+  )
+}
+
 cuda_device_summary <- function(available) {
   if (!isTRUE(available)) return(NA_character_)
-  executable <- Sys.which("nvidia-smi")
+  executable <- device_query_executable("nvidia-smi")
   if (!nzchar(executable)) return("CUDA device available (name query unavailable)")
   value <- tryCatch(
-    suppressWarnings(system2(
+    device_query_output(
       executable,
-      c("--query-gpu=name", "--format=csv,noheader"),
-      stdout = TRUE,
-      stderr = FALSE
-    )),
+      c("--query-gpu=name", "--format=csv,noheader")
+    ),
+    warning = function(w) character(),
     error = function(e) character()
   )
   value <- trimws(value[nzchar(trimws(value))])
@@ -233,15 +245,14 @@ cuda_device_summary <- function(available) {
 
 metal_device_summary <- function(available) {
   if (!isTRUE(available)) return(NA_character_)
-  executable <- Sys.which("system_profiler")
+  executable <- device_query_executable("system_profiler")
   if (!nzchar(executable)) return("Metal device available (name query unavailable)")
   value <- tryCatch(
-    suppressWarnings(system2(
+    device_query_output(
       executable,
-      "SPDisplaysDataType",
-      stdout = TRUE,
-      stderr = FALSE
-    )),
+      "SPDisplaysDataType"
+    ),
+    warning = function(w) character(),
     error = function(e) character()
   )
   chipset <- grep("^[[:space:]]*Chipset Model:", value, value = TRUE)

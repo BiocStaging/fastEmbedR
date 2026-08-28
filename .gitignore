@@ -46,7 +46,7 @@ tools/
 tools/*
 !tools/validate_tsne_numerics.R
 !tools/report_test_coverage.R
-examples/
+/examples/
 cache/
 results/
 fastEmbedR-rlayout/

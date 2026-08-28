@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Opinionated Native UMAP and openTSNE Embeddings
-Version: 0.99.9
+Version: 0.99.10
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),
@@ -19,18 +19,9 @@ Authors@R: c(
     person(given = "Silvano", family = "Piazza", role = "aut"),
     person(given = "Stefano", family = "Cacciatore",
         role = c("aut", "cre"),
-        email = "tkcaccia@gmail.com")
+        email = "tkcaccia@gmail.com",
+        comment = c(ORCID = "0000-0001-7052-7156"))
     )
-Author: Moussa Kassim [aut],
-    Martin Ocharo [aut],
-    Dalia Ahmed [aut],
-    Dupe Ojo [aut],
-    Alessia Vignoli [aut],
-    Leonardo Tenori [aut],
-    Dinesh Gupta [aut],
-    Silvano Piazza [aut],
-    Stefano Cacciatore [aut, cre]
-Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
 Copyright: See inst/COPYRIGHTS and inst/NOTICE for source-level ownership,
     adapted components, and optional linked dependencies.
 Description: An opinionated, fixed-policy float32 UMAP implementation and a

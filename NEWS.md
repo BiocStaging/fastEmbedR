@@ -1,3 +1,13 @@
+# fastEmbedR 0.99.10
+
+- Make CUDA and Metal device-name capability probes handle failed system
+  queries explicitly without suppressing warnings. Add regression coverage for
+  unavailable and failing query commands.
+- Record the maintainer's verified ORCID in `Authors@R` and document the
+  disposition of BiocCheck's assay-view and dependency recommendations.
+- Ensure the canonical installed API example is included in clean source
+  archives and exercised by package tests.
+
 # fastEmbedR 0.99.9
 
 - Classify the package under the Bioconductor `Infrastructure` view. The core

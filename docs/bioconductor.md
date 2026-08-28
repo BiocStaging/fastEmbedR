@@ -17,8 +17,9 @@ submission of `fastEmbedR`.
 
 `fastEmbedR` is under review in
 [BiocContributions issue 142](https://github.com/Bioconductor/BiocContributions/issues/142).
-The version 0.99.7 review build completed with 0 errors, 1 warning, and 5 notes.
-The warning was:
+The version 0.99.9 review build completed with 0 errors, 0 warnings, and 7
+notes. Version 0.99.10 removes the source-level warning-suppression note and
+records the maintainer's verified ORCID. One persistent note is:
 
 > No Bioconductor dependencies detected. Note that some infrastructure
 > packages may not have Bioconductor dependencies.
@@ -31,7 +32,7 @@ deliberately standalone, however, and no Bioconductor package provides a
 legitimate mandatory runtime API dependency. An artificial dependency will
 therefore not be added merely to silence the check. Eligibility and any
 required scope clarification should be decided with the assigned
-Bioconductor reviewer. Version 0.99.9 therefore declares the accurate
+Bioconductor reviewer. Version 0.99.10 therefore declares the accurate
 `Infrastructure` biocView. BiocCheck treats dependency-independent
 infrastructure packages as a note rather than a warning; no artificial package
 dependency is added.
@@ -39,16 +40,19 @@ dependency is added.
 The accompanying notes are triaged as follows:
 
 - a runnable example is provided for `fastEmbedR_backend()`;
-- maintainer ORCID and funder metadata will be added only when verified;
+- the maintainer ORCID is recorded from the author's existing CRAN identity;
+  funder metadata will be added only when verified;
 - the suggested `ATACSeq` and `DNASeq` views are not used because fastEmbedR
   is not specific to either assay;
 - condition handling is written without nonlocal assignment in the openTSNE
   PCA initialization path;
-- remaining findings about long functions, line width, indentation,
-  `suppressWarnings()`, and closure state are tracked as maintainability work.
-  They should be changed incrementally with CPU, Metal, and CUDA regression
-  tests rather than by a high-churn formatting or control-flow rewrite during
-  review.
+- failed device-name queries are handled explicitly without
+  `suppressWarnings()` and have regression coverage;
+- remaining findings about long functions, line width, and indentation are
+  tracked as maintainability work. A formatter-only trial changed 45 files and
+  approximately 30,000 diff lines without resolving the function-length note,
+  so these changes will be made incrementally with CPU, Metal, and CUDA
+  regression tests instead of as high-churn review-time formatting.
 
 ## Dependency Classes
 
@@ -126,7 +130,7 @@ LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 R CMD build .
 
 LC_ALL=C \
-FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.9.tar.gz
+FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.10.tar.gz
 ```
 
 GPU-enabled builds should be validated separately on machines with the relevant
@@ -138,10 +142,10 @@ The local submission preflight used for this repository is:
 ```sh
 LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 \
-R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.9.tar.gz
+R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.10.tar.gz
 
 LC_ALL=C \
-Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.9.tar.gz", `quit-with-status`=FALSE)'
+Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.10.tar.gz", `quit-with-status`=FALSE)'
 ```
 
 The `--no-build-vignettes` check mode is useful during development, but it
@@ -153,6 +157,6 @@ Current Bioconductor-specific follow-up items:
 - register and validate the maintainer email on the Bioconductor Support Site;
 - obtain the assigned reviewer's decision on eligibility without a mandatory
   Bioconductor dependency;
-- add an ORCID to `Authors@R` when available;
-- audit targeted warning suppression and closure state;
+- keep the verified maintainer ORCID in `Authors@R`;
+- continue replacing broad warning suppression with explicit condition handling;
 - gradually shorten very long R helper functions as maintenance work.
