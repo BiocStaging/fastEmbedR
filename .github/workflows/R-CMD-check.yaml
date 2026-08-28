@@ -14,6 +14,11 @@ jobs:
   R-CMD-check:
     name: ${{ matrix.config.os }} / R ${{ matrix.config.r }} (CPU build)
     runs-on: ${{ matrix.config.os }}
+    env:
+      # CRAN's remote incoming lookup is an external network probe. Keep all
+      # local --as-cran checks, but do not turn repository outages into package
+      # warnings.
+      _R_CHECK_CRAN_INCOMING_REMOTE_: false
     strategy:
       fail-fast: false
       matrix:

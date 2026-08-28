@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Opinionated Native UMAP and openTSNE Embeddings
-Version: 0.99.10
+Version: 0.99.11
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),

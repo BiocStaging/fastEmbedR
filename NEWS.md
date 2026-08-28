@@ -1,3 +1,10 @@
+# fastEmbedR 0.99.11
+
+- Keep `R CMD check --as-cran` in the cross-platform CI matrix while disabling
+  only its remote incoming lookup. This prevents transient Bioconductor index
+  outages from being reported as package warnings; package installation,
+  examples, tests, and local incoming checks remain enabled.
+
 # fastEmbedR 0.99.10
 
 - Make CUDA and Metal device-name capability probes handle failed system
