@@ -1,3 +1,12 @@
+# fastEmbedR 0.99.15
+
+- List Stefano Cacciatore as the sole package author and maintainer.
+- Clarify the build contract: CPU installation needs only C++17 and Rcpp;
+  Apple accelerator frameworks are supplied by the Apple SDK; FAISS GPU and
+  cuVS are linked only by CUDA nearest-neighbor builds; and RAFT/RMM are needed
+  only when optional CUDA TSVD initialization is enabled. The package-native
+  CPU HNSW and Metal exact/IVF-Flat implementations do not link FAISS.
+
 # fastEmbedR 0.99.14
 
 - Clarify in the README and introductory vignette that the Iris example uses

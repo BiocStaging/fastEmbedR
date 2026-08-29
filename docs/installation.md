@@ -40,19 +40,24 @@ package dependencies.
 
 ## Core Build Dependencies
 
-`fastEmbedR` needs:
+A CPU installation needs only R, `Rcpp`, and the C++17 compiler configured for
+that R installation. The CPU HNSW implementation is compiled from source in
+fastEmbedR and does not link FAISS.
 
-- R;
-- the C++17 compiler configured for that R installation;
-- `Rcpp`;
-- Xcode/Apple Metal frameworks for native Metal kernels on Apple Silicon;
-- CUDA toolkit plus RAPIDS cuVS/RAFT for optional native CUDA workflows.
+On Apple Silicon, Xcode supplies Foundation, Accelerate, Metal, Metal
+Performance Shaders, and Metal Performance Shaders Graph. The package-native
+Metal exact and IVF-Flat implementations likewise do not link FAISS, MLX, or
+another R package.
 
-`fastEmbedR` links directly to FAISS GPU and the RAPIDS cuVS C API for optional CUDA
-one-call KNN. Follow the [backend build guide](installation-backends.md) for
-the exact compiler, GPU-architecture, host-compiler, header, library, and
-runtime requirements. CPU, Metal, and correctly compiled CUDA
-`tsne()`/`umap()` do not call another R package for neighbor search.
+CUDA support is optional and has a separate build contract. The embedding
+kernels directly use the CUDA runtime, cuFFT, cuBLAS, cuSOLVER, and CUB/Thrust
+headers. CUDA nearest-neighbor search links installed FAISS GPU for exact
+search and RAPIDS cuVS for IVF-Flat search. RAPIDS RAFT and RMM are needed only
+when CUDA TSVD initialization is explicitly enabled. Distilling the R-facing
+adapters into fastEmbedR removed the faissR package dependency; it did not
+vendor or reimplement these CUDA libraries. Follow the
+[backend build guide](installation-backends.md) for exact compiler,
+GPU-architecture, header, library, and runtime requirements.
 
 The portable C++ core inherits `CXX17` and `CXX17FLAGS` from R and adds only
 `-pthread`. The package does not globally force `-march=native`,

@@ -1,15 +1,6 @@
 ---
 title: "fastEmbedR: native UMAP and t-SNE workflows"
-author:
-    - "Moussa Kassim"
-    - "Martin Ocharo"
-    - "Dalia Ahmed"
-    - "Dupe Ojo"
-    - "Alessia Vignoli"
-    - "Leonardo Tenori"
-    - "Dinesh Gupta"
-    - "Silvano Piazza"
-    - "Stefano Cacciatore"
+author: "Stefano Cacciatore"
 output:
     rmarkdown::html_vignette:
     toc: true
@@ -19,21 +10,6 @@ vignette: >
     %\VignetteEngine{knitr::rmarkdown}
     %\VignetteEncoding{UTF-8}
 ---
-
-**Affiliations.** [1] Bioinformatics Unit, International Centre for Genetic
-Engineering and Biotechnology (ICGEB), Cape Town 7925, South Africa;
-[2] Department of Integrative Biomedical Sciences, Institute of Infectious
-Disease & Molecular Medicine (IDM), University of Cape Town, Cape Town 7925,
-South Africa; [3] Department of Chemistry "Ugo Schiff", University of
-Florence, Sesto Fiorentino, Italy; [4] Magnetic Resonance Center (CERM),
-University of Florence, Sesto Fiorentino, Italy; [20] Translational
-Bioinformatics Group, International Centre for Genetic Engineering and
-Biotechnology (ICGEB), New Delhi, India; [21] Computational Biology Group,
-International Centre for Genetic Engineering and Biotechnology (ICGEB),
-Trieste, Italy; [22] Bioinformatics Facility, Department of Cellular,
-Computational and Integrative Biology - CIBIO, University of Trento, Trento,
-Italy. Moussa Kassim and Martin Ocharo contributed equally. Leonardo Tenori and
-Stefano Cacciatore are co-corresponding authors.
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(

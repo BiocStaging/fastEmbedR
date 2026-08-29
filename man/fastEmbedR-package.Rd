@@ -48,14 +48,6 @@ Authors:
 \itemize{
     \item Stefano Cacciatore \email{tkcaccia@gmail.com}
     (\href{https://orcid.org/0000-0001-7052-7156}{ORCID})
-    \item Moussa Kassim \email{Moussa.Kassim@icgeb.org}
-    \item Martin Ocharo \email{Martin.Ocharo@icgeb.org}
-    \item Dalia Ahmed \email{Dalia.Ahmed@icgeb.org}
-    \item Dupe Ojo \email{Dupe.Ojo@icgeb.org}
-    \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
-    \item Leonardo Tenori \email{tenori@cerm.unifi.it}
-    \item Dinesh Gupta
-    \item Silvano Piazza
 }
 
 }
