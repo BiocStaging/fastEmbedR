@@ -72,8 +72,9 @@ unavailable GPU backend is silently relabelled as CPU.
 ```r
 library(fastEmbedR)
 
-x <- scale(as.matrix(iris[, 1:4]))
-labels <- iris$Species
+iris_data <- datasets::iris
+x <- scale(as.matrix(iris_data[, 1:4]))
+labels <- iris_data$Species
 
 y_tsne <- fastEmbedR::tsne(
   x,

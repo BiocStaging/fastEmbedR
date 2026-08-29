@@ -194,14 +194,16 @@ not silently resolve masking conflicts.
 # A first analysis
 
 We use the four numeric Iris measurements for a small, reproducible example.
-The matrix is scaled once outside the embedding calls, so `standardize = FALSE`
-prevents repeated preprocessing.
+Iris is supplied by R's separate `datasets` package and is not bundled with
+fastEmbedR. The matrix is scaled once outside the embedding calls, so
+`standardize = FALSE` prevents repeated preprocessing.
 
 ```{r data}
 library(fastEmbedR)
 
-x <- scale(as.matrix(iris[, 1:4]))
-labels <- iris$Species
+iris_data <- datasets::iris
+x <- scale(as.matrix(iris_data[, 1:4]))
+labels <- iris_data$Species
 dim(x)
 ```
 

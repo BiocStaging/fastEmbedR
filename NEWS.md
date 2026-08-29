@@ -1,3 +1,9 @@
+# fastEmbedR 0.99.14
+
+- Clarify in the README and introductory vignette that the Iris example uses
+  the dataset supplied by R's `datasets` package; fastEmbedR does not bundle
+  that dataset.
+
 # fastEmbedR 0.99.13
 
 - Rename the canonical public interpolation-based t-SNE API to `tsne()`,
