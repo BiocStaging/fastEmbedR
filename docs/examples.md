@@ -18,7 +18,7 @@ library(fastEmbedR)
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-y_tsne <- fastEmbedR::opentsne(
+y_tsne <- fastEmbedR::tsne(
   x, perplexity = 10, backend = "cpu", n.cores = 4, seed = 1
 )$layout
 y_umap <- fastEmbedR::umap(
@@ -30,10 +30,10 @@ plot(y_tsne, pch = 21, bg = labels)
 plot(y_umap, pch = 21, bg = labels)
 ```
 
-## Iris One-Call openTSNE
+## Iris One-Call t-SNE
 
 ```r
-fit <- fastEmbedR::opentsne(
+fit <- fastEmbedR::tsne(
   x,
   perplexity = 30,
   backend = "cpu",
@@ -51,7 +51,7 @@ For matrix input, CPU uses native HNSW and Metal uses native exact or
 recall-tuned IVF-Flat. CUDA uses package-native cuVS GPU-resident KNN. The
 default non-self affinity support is `ceiling(3 * perplexity)`. The explicit
 `affinity_support = "compact"` approximation uses `ceiling(perplexity)` but is
-not equivalent to conventional sparse t-SNE. Use `opentsne_knn()` with a plain
+not equivalent to conventional sparse t-SNE. Use `tsne_knn()` with a plain
 precomputed host KNN list when benchmarking another search or a wider support.
 
 ## Iris One-Call UMAP
@@ -71,7 +71,7 @@ plot(fit)
 fit$metrics
 ```
 
-For matrix input, `umap()` uses the same fixed KNN policy as `opentsne()`.
+For matrix input, `umap()` uses the same fixed KNN policy as `tsne()`.
 Use `umap_knn()` when you want to reuse or benchmark a separately computed KNN
 object.
 
@@ -79,7 +79,7 @@ object.
 
 The example below uses the full 70,000 MNIST observations as flattened 28x28
 images. CPU paths are requested with 4 threads. The result figure places
-t-SNE/openTSNE methods on the first row and UMAP methods on the second row.
+t-SNE methods on the first row and UMAP methods on the second row.
 
 ```r
 library(fastEmbedR)
@@ -135,14 +135,14 @@ layouts <- list()
 results <- list()
 
 results[[length(results) + 1L]] <- run_method(
-  "fastEmbedR openTSNE CPU", "cpu",
-  fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cpu",
+  "fastEmbedR t-SNE CPU", "cpu",
+  fastEmbedR::tsne(x_fast, perplexity = perplexity, backend = "cpu",
                        n.cores = 4, seed = seed)
 )
 
 results[[length(results) + 1L]] <- run_method(
-  "fastEmbedR openTSNE CUDA", "cuda",
-  fastEmbedR::opentsne(x_fast, perplexity = perplexity, backend = "cuda",
+  "fastEmbedR t-SNE CUDA", "cuda",
+  fastEmbedR::tsne(x_fast, perplexity = perplexity, backend = "cuda",
                        n.cores = 4, seed = seed)
 )
 
@@ -197,7 +197,7 @@ dev.off()
 
 The example compares:
 
-- `fastEmbedR::opentsne()` on CPU, Metal, and/or CUDA;
+- `fastEmbedR::tsne()` on CPU, Metal, and/or CUDA;
 - `Rtsne::Rtsne()` as the full Rtsne baseline with its own internal KNN;
 - `fastEmbedR::umap(..., graph_mode = "fuzzy")` on CPU, Metal, and/or CUDA;
 - `uwot::umap(..., fast_sgd = TRUE)` as the full uwot baseline with its own
@@ -244,8 +244,8 @@ description, and embedding panels stay tied to the executable R example.
 
 | method | backend | total sec | trust | label KNN acc |
 | --- | --- | ---: | ---: | ---: |
-| fastEmbedR openTSNE CPU | CPU | 46.640 | 0.330 | 0.969 |
-| fastEmbedR openTSNE CUDA | CUDA | 5.286 | 0.332 | 0.965 |
+| fastEmbedR t-SNE CPU | CPU | 46.640 | 0.330 | 0.969 |
+| fastEmbedR t-SNE CUDA | CUDA | 5.286 | 0.332 | 0.965 |
 | Rtsne full | CPU | 94.131 | 0.323 | 0.972 |
 | fastEmbedR UMAP CPU fuzzy | CPU | 26.507 | 0.281 | 0.971 |
 | fastEmbedR UMAP CUDA fuzzy | CUDA | 4.397 | 0.278 | 0.970 |

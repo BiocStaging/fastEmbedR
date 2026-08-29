@@ -23,7 +23,7 @@ Every accepted artifact contains:
   smoke/correctness evidence rather than a performance benchmark;
 - build and installation logs;
 - the complete installed-package test log;
-- `hardware-benchmark.csv` for PCA, KNN, UMAP, openTSNE, and Leiden; and
+- `hardware-benchmark.csv` for PCA, KNN, UMAP, t-SNE, and Leiden; and
 - `validation-results.rds` containing the layouts and clustering membership.
 
 An artifact is accepted only when all public operations record the requested

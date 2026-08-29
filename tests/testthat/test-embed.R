@@ -8,7 +8,7 @@ test_that("auto_k chooses bounded size-aware neighborhoods", {
 })
 
 test_that("automatic embedding K is openTSNE focused", {
-  expect_equal(fastEmbedR:::auto_embedding_k(1000L, "opentsne"), 30L)
+  expect_equal(fastEmbedR:::auto_embedding_k(1000L, "tsne"), 30L)
   expect_equal(fastEmbedR:::auto_embedding_k(1000L, include_self = TRUE), 31L)
 })
 
@@ -162,12 +162,12 @@ test_that("float32 landmark projections avoid full double materialization", {
   expect_equal(projected, reference, tolerance = 1e-6)
 })
 
-test_that("opentsne and umap accept float32 matrix input", {
+test_that("tsne and umap accept float32 matrix input", {
   skip_if_not_installed("float")
   set.seed(42)
   x <- float::fl(matrix(rnorm(120L), 30L, 4L))
 
-  fit_tsne <- opentsne(
+  fit_tsne <- tsne(
     x,
     perplexity = 1,
     early_exaggeration_iter = 2L,
@@ -196,7 +196,7 @@ test_that("double matrix input keeps a double layout despite float internal KNN"
   set.seed(46)
   x <- matrix(rnorm(120L), 30L, 4L)
 
-  fit_tsne <- opentsne(
+  fit_tsne <- tsne(
     x,
     perplexity = 1,
     early_exaggeration_iter = 2L,
@@ -224,20 +224,20 @@ test_that("layout finalizer preserves requested type and float32 memory footprin
 
   float_layout <- fastEmbedR:::finalize_embedding_layout(
     raw_layout,
-    "openTSNE",
+    "TSNE",
     return_float32 = TRUE
   )
   double_layout <- fastEmbedR:::finalize_embedding_layout(
     float_layout,
-    "openTSNE",
+    "TSNE",
     return_float32 = FALSE
   )
 
   expect_s4_class(float_layout, "float32")
   expect_type(double_layout, "double")
   expect_equal(dim(float_layout), dim(double_layout))
-  expect_equal(colnames(float_layout), c("openTSNE1", "openTSNE2"))
-  expect_equal(colnames(double_layout), c("openTSNE1", "openTSNE2"))
+  expect_equal(colnames(float_layout), c("TSNE1", "TSNE2"))
+  expect_equal(colnames(double_layout), c("TSNE1", "TSNE2"))
   expect_equal(attr(float_layout, "precision"), "float32")
   expect_equal(attr(double_layout, "precision"), "double")
 
@@ -435,7 +435,7 @@ test_that("CUDA openTSNE keeps native fastEmbedR GPU KNN on device", {
     class = "fastEmbedR_gpu_knn"
   )
   with_mocked_bindings(
-    opentsne_knn = function(indices, distances = NULL, n_neighbors = NULL, ...) {
+    tsne_knn = function(indices, distances = NULL, n_neighbors = NULL, ...) {
       captured$gpu_input <- fastEmbedR:::fastembedr_is_gpu_knn(indices)
       captured$distances_null <- is.null(distances)
       out <- matrix(0, 8L, 2L)
@@ -447,7 +447,7 @@ test_that("CUDA openTSNE keeps native fastEmbedR GPU KNN on device", {
       out
     },
     {
-      fit <- opentsne(gpu_knn, backend = "cuda", perplexity = 3, keep_knn = TRUE)
+      fit <- tsne(gpu_knn, backend = "cuda", perplexity = 3, keep_knn = TRUE)
     },
     .package = "fastEmbedR"
   )
@@ -551,7 +551,7 @@ test_that("one-call CUDA embeddings use the intended KNN residency policy", {
       )
       out
     },
-    opentsne_knn = function(indices, distances = NULL, ...) {
+    tsne_knn = function(indices, distances = NULL, ...) {
       captured$tsne_gpu_input <- fastEmbedR:::fastembedr_is_gpu_knn(indices)
       captured$tsne_distances_null <- is.null(distances)
       out <- matrix(0, 8L, 2L)
@@ -564,7 +564,7 @@ test_that("one-call CUDA embeddings use the intended KNN residency policy", {
     },
     {
       fit_umap <- umap(x, n_neighbors = 3L, backend = "cuda", keep_knn = TRUE)
-      fit_tsne <- opentsne(x, perplexity = 2, Y_init = y_init, backend = "cuda", keep_knn = TRUE)
+      fit_tsne <- tsne(x, perplexity = 2, Y_init = y_init, backend = "cuda", keep_knn = TRUE)
     },
     .package = "fastEmbedR"
   )
@@ -644,12 +644,12 @@ test_that("UMAP CSR graph weights stay float32 through prepared optimizer path",
   expect_true(all(is.finite(layout)))
 })
 
-test_that("opentsne convenience wrapper runs the automatic KNN workflow", {
+test_that("tsne convenience wrapper runs the automatic KNN workflow", {
   set.seed(43)
   x <- rbind(matrix(rnorm(500), 25L, 20L), matrix(rnorm(500, 2), 25L, 20L))
   labels <- rep(1:2, each = 25L)
 
-  fit <- opentsne(
+  fit <- tsne(
     x,
     perplexity = 1,
     early_exaggeration_iter = 2L,
@@ -658,17 +658,17 @@ test_that("opentsne convenience wrapper runs the automatic KNN workflow", {
   )
 
   expect_s3_class(fit, "fastEmbedR_embedding")
-  expect_equal(fit$parameters$method, "opentsne")
+  expect_equal(fit$parameters$method, "tsne")
   expect_equal(dim(fit$layout), c(nrow(x), 2L))
-  expect_equal(colnames(fit$layout), c("openTSNE1", "openTSNE2"))
+  expect_equal(colnames(fit$layout), c("TSNE1", "TSNE2"))
   expect_equal(fit$parameters$init, "pca_rsvd")
   expect_equal(fit$parameters$init_backend, "cpu_rsvd")
 })
 
-test_that("opentsne PCA initialization uses native CPU RSVD", {
+test_that("tsne PCA initialization uses native CPU RSVD", {
   set.seed(44)
   x <- matrix(rnorm(160L), 40L, 4L)
-  init <- opentsne_pca_init(x, n_components = 2L, seed = 44L, backend = "cpu")
+  init <- tsne_pca_init(x, n_components = 2L, seed = 44L, backend = "cpu")
 
   expect_equal(dim(init), c(40L, 2L))
   expect_true(all(is.finite(init)))
@@ -750,29 +750,29 @@ test_that("public PCA API can return an openTSNE-ready initialization", {
     xtest = xtest,
     seed = 46L,
     backend = "cpu",
-    opentsne_init = TRUE
+    tsne_init = TRUE
   )
 
   expect_s3_class(fit, "fastEmbedR_pca")
-  expect_equal(dim(fit$opentsne_init), c(100L, 2L))
+  expect_equal(dim(fit$tsne_init), c(100L, 2L))
   expect_equal(dim(fit$scores_test), c(20L, 2L))
   expected_test <- sweep(xtest, 2L, fit$center, "-", check.margin = FALSE)
   expected_test <- sweep(expected_test, 2L, fit$scale, "/", check.margin = FALSE)
   expected_test <- expected_test %*% fit$loadings
   colnames(expected_test) <- colnames(fit$scores)
   expect_equal(fit$scores_test, expected_test, tolerance = 1e-10)
-  expect_equal(unname(colMeans(fit$opentsne_init)), c(0, 0), tolerance = 1e-12)
-  expect_equal(max(apply(fit$opentsne_init, 2L, stats::sd)), 1e-4,
+  expect_equal(unname(colMeans(fit$tsne_init)), c(0, 0), tolerance = 1e-12)
+  expect_equal(max(apply(fit$tsne_init, 2L, stats::sd)), 1e-4,
     tolerance = 1e-12)
   expect_identical(
-    attr(fit$opentsne_init, "fastEmbedR_init_backend"),
+    attr(fit$tsne_init, "fastEmbedR_init_backend"),
     fit$backend
   )
   expect_identical(
-    attr(fit$opentsne_init, "fastEmbedR_init_method"),
+    attr(fit$tsne_init, "fastEmbedR_init_method"),
     paste0("pca_", fit$method)
   )
-  expect_error(pca(x, opentsne_init = NA), "must be TRUE or FALSE")
+  expect_error(pca(x, tsne_init = NA), "must be TRUE or FALSE")
   expect_error(pca(x, xtest = matrix(0, 2L, 5L)), "same number of columns")
 })
 
@@ -780,14 +780,14 @@ test_that("high-level embeddings avoid retaining KNN matrices by default", {
   set.seed(47)
   x <- matrix(rnorm(90), 30L, 3L)
 
-  compact <- opentsne(
+  compact <- tsne(
     x,
     perplexity = 1,
     early_exaggeration_iter = 2L,
     n_iter = 3L,
     seed = 47L
   )
-  retained <- opentsne(
+  retained <- tsne(
     x,
     perplexity = 1,
     early_exaggeration_iter = 2L,
@@ -812,7 +812,7 @@ test_that("CPU UMAP and openTSNE return genuine three-dimensional layouts", {
     n.cores = 2L,
     seed = 4L
   )
-  tsne_fit <- opentsne(
+  tsne_fit <- tsne(
     x,
     perplexity = 5,
     affinity_support = "standard",

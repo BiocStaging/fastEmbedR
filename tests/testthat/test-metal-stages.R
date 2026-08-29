@@ -24,7 +24,7 @@ test_that("GPU UMAP exposes one CUDA fused entry shape", {
   expect_length(formals(fastEmbedR:::knn_umap_cuda_fused_cpp), 10L)
 })
 
-test_that("Metal openTSNE FFT-grid exposes opt-in per-stage timing", {
+test_that("Metal t-SNE FFT-grid exposes opt-in per-stage timing", {
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
 
   old_timing <- Sys.getenv("FASTEMBEDR_METAL_STAGE_TIMING", unset = NA_character_)
@@ -40,7 +40,7 @@ test_that("Metal openTSNE FFT-grid exposes opt-in per-stage timing", {
   set.seed(93)
   x <- matrix(rnorm(120L * 6L), nrow = 120L, ncol = 6L)
   knn <- test_exact_knn(x, k = 12L, backend = "cpu")
-  layout <- fastEmbedR::opentsne_knn(
+  layout <- fastEmbedR::tsne_knn(
     knn,
     perplexity = 3,
     early_exaggeration_iter = 1L,
@@ -357,12 +357,12 @@ test_that("native Metal MPS TSVD matches reference PCA", {
       scale = FALSE,
       backend = "metal",
       seed = 72L,
-      opentsne_init = TRUE
+      tsne_init = TRUE
     )
     expect_identical(float_fit$precision, "float32")
     expect_s4_class(float_fit$scores, "float32")
     expect_s4_class(float_fit$loadings, "float32")
-    expect_s4_class(float_fit$opentsne_init, "float32")
+    expect_s4_class(float_fit$tsne_init, "float32")
     expect_s4_class(float_fit$scores_test, "float32")
     expect_equal(dim(float_fit$scores_test), c(12L, 2L))
     expect_equal(float::dbl(float_fit$scores), fit$scores, tolerance = 1e-5)
@@ -372,11 +372,11 @@ test_that("native Metal MPS TSVD matches reference PCA", {
       as.numeric(object.size(fit$scores)) * 0.7
     )
     expect_lt(
-      abs(max(apply(float::dbl(float_fit$opentsne_init), 2L, stats::sd)) - 1e-4),
+      abs(max(apply(float::dbl(float_fit$tsne_init), 2L, stats::sd)) - 1e-4),
       2e-8
     )
 
-    float_init <- fastEmbedR::opentsne_pca_init(
+    float_init <- fastEmbedR::tsne_pca_init(
       float_x,
       n_components = 2L,
       backend = "metal",
@@ -391,7 +391,7 @@ test_that("native Metal MPS TSVD matches reference PCA", {
     cache_file <- tempfile(fileext = ".rds")
     on.exit(unlink(cache_file), add = TRUE)
     saveRDS(float_init, cache_file)
-    cached_init <- fastEmbedR::opentsne_pca_init(
+    cached_init <- fastEmbedR::tsne_pca_init(
       float_x,
       n_components = 2L,
       backend = "metal",
@@ -414,7 +414,7 @@ test_that("native Metal MPS TSVD matches reference PCA", {
     )
   }
 
-  init <- fastEmbedR::opentsne_pca_init(
+  init <- fastEmbedR::tsne_pca_init(
     x,
     n_components = 2L,
     backend = "metal",

@@ -18,7 +18,7 @@ landmark count, or explicit row indices.}
 }
 \value{
 A `fastEmbedR_landmark_selection` object containing `indices` and
-  `query_indices`.
+    `query_indices`.
 }
 \description{
 `select_landmarks()` separates row indices into a representative landmark

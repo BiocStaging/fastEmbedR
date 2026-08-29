@@ -1,23 +1,23 @@
 ---
-title: "fastEmbedR: opinionated native UMAP and openTSNE workflows"
+title: "fastEmbedR: native UMAP and t-SNE workflows"
 author:
-  - "Moussa Kassim"
-  - "Martin Ocharo"
-  - "Dalia Ahmed"
-  - "Dupe Ojo"
-  - "Alessia Vignoli"
-  - "Leonardo Tenori"
-  - "Dinesh Gupta"
-  - "Silvano Piazza"
-  - "Stefano Cacciatore"
+    - "Moussa Kassim"
+    - "Martin Ocharo"
+    - "Dalia Ahmed"
+    - "Dupe Ojo"
+    - "Alessia Vignoli"
+    - "Leonardo Tenori"
+    - "Dinesh Gupta"
+    - "Silvano Piazza"
+    - "Stefano Cacciatore"
 output:
-  BiocStyle::html_document:
+    rmarkdown::html_vignette:
     toc: true
     number_sections: true
 vignette: >
-  %\VignetteIndexEntry{fastEmbedR: opinionated native UMAP and openTSNE workflows}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+    %\VignetteIndexEntry{fastEmbedR: native UMAP and t-SNE workflows}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
 ---
 
 **Affiliations.** [1] Bioinformatics Unit, International Centre for Genetic
@@ -37,14 +37,15 @@ Stefano Cacciatore are co-corresponding authors.
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>",
-  fig.align = "center",
-  fig.width = 8,
-  fig.height = 4,
-  fig.retina = if (knitr::is_html_output()) 2 else NULL,
-  dpi = 96,
-  dev.args = list(bg = "white")
+    collapse = TRUE,
+    comment = "#>",
+    fig.align = "center",
+    fig.width = 6.2,
+    fig.height = 3.2,
+    out.width = "92%",
+    fig.retina = if (knitr::is_html_output()) 2 else NULL,
+    dpi = 96,
+    dev.args = list(bg = "white")
 )
 options(width = 90)
 set.seed(4)
@@ -52,8 +53,8 @@ set.seed(4)
 embedding_colors <- c("#2678C8", "#E4576B", "#26A269")
 
 plot_embedding <- function(layout, labels, main) {
-  labels <- factor(labels)
-  plot(
+    labels <- factor(labels)
+    plot(
     as.matrix(layout),
     col = embedding_colors[as.integer(labels)],
     pch = 19,
@@ -63,29 +64,10 @@ plot_embedding <- function(layout, labels, main) {
     xlab = "",
     ylab = "",
     main = main
-  )
-  box(col = "#B8B8B8")
+    )
+    box(col = "#B8B8B8")
 }
 ```
-
-## Select a default execution backend
-
-Backend-capable functions use CPU unless a backend is selected for the R
-session:
-
-```r
-options(fastEmbedR.backend = "metal")
-# Equivalent: fastEmbedR_backend("metal")
-
-u <- umap(x)                         # Metal
-t <- opentsne(x)                     # Metal
-u.cpu <- umap(x, backend = "cpu")   # explicit override
-```
-
-For batch jobs, `FASTEMBEDR_BACKEND=cpu|cuda|metal` is used when the R option
-is unset. Precedence is explicit argument, R option, environment variable,
-then CPU. The requested backend is validated normally; unavailable native
-accelerators do not silently replace the selected backend.
 
 # Overview
 
@@ -93,8 +75,8 @@ accelerators do not silently replace the selected backend.
 dimension-reduction workflows:
 
 - UMAP from a sparse nearest-neighbor graph;
-- openTSNE-style t-SNE with sparse attractive forces and an FFT-grid
-  approximation for repulsion.
+- interpolation-based t-SNE with sparse attractive forces and an FFT-grid
+    approximation for repulsion.
 
 The same R interface selects native CPU, Apple Metal, or NVIDIA CUDA code.
 One-call functions include nearest-neighbor search, initialization, graph or
@@ -103,16 +85,93 @@ neighbor graph be reused without repeating search. Explicit GPU requests either
 run on the requested GPU backend or fail with an informative error; they are
 never silently reported as GPU work after falling back to CPU.
 
+## Select the backend and CPU core count
+
+Every backend-capable function accepts `backend = "cpu"`, `"metal"`, or
+`"cuda"`. An explicit function argument is the clearest choice for a
+reproducible script:
+
+```r
+fit_cpu <- fastEmbedR::umap(
+    x,
+    backend = "cpu",
+    n.cores = 4,
+    seed = 4
+)
+
+tsne_cpu <- fastEmbedR::tsne(
+    x,
+    perplexity = 10,
+    backend = "cpu",
+    n.cores = 4,
+    seed = 4
+)
+
+fit_metal <- fastEmbedR::umap(x, backend = "metal", seed = 4)
+fit_cuda <- fastEmbedR::umap(x, backend = "cuda", seed = 4)
+```
+
+`n.cores` is a positive integer controlling CPU parallel work, including the
+native nearest-neighbor search and the CPU graph, affinity, and optimization
+stages that support parallel execution. Omitting it selects one CPU core.
+Metal and CUDA execute on their respective accelerators and ignore `n.cores`;
+the argument does not control GPU concurrency.
+
+For an interactive session, set a default once and omit `backend` from later
+calls:
+
+```r
+old_backend <- getOption("fastEmbedR.backend")
+
+fastEmbedR::fastEmbedR_backend("metal")
+fastEmbedR::fastEmbedR_backend()       # reports "metal"
+u <- fastEmbedR::umap(x)               # uses Metal
+t <- fastEmbedR::tsne(x, perplexity = 10)
+
+u.cpu <- fastEmbedR::umap(             # explicit arguments take precedence
+    x,
+    backend = "cpu",
+    n.cores = 4
+)
+
+options(fastEmbedR.backend = old_backend)
+```
+
+The equivalent base-R setting is
+`options(fastEmbedR.backend = "cpu")`, `"metal"`, or `"cuda"`. For a batch
+job, set `FASTEMBEDR_BACKEND` before starting R, for example
+`FASTEMBEDR_BACKEND=cuda Rscript analysis.R`. Resolution precedence is:
+
+1. the explicit `backend` function argument;
+2. `options(fastEmbedR.backend = ...)` or `fastEmbedR_backend()`;
+3. the `FASTEMBEDR_BACKEND` environment variable;
+4. CPU when none of the above is set.
+
+Before requesting an accelerator, inspect the installed build and runtime
+device support:
+
+```r
+fastEmbedR::fastEmbedR_capabilities()[
+    , c("backend", "available", "device", "knn_engine", "unavailable_reason")
+]
+```
+
+The backend requested by the user and the backend that actually ran are also
+recorded in returned objects, for example
+`fit_cpu$parameters[c("backend", "nn_backend", "n.cores")]`. A requested
+Metal or CUDA backend must be available and execute natively; otherwise the
+function stops with an informative error instead of silently using CPU.
+
 The public workflow is intentionally small:
 
 | Goal | Function |
 | --- | --- |
 | Precompute native non-self neighbors | `precompute_knn()` |
 | Run UMAP from a data matrix | `umap()` |
-| Run openTSNE-style t-SNE from a data matrix | `opentsne()` |
-| Reuse a KNN graph | `umap_knn()` or `opentsne_knn()` |
+| Run interpolation-based t-SNE from a data matrix | `tsne()` |
+| Reuse a KNN graph | `umap_knn()` or `tsne_knn()` |
 | Compute reusable PCA scores or t-SNE initialization | `pca()` |
-| Accelerate a very large run with an explicit landmark approximation | `landmark_umap()` or `landmark_tsne()` |
+| Approximate a very large run with landmarks | Landmark functions |
 | Place new observations in a fixed t-SNE reference | `transform_tsne()` |
 | Quantify embedding quality | `evaluate_embedding()` |
 
@@ -147,31 +206,31 @@ dim(x)
 ```
 
 UMAP uses a neighborhood size, whereas t-SNE uses perplexity. For this small
-dataset we use 15 neighbors and perplexity 10. Missing openTSNE optimization
+dataset we use 15 neighbors and perplexity 10. Missing t-SNE optimization
 settings are chosen by the package's native auto-configuration policy. Its
 default initialization is a small-scale randomized-PCA layout.
 
 ```{r first-embeddings}
 fit_umap <- umap(
-  x,
-  n_neighbors = 15,
-  graph_mode = "fuzzy",
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+    x,
+    n_neighbors = 15,
+    graph_mode = "fuzzy",
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 
-fit_tsne <- opentsne(
-  x,
-  perplexity = 10,
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+fit_tsne <- tsne(
+    x,
+    perplexity = 10,
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 
 c(
-  UMAP_seconds = fit_umap$metrics$elapsed,
-  openTSNE_seconds = fit_tsne$metrics$elapsed
+    UMAP_seconds = fit_umap$metrics$elapsed,
+    tsne_seconds = fit_tsne$metrics$elapsed
 )
 ```
 
@@ -179,9 +238,9 @@ Both functions return a `fastEmbedR_embedding` object. The full coordinates are
 in `$layout`; `$metrics`, `$timings`, and `$parameters` preserve enough context
 to audit a run.
 
-```{r first-embedding-plots, fig.cap="Iris embeddings produced by the one-call CPU workflows."}
+```{r first-embedding-plots, fig.cap="Iris one-call CPU embeddings."}
 old_par <- par(mfrow = c(1, 2), mar = c(1, 1, 2.5, 1), bg = "white")
-plot_embedding(fit_tsne$layout, labels, "openTSNE")
+plot_embedding(fit_tsne$layout, labels, "t-SNE")
 plot_embedding(fit_umap$layout, labels, "UMAP (fuzzy graph)")
 par(old_par)
 ```
@@ -191,15 +250,15 @@ The backend recorded in the result is the backend that actually ran:
 ```{r result-metadata}
 fit_umap$parameters[c("backend", "nn_backend", "n.cores", "graph_mode")]
 fit_tsne$parameters[c(
-  "backend", "nn_backend", "n.cores", "perplexity",
-  "affinity_support", "affinity_support_k"
+    "backend", "nn_backend", "n.cores", "perplexity",
+    "affinity_support", "affinity_support_k"
 )]
 ```
 
 # Parameter philosophy and intended scope
 
 The two embedding functions deliberately expose different levels of control.
-openTSNE exposes perplexity/support, initialization, iteration counts, early
+t-SNE exposes perplexity/support, initialization, iteration counts, early
 and normal exaggeration, learning rate, momentum, clipping, and exact-versus-FFT
 repulsion. Set `auto_config = FALSE` and provide explicit values when automatic
 iteration or stopping choices are not appropriate.
@@ -229,18 +288,20 @@ input, reusable KNN, prepared graphs, compact t-SNE support, and
 landmarking remain explicit memory/speed controls; compact support and
 landmarking must be described as approximations.
 
-# Choosing between UMAP and openTSNE
+# Choosing between UMAP and t-SNE
 
 The two methods answer related but different questions.
 
-| Property | UMAP | openTSNE-style t-SNE |
+| Property | UMAP | interpolation-based t-SNE |
 | --- | --- | --- |
-| High-dimensional model | Weighted or binary KNN graph | Sparse probability affinities |
+| Model | Weighted or binary KNN graph | Sparse affinities |
 | Main scale parameter | `n_neighbors` | `perplexity` |
 | Initialization | Graph-native initialization | Randomized PCA by default |
 | Repulsion | Sampled negative edges | Exact or FFT-grid negative gradient |
-| New observations | Landmark interpolation/refinement | Fixed-reference t-SNE transform |
-| Typical interpretation | Local neighborhoods with some graph-level organization | Local probability neighborhoods and cluster organization |
+| New data | Landmark projection | Fixed-reference transform |
+
+UMAP emphasizes local neighborhoods with some graph-level organization.
+t-SNE emphasizes local probability neighborhoods and cluster organization.
 
 Distances and empty space in either two-dimensional plot should not be treated
 as calibrated biological effect sizes. Compare methods with neighborhood and
@@ -249,7 +310,7 @@ label-aware metrics rather than visual appearance alone.
 # Optional downstream graph clustering
 
 Graph clustering is a secondary downstream utility; the primary package
-contribution is native UMAP and openTSNE embedding.
+contribution is native UMAP and t-SNE embedding.
 
 `knn_graph()` builds a compact undirected graph from raw data, an embedding, or
 precomputed neighbors. It uses the existing KNN route selected by `backend`;
@@ -269,37 +330,37 @@ random-walk agglomeration method and remains CPU-only because its exact
 transition matrix is intentionally limited to moderate graphs. Neither
 `igraph`, cuGraph, nor an external clustering routine is called at run time.
 
-# PCA and reproducible openTSNE initialization
+# PCA and reproducible t-SNE initialization
 
 `pca()` exposes the backend-native truncated PCA used for initialization. It
 deliberately omits an SVD-method menu: randomized SVD is the supported
 decomposition family. For `backend = "cpu"`,
 `n.cores` sets the CPU BLAS/OpenMP thread limit for the call.
-`opentsne_init = FALSE` is the default; request it when the t-SNE-ready layout
+`tsne_init = FALSE` is the default; request it when the t-SNE-ready layout
 is needed. `irlba` is not used by the package implementation and appears only
 as an external benchmark reference.
 
 ```{r pca-initialization}
 pca_fit <- pca(
-  x,
-  ncomp = 2,
-  center = TRUE,
-  scale = FALSE,
-  backend = "cpu",
-  n.cores = 2,
-  seed = 4,
-  opentsne_init = TRUE
+    x,
+    ncomp = 2,
+    center = TRUE,
+    scale = FALSE,
+    backend = "cpu",
+    n.cores = 2,
+    seed = 4,
+    tsne_init = TRUE
 )
 
 c(
-  score_rows = nrow(pca_fit$scores),
-  score_columns = ncol(pca_fit$scores),
-  init_max_sd = max(apply(as.matrix(pca_fit$opentsne_init), 2, stats::sd))
+    score_rows = nrow(pca_fit$scores),
+    score_columns = ncol(pca_fit$scores),
+    init_max_sd = max(apply(as.matrix(pca_fit$tsne_init), 2, stats::sd))
 )
 ```
 
 The ordinary scores remain in `pca_fit$scores`. The added
-`pca_fit$opentsne_init` is centered and rescaled so the largest component
+`pca_fit$tsne_init` is centered and rescaled so the largest component
 standard deviation is `1e-4`, the small initialization scale expected by
 t-SNE optimizers. CPU fits record the requested and observable thread counts
 in `n.cores_requested` and `n.cores_effective`. A single-threaded BLAS may
@@ -307,13 +368,13 @@ still report one effective thread. The initialization can be reused across
 methods, seeds, or backends:
 
 ```{r reuse-initialization}
-layout_tsne_fixed_init <- opentsne(
-  x,
-  perplexity = 10,
-  Y_init = pca_fit$opentsne_init,
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+layout_tsne_fixed_init <- tsne(
+    x,
+    perplexity = 10,
+    Y_init = pca_fit$tsne_init,
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 ```
 
@@ -331,17 +392,17 @@ the one-call embedding functions, without exposing a second algorithm menu.
 
 ```{r precompute-knn}
 knn <- precompute_knn(
-  x,
-  k = 30,
-  metric = "euclidean",
-  backend = "cpu",
-  n.cores = 2
+    x,
+    k = 30,
+    metric = "euclidean",
+    backend = "cpu",
+    n.cores = 2
 )
 knn
 ```
 
 `prepare_umap_knn()` builds graph state and `epochs_per_sample` once.
-`prepare_opentsne_knn()` validates, strips self-neighbors when needed, and
+`prepare_tsne_knn()` validates, strips self-neighbors when needed, and
 stores the selected affinity support. Its default uses three candidate
 neighbors per unit of perplexity; `affinity_support = "compact"` explicitly
 selects the older one-per-perplexity approximation. Prepared objects are
@@ -349,25 +410,25 @@ useful for repeated runs.
 
 ```{r prepared-knn}
 prepared_umap <- prepare_umap_knn(
-  knn,
-  graph_mode = "fuzzy",
-  n.cores = 2
+    knn,
+    graph_mode = "fuzzy",
+    n.cores = 2
 )
-prepared_tsne <- prepare_opentsne_knn(knn, perplexity = 10)
+prepared_tsne <- prepare_tsne_knn(knn, perplexity = 10)
 
 layout_umap_reused <- umap_knn(
-  prepared_umap,
-  n.cores = 2,
-  seed = 4
+    prepared_umap,
+    n.cores = 2,
+    seed = 4
 )
-layout_tsne_reused <- opentsne_knn(
-  prepared_tsne,
-  Y_init = pca_fit$opentsne_init,
-  n.cores = 2,
-  seed = 4
+layout_tsne_reused <- tsne_knn(
+    prepared_tsne,
+    Y_init = pca_fit$tsne_init,
+    n.cores = 2,
+    seed = 4
 )
 
-cbind(UMAP = dim(layout_umap_reused), openTSNE = dim(layout_tsne_reused))
+cbind(UMAP = dim(layout_umap_reused), TSNE = dim(layout_tsne_reused))
 ```
 
 ## Independent UMAP initialization
@@ -380,18 +441,18 @@ optimizer-only timing.
 
 ```{r independent-umap-init}
 umap_initialization <- umap_init(
-  prepared_umap,
-  backend = "cpu",
-  graph_mode = "fuzzy",
-  n.cores = 2,
-  seed = 4
+    prepared_umap,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    n.cores = 2,
+    seed = 4
 )
 
 layout_from_initialization <- umap_knn(
-  umap_initialization,
-  backend = "cpu",
-  n.cores = 2,
-  seed = 4
+    umap_initialization,
+    backend = "cpu",
+    n.cores = 2,
+    seed = 4
 )
 
 umap_initialization$timings
@@ -406,27 +467,27 @@ ordinary one-call GPU embeddings continue to use their resident backend path.
 The graph mode is an explicit scientific choice, not a hidden speed setting.
 
 - `graph_mode = "fuzzy"` is the default and uses locally scaled fuzzy
-  membership strengths from the standard UMAP graph construction.
+    membership strengths from the standard UMAP graph construction.
 - `graph_mode = "binary"` symmetrizes unit-weight neighbor edges and then uses
-  the same UMAP optimizer. It is an explicit sensitivity mode and can produce
-  stronger separation on some datasets.
+    the same UMAP optimizer. It is an explicit sensitivity mode and can produce
+    stronger separation on some datasets.
 
 ```{r graph-modes}
 layout_binary <- umap_knn(
-  knn,
-  graph_mode = "binary",
-  n.cores = 2,
-  seed = 4
+    knn,
+    graph_mode = "binary",
+    n.cores = 2,
+    seed = 4
 )
 layout_fuzzy <- umap_knn(
-  knn,
-  graph_mode = "fuzzy",
-  n.cores = 2,
-  seed = 4
+    knn,
+    graph_mode = "fuzzy",
+    n.cores = 2,
+    seed = 4
 )
 ```
 
-```{r graph-mode-plots, fig.cap="The UMAP graph mode changes edge weights while retaining the same optimizer."}
+```{r graph-mode-plots, fig.cap="UMAP graph modes use the same optimizer."}
 old_par <- par(mfrow = c(1, 2), mar = c(1, 1, 2.5, 1), bg = "white")
 plot_embedding(layout_binary, labels, "Binary graph")
 plot_embedding(layout_fuzzy, labels, "Fuzzy graph")
@@ -444,19 +505,19 @@ in R, and the returned layout remains float32.
 
 ```{r float32, results='hold'}
 if (requireNamespace("float", quietly = TRUE)) {
-  x_float <- float::fl(x)
-  fit_float <- umap(
+    x_float <- float::fl(x)
+    fit_float <- umap(
     x_float,
     n_neighbors = 15,
     graph_mode = "fuzzy",
     standardize = FALSE,
     n.cores = 2,
     seed = 4
-  )
-  c(
+    )
+    c(
     input_class = class(x_float)[1],
     layout_class = class(fit_float$layout)[1]
-  )
+    )
 }
 ```
 
@@ -467,7 +528,7 @@ For large datasets:
 3. leave `keep_knn = FALSE` unless neighbor matrices are needed later;
 4. use prepared KNN/graph objects for repeated seeds;
 5. consider landmarking only when its approximation is scientifically
-   acceptable.
+    acceptable.
 
 # Embedding new observations
 
@@ -487,71 +548,71 @@ reference_rows <- setdiff(seq_len(nrow(x)), query_rows)
 reference_data <- x[reference_rows, , drop = FALSE]
 query_data <- x[query_rows, , drop = FALSE]
 
-reference_fit <- opentsne(
-  reference_data,
-  perplexity = 10,
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+reference_fit <- tsne(
+    reference_data,
+    perplexity = 10,
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 
 exact_query_knn <- function(reference, query, k) {
-  squared_distances <- outer(
+    squared_distances <- outer(
     rowSums(query^2), rowSums(reference^2), "+"
-  ) - 2 * tcrossprod(query, reference)
-  squared_distances[squared_distances < 0] <- 0
-  indices <- t(apply(squared_distances, 1L, order))[
+    ) - 2 * tcrossprod(query, reference)
+    squared_distances[squared_distances < 0] <- 0
+    indices <- t(apply(squared_distances, 1L, order))[
     , seq_len(k), drop = FALSE
-  ]
-  distances <- matrix(
+    ]
+    distances <- matrix(
     sqrt(squared_distances[
-      cbind(rep(seq_len(nrow(query)), each = k), as.vector(t(indices)))
+    cbind(rep(seq_len(nrow(query)), each = k), as.vector(t(indices)))
     ]),
     nrow = nrow(query),
     byrow = TRUE
-  )
-  list(indices = indices, distances = distances)
+    )
+    list(indices = indices, distances = distances)
 }
 
 query_knn <- exact_query_knn(reference_data, query_data, k = 15)
 query_layout <- transform_tsne(
-  reference_fit,
-  knn = query_knn,
-  perplexity = 5,
-  n_iter = 100,
-  n.cores = 2,
-  backend = "cpu",
-  seed = 4
+    reference_fit,
+    knn = query_knn,
+    perplexity = 5,
+    n_iter = 100,
+    n.cores = 2,
+    backend = "cpu",
+    seed = 4
 )
 ```
 
-```{r transform-plot, fig.cap="New observations (triangles) transformed into a fixed openTSNE reference (circles)."}
+```{r transform-plot, fig.cap="Transform into a fixed t-SNE reference."}
 reference_labels <- factor(labels[reference_rows], levels = levels(labels))
 query_labels <- factor(labels[query_rows], levels = levels(labels))
 par(bg = "white")
 plot(
-  reference_fit$layout,
-  col = embedding_colors[as.integer(reference_labels)],
-  pch = 19,
-  cex = 0.65,
-  asp = 1,
-  axes = FALSE,
-  xlab = "",
-  ylab = "",
-  main = "Fixed-reference transform"
+    reference_fit$layout,
+    col = embedding_colors[as.integer(reference_labels)],
+    pch = 19,
+    cex = 0.65,
+    asp = 1,
+    axes = FALSE,
+    xlab = "",
+    ylab = "",
+    main = "Fixed-reference transform"
 )
 points(
-  query_layout,
-  col = embedding_colors[as.integer(query_labels)],
-  pch = 17,
-  cex = 1.05
+    query_layout,
+    col = embedding_colors[as.integer(query_labels)],
+    pch = 17,
+    cex = 1.05
 )
 legend(
-  "bottomright",
-  legend = c("Reference", "New"),
-  pch = c(19, 17),
-  bty = "n",
-  cex = 0.8
+    "bottomright",
+    legend = c("Reference", "New"),
+    pch = c(19, 17),
+    bty = "n",
+    cex = 0.8
 )
 box(col = "#B8B8B8")
 ```
@@ -563,7 +624,7 @@ CPU transform as GPU work.
 # Landmarking
 
 Landmarking embeds a representative subset and places the remaining rows in
-that reference. It is never activated silently by `umap()` or `opentsne()`.
+that reference. It is never activated silently by `umap()` or `tsne()`.
 The final layout still has one row per input observation. Reference and
 projection searches use fastEmbedR's native KNN routes.
 
@@ -572,33 +633,33 @@ This is useful when the same landmark reference will be reused:
 
 ```{r staged-landmarking}
 landmark_selection <- select_landmarks(
-  x,
-  landmarks = 0.5,
-  seed = 4,
-  n.cores = 2
+    x,
+    landmarks = 0.5,
+    seed = 4,
+    n.cores = 2
 )
 
 umap_reference <- fit_landmark_model(
-  x,
-  landmark_selection,
-  method = "umap",
-  n_neighbors = 15,
-  graph_mode = "fuzzy",
-  backend = "cpu",
-  n.cores = 2,
-  seed = 4
+    x,
+    landmark_selection,
+    method = "umap",
+    n_neighbors = 15,
+    graph_mode = "fuzzy",
+    backend = "cpu",
+    n.cores = 2,
+    seed = 4
 )
 
 umap_projected <- project_landmark_model(
-  umap_reference,
-  x,
-  refinement_epochs = 50,
-  n.cores = 2
+    umap_reference,
+    x,
+    refinement_epochs = 50,
+    n.cores = 2
 )
 ```
 
 `fit_landmark_model()` invokes the ordinary production `umap()` or
-`opentsne()` implementation on the reference rows. Consequently, UMAP
+`tsne()` implementation on the reference rows. Consequently, UMAP
 `graph_mode`, optimizer settings, seed, and backend are explicit and
 consistent with a full-data fit. `project_landmark_model()` computes only the
 query-to-reference neighbors. It does not recompute neighbors among
@@ -611,43 +672,43 @@ selection and model do not need to be retained.
 
 ```{r landmarking}
 fit_landmark_umap <- landmark_umap(
-  x,
-  landmarks = 0.5,
-  n_neighbors = 15,
-  graph_mode = "fuzzy",
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+    x,
+    landmarks = 0.5,
+    n_neighbors = 15,
+    graph_mode = "fuzzy",
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 
 fit_landmark_tsne <- landmark_tsne(
-  x,
-  landmarks = 0.5,
-  perplexity = 10,
-  standardize = FALSE,
-  n.cores = 2,
-  seed = 4
+    x,
+    landmarks = 0.5,
+    perplexity = 10,
+    standardize = FALSE,
+    n.cores = 2,
+    seed = 4
 )
 
 rbind(
-  UMAP = fit_landmark_umap$metrics[
+    UMAP = fit_landmark_umap$metrics[
     1, c("elapsed", "reference_embedding_elapsed",
-         "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
-  ],
-  openTSNE = setNames(
+        "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
+    ],
+    TSNE = setNames(
     fit_landmark_tsne$metrics[
-      1, c("elapsed", "reference_embedding_elapsed",
-           "landmark_projection_knn_elapsed", "transform_elapsed")
+    1, c("elapsed", "reference_embedding_elapsed",
+            "landmark_projection_knn_elapsed", "transform_elapsed")
     ],
     c("elapsed", "reference_embedding_elapsed",
-      "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
-  )
+    "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
+    )
 )
 ```
 
-```{r landmark-plots, fig.cap="Iris embeddings using 50% of observations as landmarks."}
+```{r landmark-plots, fig.cap="Iris with 50% landmarks."}
 old_par <- par(mfrow = c(1, 2), mar = c(1, 1, 2.5, 1), bg = "white")
-plot_embedding(fit_landmark_tsne$layout, labels, "Landmark openTSNE")
+plot_embedding(fit_landmark_tsne$layout, labels, "Landmark t-SNE")
 plot_embedding(fit_landmark_umap$layout, labels, "Landmark UMAP")
 par(old_par)
 ```
@@ -670,41 +731,41 @@ high-dimensional neighbor search.
 
 ```{r quality}
 quality_umap <- evaluate_embedding(
-  x,
-  fit_umap$layout,
-  labels = labels,
-  k = 10,
-  primary_k = 10,
-  reference_nn = knn,
-  sample_size_for_local_metrics = nrow(x),
-  sample_size_for_global_metrics = nrow(x),
-  seed = 4,
-  method = "UMAP",
-  backend = "cpu",
-  dataset = "iris",
-  n.cores = 2
+    x,
+    fit_umap$layout,
+    labels = labels,
+    k = 10,
+    primary_k = 10,
+    reference_nn = knn,
+    sample_size_for_local_metrics = nrow(x),
+    sample_size_for_global_metrics = nrow(x),
+    seed = 4,
+    method = "UMAP",
+    backend = "cpu",
+    dataset = "iris",
+    n.cores = 2
 )
 
 quality_tsne <- evaluate_embedding(
-  x,
-  fit_tsne$layout,
-  labels = labels,
-  k = 10,
-  primary_k = 10,
-  reference_nn = knn,
-  sample_size_for_local_metrics = nrow(x),
-  sample_size_for_global_metrics = nrow(x),
-  seed = 4,
-  method = "openTSNE",
-  backend = "cpu",
-  dataset = "iris",
-  n.cores = 2
+    x,
+    fit_tsne$layout,
+    labels = labels,
+    k = 10,
+    primary_k = 10,
+    reference_nn = knn,
+    sample_size_for_local_metrics = nrow(x),
+    sample_size_for_global_metrics = nrow(x),
+    seed = 4,
+    method = "t-SNE",
+    backend = "cpu",
+    dataset = "iris",
+    n.cores = 2
 )
 
 quality <- rbind(quality_umap, quality_tsne)
 quality[, c(
-  "method", "trustworthiness", "knn_preservation_10",
-  "distance_spearman", "silhouette", "label_knn_accuracy"
+    "method", "trustworthiness", "knn_preservation_10",
+    "distance_spearman", "silhouette", "label_knn_accuracy"
 )]
 ```
 
@@ -719,14 +780,18 @@ The backend argument has exactly three choices.
 
 | Backend | One-call KNN | Embedding implementation |
 | --- | --- | --- |
-| `"cpu"` | Native float32 HNSW | Native multithreaded C++ UMAP or FFT-grid openTSNE |
-| `"metal"` | Native exact or recall-tuned IVF-Flat | Objective-C++/Metal kernels; no Python bridge |
-| `"cuda"` | Native FAISS GPU exact search or RAPIDS cuVS IVF-Flat | CUDA UMAP or CUDA/cuFFT openTSNE with resident device buffers |
+| `"cpu"` | HNSW | Multithreaded C++ |
+| `"metal"` | Exact or IVF-Flat | Metal kernels |
+| `"cuda"` | Exact or IVF-Flat | CUDA kernels |
+
+CPU t-SNE uses a fast Fourier transform (FFT) grid. Metal uses native
+Objective-C++ kernels. CUDA uses FAISS GPU or RAPIDS cuVS search and keeps
+embedding buffers resident on the device.
 
 GPU use is explicit:
 
 ```{r gpu-examples, eval=FALSE}
-fit_metal <- opentsne(x, perplexity = 10, backend = "metal", seed = 4)
+fit_metal <- tsne(x, perplexity = 10, backend = "metal", seed = 4)
 fit_cuda <- umap(x, n_neighbors = 15, backend = "cuda", seed = 4)
 ```
 
@@ -736,34 +801,122 @@ reductions and atomic updates can be ordered differently, fixed seeds provide
 controlled stochastic initialization and sampling but do not promise bitwise
 identity between devices or thread counts.
 
+## Package boundary
+
+The package owns the matrix and KNN-input interfaces, native nearest-neighbor
+routes, PCA initialization, graph or affinity construction, low-dimensional
+optimization, landmark transformation, graph construction, community
+detection, quality metrics, and returned metadata. A plain host KNN object can
+be supplied as `indices` and `distances`, while a CUDA KNN result produced by
+`precompute_knn()` can remain device-resident through the CUDA embedding path.
+No external R nearest-neighbor package is called by the production workflow.
+
+## UMAP implementation
+
+The fuzzy path follows the graph construction and cross-entropy optimization
+defined by McInnes, Healy, and Melville. `fastEmbedR` changes the execution
+boundary rather than the UMAP objective: graph weights, coordinates, schedules,
+and optimizer state use compact float32 buffers, and dense graph intermediates
+are avoided. CPU parallelizes row preparation and sampled-edge updates; Metal
+retains graph and optimizer buffers in unified memory; CUDA constructs and
+optimizes the graph from device-resident KNN arrays.
+
+`graph_mode = "fuzzy"` is the standard default. The explicit `"binary"` mode
+assigns unit weight to the symmetric KNN union and is an adjacency-only
+sensitivity analysis for settings where neighbor identity is more reliable than
+distance calibration. It is not standard UMAP and is not guaranteed to be
+faster because every retained edge receives the maximum sampling frequency.
+
+## Interpolation-based t-SNE implementation
+
+The affinity definition and Kullback--Leibler objective follow van der Maaten
+and Hinton. Interpolation-based repulsion follows FIt-SNE, while the automatic
+two-phase optimization policy is informed by opt-SNE and openTSNE. The default
+affinity support uses `ceiling(3 * perplexity)` non-self candidates; the
+explicit compact approximation uses `ceiling(perplexity)`.
+
+CPU uses a retained FFT-grid workspace, Metal uses package-native scatter,
+transform, gather, attraction, and optimizer kernels, and CUDA combines native
+kernels with cuFFT and persistent device buffers. PCA initialization is created
+by `pca(..., tsne_init = TRUE)` or internally by the one-call workflow. The
+fixed-reference transform follows the published reference-space embedding
+procedure and keeps the fitted reference coordinates unchanged.
+
+## Graph clustering and landmarking
+
+`knn_graph()` builds weighted sparse graphs using shared-neighbor, inverse-
+distance, or binary edges. `graph_cluster()` provides native Louvain, Leiden,
+and exact CPU Walktrap implementations. Louvain and Leiden have CPU, Metal, and
+CUDA routes; Walktrap remains CPU-only because its exact transition
+representation is quadratic in the number of vertices. The implementations are
+tested against `igraph` on matched weighted graphs, but `igraph` is not a
+runtime dependency.
+
+Landmark workflows separate selection, reference embedding, projection KNN,
+local correction, and optional fixed-reference refinement. They are explicit
+approximations: timings and returned parameters identify landmark and projection
+stages rather than presenting them as ordinary full-data embeddings.
+
+## Backend reporting and software acknowledgements
+
+An explicit accelerator request must execute on that backend or fail. Returned
+objects record the resolved embedding backend, nearest-neighbor route,
+precision,
+parameters, and stage timings. Backend availability and diagnostic reasons are
+reported by `fastEmbedR_capabilities()`.
+
+The package is distributed under the MIT license. Adapted source and linked
+library boundaries, upstream commits, SPDX identifiers, and retained notices
+are recorded in `inst/NOTICE`, `inst/COPYRIGHTS`,
+`inst/THIRD_PARTY_DEPENDENCIES.json`, and the repository's source-provenance
+documentation. Software used only for validation remains outside the production
+call graph.
+
 # A practical analysis checklist
 
 Before publishing an embedding analysis:
 
 1. state whether input features were centered, scaled, or reduced by PCA;
 2. report method, backend, seed, `n_neighbors` or perplexity, and UMAP graph
-   mode;
+    mode;
 3. distinguish full runs from landmark approximations;
 4. compare total runtime when competing packages expose different internal
-   boundaries;
+    boundaries;
 5. report trustworthiness and neighbor preservation alongside any label-aware
-   score;
+    score;
 6. inspect the plot for outliers, splitting, crowding, and seed sensitivity;
 7. save `sessionInfo()` and the result's `$parameters` and `$timings`.
 
 # References
 
-1. van der Maaten L, Hinton G. Visualizing data using t-SNE. J Mach Learn Res 2008;9:2579-2605.
-2. Policar PG, Strazar M, Zupan B. openTSNE: a modular Python library for t-SNE dimensionality reduction and embedding. J Open Source Softw 2019;4:1576.
-3. Linderman GC, Rachh M, Hoskins JG, Steinerberger S, Kluger Y. Fast interpolation-based t-SNE for improved visualization of single-cell RNA-seq data. Nat Methods 2019;16:243-245.
-4. McInnes L, Healy J, Melville J. UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction. arXiv 2018;1802.03426.
-5. Belkina AC, Ciccolella CO, Anno R, Halpert R, Spidlen J, Snyder-Cappione JE. Automated optimized parameters for T-distributed stochastic neighbor embedding improve visualization and analysis of large datasets. Nat Commun 2019;10:5415.
-6. Policar PG, Stražar M, Zupan B. Embedding to reference t-SNE space addresses batch effects in single-cell classification. Mach Learn 2021;110:3395-3417.
-7. Johnson J, Douze M, Jegou H. Billion-scale similarity search with GPUs. IEEE Trans Big Data 2021;7:535-547.
-
-See the companion *Algorithmic design and acknowledgements* vignette for the
-native implementation, performance engineering, software provenance, and
-license boundaries.
+1. van der Maaten L, Hinton G. Visualizing data using t-SNE. J Mach Learn
+    Res 2008;9:2579-2605.
+2. van der Maaten L. Accelerating t-SNE using tree-based algorithms. J Mach
+    Learn Res 2014;15:3221-3245.
+3. Linderman GC, Rachh M, Hoskins JG, Steinerberger S, Kluger Y. Fast
+    interpolation-based t-SNE for improved visualization of single-cell
+    RNA-seq data. Nat Methods 2019;16:243-245.
+4. Policar PG, Strazar M, Zupan B. openTSNE: a modular Python library for
+    t-SNE dimensionality reduction and embedding. J Stat Softw 2024;109:1-30.
+5. Chan DM, Rao R, Huang F, Canny JF. t-SNE-CUDA: GPU-accelerated t-SNE and
+    its applications to modern data. arXiv 2018;1807.11824.
+6. Belkina AC, Ciccolella CO, Anno R, Halpert R, Spidlen J,
+    Snyder-Cappione JE. Automated optimized parameters for T-distributed
+    stochastic neighbor embedding improve visualization and analysis of
+    large datasets. Nat Commun 2019;10:5415.
+7. Policar PG, Strazar M, Zupan B. Embedding to reference t-SNE space
+    addresses batch effects in single-cell classification. Mach Learn
+    2021;110:1211-1231.
+8. McInnes L, Healy J, Melville J. UMAP: Uniform Manifold Approximation and
+    Projection for Dimension Reduction. arXiv 2018;1802.03426.
+9. Johnson J, Douze M, Jegou H. Billion-scale similarity search with GPUs.
+    IEEE Trans Big Data 2021;7:535-547.
+10. Blondel VD, Guillaume JL, Lambiotte R, Lefebvre E. Fast unfolding of
+    communities in large networks. J Stat Mech 2008;2008:P10008.
+11. Traag VA, Waltman L, van Eck NJ. From Louvain to Leiden: guaranteeing
+    well-connected communities. Sci Rep 2019;9:5233.
+12. Pons P, Latapy M. Computing communities in large networks using random
+    walks. J Graph Algorithms Appl 2006;10:191-218.
 
 ```{r session-info}
 sessionInfo()

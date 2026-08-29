@@ -12,10 +12,10 @@
 [References](references.md)
 
 `fastEmbedR` implements two nonlinear embedding families: UMAP and an
-openTSNE-style t-SNE. UMAP follows the fuzzy simplicial-set graph formulation
+interpolation-based t-SNE. UMAP follows the fuzzy simplicial-set graph formulation
 introduced by McInnes and colleagues [7,13]. The t-SNE path follows the
 probabilistic neighbor-embedding objective of van der Maaten and Hinton [1],
-with modern openTSNE/FIt-SNE-style optimization and interpolation ideas [3-4].
+with modern interpolation-based optimization ideas from FIt-SNE and openTSNE [3-4].
 The package is intentionally KNN-first. fastEmbedR implements its CPU HNSW and
 Apple Metal exact/IVF-Flat one-call KNN paths natively. CUDA builds link
 directly to FAISS GPU for exact search and to the Apache-2.0 RAPIDS cuVS C API
@@ -27,8 +27,8 @@ The public package surface is deliberately small:
 
 - `precompute_knn()` exposes the same native backend policy used by the
   one-call functions, while keeping algorithm and recall tuning internal.
-- `opentsne_knn()` and `umap_knn()` consume a supplied KNN object.
-- `opentsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
+- `tsne_knn()` and `umap_knn()` consume a supplied KNN object.
+- `tsne()` and `umap()` select native CPU/Metal KNN or direct FAISS/cuVS CUDA KNN and
   then call the corresponding KNN entry point.
 - `pca()` computes backend-native truncated PCA scores and loadings. CPU uses
   fastEmbedR's native blocked RSVD implementation, Metal uses a resident
@@ -56,7 +56,7 @@ On macOS, `configure` adds the Apple Foundation, Metal, MPS, and MPSGraph
 frameworks and compiles the Objective-C++ bridge with the Xcode SDK. Metal
 shader source is compiled by the runtime for the active GPU. The native Metal
 KNN shader enables Apple's float32 fast arithmetic locally; this is not
-propagated to the CPU core or to UMAP/openTSNE host code.
+propagated to the CPU core or to UMAP/t-SNE host code.
 
 CUDA translation units are compiled by NVCC as C++17 with extended lambdas,
 relaxed `constexpr`, and position-independent host code. The deployment
@@ -82,7 +82,7 @@ The script
 uses exact KNN on iris, fixes the random seed, and compares package-native
 outputs with established R references.
 
-For t-SNE, the validation compares `opentsne_knn()` with
+For t-SNE, the validation compares `tsne_knn()` with
 `Rtsne::Rtsne_neighbors()` from the same exact KNN matrix and PCA
 initialization. It records trustworthiness, nearest-neighbor preservation,
 embedding-space KNN label accuracy, the final KL/cost value where exposed, and
@@ -164,7 +164,7 @@ and a small/large data policy:
 - FAISS/cuVS write int64 row-major search output on the device. One package CUDA
   kernel removes self-neighbors, converts indices to int32/one-based form,
   transforms squared distances, and packs the result directly into the
-  column-major device layout consumed by UMAP and openTSNE. No KNN matrix is
+  column-major device layout consumed by UMAP and t-SNE. No KNN matrix is
   materialized in R during a one-call CUDA embedding.
 - KNN-input functions accept the index and distance matrices as already
   measured data and do not repeat neighbor search.
@@ -222,7 +222,7 @@ are not guaranteed to be bitwise identical across devices.
 ## PCA And Truncated-SVD Initialization
 
 `fastEmbedR::pca()` provides a small PCA API for reusable scores, loadings, and
-openTSNE initialization. The API has no method-selection layer and does not
+t-SNE initialization. The API has no method-selection layer and does not
 call `irlba`, ARPACK, Python, or `reticulate`.
 
 The backend implementations share the same truncated low-rank PCA target but
@@ -253,7 +253,7 @@ subspace iteration through rank 20, and two above rank 20. If the sketch spans
 the complete available feature space, the redundant power iteration is
 omitted.
 
-For openTSNE initialization, the input is mean-centered before decomposition
+For t-SNE initialization, the input is mean-centered before decomposition
 and the resulting scores are centered and scaled to the small t-SNE
 initialization scale. CUDA acceleration for this step is native C++/CUDA
 through RAPIDS RAFT TSVD compiled in the package CUDA translation unit. If
@@ -268,14 +268,14 @@ and observable thread counts. A single-threaded BLAS remains single-threaded.
 `irlba` is retained only as an external benchmark comparator and is not part of
 the package implementation.
 
-Set `opentsne_init = TRUE` in `pca()` to retain the ordinary PCA fit and add an
-`opentsne_init` matrix derived from those same scores. The added matrix is
+Set `tsne_init = TRUE` in `pca()` to retain the ordinary PCA fit and add an
+`tsne_init` matrix derived from those same scores. The added matrix is
 centered and rescaled so the maximum component standard deviation is `1e-4`,
-matching the small-scale initialization expected by t-SNE/openTSNE optimizers
-[1,3-4]. No second decomposition is performed. `opentsne_pca_init()` remains a
+matching the small-scale initialization expected by t-SNE/t-SNE optimizers
+[1,3-4]. No second decomposition is performed. `tsne_pca_init()` remains a
 compact helper for users who need only the initialization matrix or an RDS
-cache. Either result can be passed as `Y_init` to `opentsne_knn()` or
-`opentsne()`.
+cache. Either result can be passed as `Y_init` to `tsne_knn()` or
+`tsne()`.
 
 ## UMAP From KNN
 
@@ -331,7 +331,7 @@ The Metal backend is implemented in Objective-C++/Metal and uses the validated
 atomic in-place edge-update kernel. It does not call Python, Torch, MLX, or
 `reticulate`. The Metal optimizer consumes the same prepared graph as the CPU
 path and returns only the final layout and metadata to R. The package-native
-Metal FFT work used by openTSNE was informed by permissive Apple GPU FFT
+Metal FFT work used by t-SNE was informed by permissive Apple GPU FFT
 engineering references [12].
 
 ### CUDA UMAP
@@ -345,9 +345,9 @@ contains external pointers with a finalizer; copying to ordinary R matrices is
 an explicit diagnostic operation. No CPU or companion-package fallback is
 used for a CUDA request.
 
-## openTSNE-Style t-SNE From KNN
+## Interpolation-Based t-SNE From KNN
 
-In this documentation, **openTSNE-style** identifies mathematical and workflow
+In this documentation, **interpolation-based t-SNE** identifies mathematical and workflow
 lineage, not software compatibility. The shared published components are the
 t-SNE KL objective, perplexity-matched sparse affinities, early-exaggeration
 and normal phases, adaptive gains and momentum, FIt-SNE interpolation/FFT
@@ -356,7 +356,7 @@ port Python `openTSNE`, and its API, affinity classes, serialized objects,
 neighbor-width defaults, optimizer trajectory, and coordinates are not
 compatibility targets.
 
-`opentsne_knn()` implements the t-SNE optimization structure used by modern
+`tsne_knn()` implements the t-SNE optimization structure used by modern
 openTSNE/FIt-SNE workflows [3-4]:
 
 1. Convert KNN distances to conditional probabilities by binary search on the
@@ -378,11 +378,11 @@ practice. `affinity_support = "compact"` instead supplies only
 `ceiling(perplexity)` neighbors. That mode reduces sparse work but drives the
 target entropy toward the maximum available entropy, so it is documented and
 reported as an approximation rather than a standard t-SNE configuration.
-`opentsne_knn()` records the exact support width and support/perplexity ratio.
+`tsne_knn()` records the exact support width and support/perplexity ratio.
 
-The public `opentsne()` function is now only a convenience wrapper around this
+The public `tsne()` function is now only a convenience wrapper around this
 KNN implementation. If a KNN object is supplied through `nn`, then
-`opentsne(data, nn = knn)` calls the same path as `opentsne_knn(knn)` and
+`tsne(data, nn = knn)` calls the same path as `tsne_knn(knn)` and
 produces the same layout for the same seed and parameters. This mirrors the
 KNN-input validation style used by R t-SNE tooling [11].
 
@@ -391,8 +391,8 @@ KNN-input validation style used by R t-SNE tooling [11].
 PCA initialization is explicit. Use:
 
 ```r
-Y_init <- opentsne_pca_init(x, backend = "cpu")
-y <- opentsne_knn(knn, Y_init = Y_init)
+Y_init <- tsne_pca_init(x, backend = "cpu")
+y <- tsne_knn(knn, Y_init = Y_init)
 ```
 
 or pass `init_data` when a KNN-input run should compute PCA internally. The
@@ -467,12 +467,12 @@ experiments, and exact benchmark artifacts are documented in
 Landmarking is implemented as an explicit approximation. The package embeds a
 subset, projects non-landmark observations using fixed-reference KNN
 interpolation/transform steps, and records projection/transform time
-separately. Landmarking is not used silently inside full `opentsne()` or
+separately. Landmarking is not used silently inside full `tsne()` or
 `umap()` calls.
 
 ## Parameter Policy And Autotuning
 
-The configurability is deliberately asymmetric. openTSNE exposes perplexity
+The configurability is deliberately asymmetric. t-SNE exposes perplexity
 and support, initialization, iteration counts, exaggeration, learning rate,
 momentum, clipping, and exact-versus-FFT repulsion. Its native helper supplies
 opt-SNE-inspired learning-rate and iteration defaults only when values are

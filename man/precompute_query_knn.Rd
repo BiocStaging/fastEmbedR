@@ -5,12 +5,12 @@
 \title{Precompute query-to-reference nearest neighbors}
 \usage{
 precompute_query_knn(
-  reference,
-  query,
-  k = 30L,
-  metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  backend = NULL,
-  n.cores = NULL
+    reference,
+    query,
+    k = 30L,
+    metric = c("euclidean", "cosine", "correlation", "inner_product"),
+    backend = NULL,
+    n.cores = NULL
 )
 }
 \arguments{
@@ -32,7 +32,7 @@ this argument.}
 }
 \value{
 A `fastEmbedR_knn` object with one row per query observation and
-  one-based indices into `reference`.
+    one-based indices into `reference`.
 }
 \description{
 `precompute_query_knn()` searches a fixed reference matrix for every row of
@@ -46,7 +46,7 @@ between a native query-only exact kernel and recall-tuned IVF-Flat from the
 estimated reference-query distance workload. CUDA uses direct FAISS GPU
 exact search below 100,000 reference rows and direct RAPIDS cuVS IVF-Flat
 above that threshold. CUDA results remain device-resident for direct
-consumption by landmark UMAP and openTSNE transformations.
+consumption by landmark UMAP and t-SNE transformations.
 }
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))

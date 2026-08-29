@@ -4,7 +4,7 @@ test_that("transform_tsne places query rows from supplied reference neighbours",
   ref <- x[1:50, , drop = FALSE]
   qry <- x[51:60, , drop = FALSE]
 
-  fit <- opentsne(
+  fit <- tsne(
     ref,
     perplexity = 5,
     early_exaggeration_iter = 2L,
@@ -24,7 +24,7 @@ test_that("transform_tsne places query rows from supplied reference neighbours",
 
   expect_equal(dim(layout), c(nrow(qry), 2L))
   expect_true(all(is.finite(layout)))
-  expect_equal(attr(layout, "transform"), "opentsne_style_fixed_reference")
+  expect_equal(attr(layout, "transform"), "tsne_fixed_reference")
   cfg <- attr(layout, "fastEmbedR_config")
   expect_equal(cfg$method, "transform_tsne")
   expect_equal(cfg$optimizer, "opentsne_style_fixed_reference_transform")
@@ -132,7 +132,7 @@ test_that("transform_tsne reports GPU transform backends honestly", {
   x <- matrix(rnorm(60L * 4L), 60L, 4L)
   ref <- x[1:42, , drop = FALSE]
   qry <- x[43:50, , drop = FALSE]
-  fit <- opentsne(
+  fit <- tsne(
     ref,
     perplexity = 4,
     early_exaggeration_iter = 2L,
@@ -204,7 +204,7 @@ test_that("landmark_tsne returns a compact full embedding object", {
   fit <- landmark_tsne(
     x,
     landmarks = 20L,
-    reference_method = "opentsne",
+    reference_method = "tsne",
     perplexity = 4,
     early_exaggeration_iter = 2L,
     n_iter = 3L,

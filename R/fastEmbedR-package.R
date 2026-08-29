@@ -1,13 +1,14 @@
-#' fastEmbedR: opinionated native UMAP and openTSNE embeddings
+#' fastEmbedR: native UMAP and interpolation-based t-SNE embeddings
 #'
 #' fastEmbedR provides an opinionated fixed-policy float32 UMAP implementation
-#' and a configurable native openTSNE-style implementation from data or
-#' precomputed nearest-neighbor matrices. Use [umap()] or [opentsne()]
+#' and a configurable native interpolation-based t-SNE implementation from
+#' data or
+#' precomputed nearest-neighbor matrices. Use [umap()] or [tsne()]
 #' for one-call workflows, [precompute_knn()] to run the package-native CPU,
 #' Metal, or CUDA search separately, or pass reusable KNN `indices` and
-#' `distances` to [umap_knn()] or [opentsne_knn()].
+#' `distances` to [umap_knn()] or [tsne_knn()].
 #' Use [pca()] for reusable backend-native PCA and request
-#' `opentsne_init = TRUE` when an openTSNE-ready initialization is needed.
+#' `tsne_init = TRUE` when a t-SNE-ready initialization is needed.
 #' Score embeddings with [evaluate_embedding()]. Optional downstream graph
 #' utilities are available through [knn_graph()] and [graph_cluster()].
 #' Use [fastEmbedR_api()] for the complete canonical, advanced, diagnostic,
@@ -26,9 +27,9 @@
 "_PACKAGE"
 
 utils::globalVariables(c(
-  "landmark_refinement_epoch_count",
-  "landmark_tsne_transform_resident_cuda_cpp",
-  "landmark_tsne_transform_resident_metal_cpp",
-  "run_native_knn_optimizer",
-  "transform_tsne_cuda_cpp"
+    "landmark_refinement_epoch_count",
+    "landmark_tsne_transform_resident_cuda_cpp",
+    "landmark_tsne_transform_resident_metal_cpp",
+    "run_native_knn_optimizer",
+    "transform_tsne_cuda_cpp"
 ))

@@ -4,16 +4,17 @@
 \name{fastEmbedR-package}
 \alias{fastEmbedR}
 \alias{fastEmbedR-package}
-\title{fastEmbedR: opinionated native UMAP and openTSNE embeddings}
+\title{fastEmbedR: native UMAP and interpolation-based t-SNE embeddings}
 \description{
 fastEmbedR provides an opinionated fixed-policy float32 UMAP implementation
-and a configurable native openTSNE-style implementation from data or
-precomputed nearest-neighbor matrices. Use [umap()] or [opentsne()]
+and a configurable native interpolation-based t-SNE implementation from
+data or
+precomputed nearest-neighbor matrices. Use [umap()] or [tsne()]
 for one-call workflows, [precompute_knn()] to run the package-native CPU,
 Metal, or CUDA search separately, or pass reusable KNN `indices` and
-`distances` to [umap_knn()] or [opentsne_knn()].
+`distances` to [umap_knn()] or [tsne_knn()].
 Use [pca()] for reusable backend-native PCA and request
-`opentsne_init = TRUE` when an openTSNE-ready initialization is needed.
+`tsne_init = TRUE` when a t-SNE-ready initialization is needed.
 Score embeddings with [evaluate_embedding()]. Optional downstream graph
 utilities are available through [knn_graph()] and [graph_cluster()].
 Use [fastEmbedR_api()] for the complete canonical, advanced, diagnostic,
@@ -32,27 +33,29 @@ InfoTSNE, PaCMAP, TriMap, or LocalMAP reducers.
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/tkcaccia/fastEmbedR}
-  \item \url{https://tkcaccia.github.io/fastEmbedR/}
-  \item \url{https://github.com/tkcaccia/fastEmbedR-benchmark}
-  \item Report bugs at \url{https://github.com/tkcaccia/fastEmbedR/issues}
+    \item \url{https://github.com/tkcaccia/fastEmbedR}
+    \item \url{https://tkcaccia.github.io/fastEmbedR/}
+    \item \url{https://github.com/tkcaccia/fastEmbedR-benchmark}
+    \item Report bugs at \url{https://github.com/tkcaccia/fastEmbedR/issues}
 }
 
 }
 \author{
 \strong{Maintainer}: Stefano Cacciatore \email{tkcaccia@gmail.com}
+(\href{https://orcid.org/0000-0001-7052-7156}{ORCID})
 
 Authors:
 \itemize{
-  \item Stefano Cacciatore \email{tkcaccia@gmail.com}
-  \item Moussa Kassim \email{Moussa.Kassim@icgeb.org}
-  \item Martin Ocharo \email{Martin.Ocharo@icgeb.org}
-  \item Dalia Ahmed \email{Dalia.Ahmed@icgeb.org}
-  \item Dupe Ojo \email{Dupe.Ojo@icgeb.org}
-  \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
-  \item Leonardo Tenori \email{tenori@cerm.unifi.it}
-  \item Dinesh Gupta
-  \item Silvano Piazza
+    \item Stefano Cacciatore \email{tkcaccia@gmail.com}
+    (\href{https://orcid.org/0000-0001-7052-7156}{ORCID})
+    \item Moussa Kassim \email{Moussa.Kassim@icgeb.org}
+    \item Martin Ocharo \email{Martin.Ocharo@icgeb.org}
+    \item Dalia Ahmed \email{Dalia.Ahmed@icgeb.org}
+    \item Dupe Ojo \email{Dupe.Ojo@icgeb.org}
+    \item Alessia Vignoli \email{vignoli@cerm.unifi.it}
+    \item Leonardo Tenori \email{tenori@cerm.unifi.it}
+    \item Dinesh Gupta
+    \item Silvano Piazza
 }
 
 }

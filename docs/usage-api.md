@@ -22,10 +22,10 @@ role, device residency, related methods, and lifecycle status for every export.
 | Situation | Use |
 | --- | --- |
 | You want to precompute fastEmbedR's native neighbors | `precompute_knn()` |
-| You already computed nearest neighbors | `umap_knn()` or `opentsne_knn()` |
-| You want one call from a data matrix | `umap()` or `opentsne()` |
-| You want reusable PCA scores or t-SNE initialization | `pca()` or `opentsne_pca_init()` |
-| You want to compare UMAP and openTSNE fairly | compute one host KNN list once, then reuse it |
+| You already computed nearest neighbors | `umap_knn()` or `tsne_knn()` |
+| You want one call from a data matrix | `umap()` or `tsne()` |
+| You want reusable PCA scores or t-SNE initialization | `pca()` or `tsne_pca_init()` |
+| You want to compare UMAP and t-SNE fairly | compute one host KNN list once, then reuse it |
 | You want Apple GPU | set `backend = "metal"` explicitly |
 | You want NVIDIA GPU | build with CUDA/cuVS, then set embedding `backend = "cuda"` |
 | You want a fast approximation for very large data | use `landmark_umap()` or `landmark_tsne()` and report it as landmarking |
@@ -47,7 +47,7 @@ knn <- precompute_knn(
   n.cores = 4L
 )
 layout_umap <- umap_knn(knn, seed = 1)
-layout_tsne <- opentsne_knn(knn, init_data = x, seed = 1)
+layout_tsne <- tsne_knn(knn, init_data = x, seed = 1)
 ```
 
 This keeps nearest-neighbor time separate from embedding time and makes
@@ -80,15 +80,15 @@ Current metric support is deliberately explicit:
 
 | metric | supported backends | notes |
 | --- | --- | --- |
-| `euclidean` | native CPU/Metal and optional direct CUDA/cuVS | Recommended default for large UMAP/openTSNE benchmarks. |
+| `euclidean` | native CPU/Metal and optional direct CUDA/cuVS | Recommended default for large UMAP/t-SNE benchmarks. |
 | `cosine` | native CPU/Metal and compiled CUDA | Rows are normalized internally. |
 | `correlation` | native CPU/Metal and compiled CUDA | Rows are centered and normalized internally. |
 | `inner_product` | compiled CUDA only | Unsupported CPU/Metal requests fail explicitly. |
 
 ## Parameter Philosophy And Scope
 
-fastEmbedR is deliberately more configurable for openTSNE than for UMAP. The
-openTSNE API exposes perplexity and affinity support, initialization, iteration
+fastEmbedR is deliberately more configurable for t-SNE than for UMAP. The
+t-SNE API exposes perplexity and affinity support, initialization, iteration
 counts, early and normal exaggeration, learning rate, momentum, clipping, and
 exact-versus-FFT repulsion. Set `auto_config = FALSE` and supply explicit
 values when an automatic iteration or stopping rule is not wanted.
@@ -117,7 +117,7 @@ claimed to be universally optimal for every scientific question.
 The one-call nearest-neighbor router also hides index parameters. It targets
 recall 0.99 and chooses the validated CPU, Metal, or CUDA route. To control the
 search independently, provide an external KNN object to `umap_knn()` or
-`opentsne_knn()`.
+`tsne_knn()`.
 
 Resolved choices are not hidden from results:
 
@@ -160,7 +160,7 @@ fit <- umap(
 plot(fit)
 ```
 
-## openTSNE From The Same KNN
+## t-SNE From The Same KNN
 
 The KNN must contain at least `ceiling(3 * perplexity)` non-self columns under
 the default `affinity_support = "standard"` policy. This avoids the
@@ -168,8 +168,8 @@ maximum-entropy degeneracy that occurs when support equals perplexity. Use
 `affinity_support = "compact"` only for an explicitly labeled approximation.
 
 ```r
-Y_init <- opentsne_pca_init(x, seed = 1)
-layout_tsne <- opentsne_knn(
+Y_init <- tsne_pca_init(x, seed = 1)
+layout_tsne <- tsne_knn(
   knn,
   Y_init = Y_init,
   perplexity = 10,
@@ -187,7 +187,7 @@ KNN-input runs and is not used for neighbor search or optimization.
 ## PCA API
 
 `fastEmbedR::pca()` exposes the backend-native truncated PCA used internally
-for openTSNE initialization:
+for t-SNE initialization:
 
 ```r
 pca_fit <- pca(
@@ -196,14 +196,14 @@ pca_fit <- pca(
   backend = "cpu",
   n.cores = 4,
   seed = 1,
-  opentsne_init = TRUE
+  tsne_init = TRUE
 )
-Y_init <- pca_fit$opentsne_init
-layout <- opentsne_knn(knn, Y_init = Y_init, perplexity = 30)
+Y_init <- pca_fit$tsne_init
+layout <- tsne_knn(knn, Y_init = Y_init, perplexity = 30)
 ```
 
 The public `pca()` helper is intentionally simple: there is no `irlba` or
-ARPACK method menu and no Python bridge. For openTSNE initialization, CUDA uses
+ARPACK method menu and no Python bridge. For t-SNE initialization, CUDA uses
 native RAPIDS RAFT TSVD compiled into the package CUDA backend and fails loudly
 if that support is unavailable. Float32 CUDA input is passed to the native fit
 without materializing an R double matrix, and float32 scores/loadings are
@@ -219,7 +219,7 @@ Single-threaded BLAS builds cannot use additional cores and report one
 effective thread. Metal and CUDA ignore this CPU-only argument.
 
 The ordinary PCA scores are always retained in `pca_fit$scores`.
-`opentsne_init = TRUE` adds a second matrix, centered and scaled so that its
+`tsne_init = TRUE` adds a second matrix, centered and scaled so that its
 largest component standard deviation is `1e-4`; no second decomposition is
 performed.
 
@@ -235,14 +235,14 @@ GPU use is explicit. A request for Metal or CUDA must run that backend or fail
 clearly.
 
 ```r
-fit <- opentsne(x, perplexity = 30, backend = "metal", seed = 1)
+fit <- tsne(x, perplexity = 30, backend = "metal", seed = 1)
 layout <- fit$layout
 ```
 
 For CUDA builds with RAPIDS cuVS available:
 
 ```r
-fit <- opentsne(x, perplexity = 50, backend = "cuda", seed = 1)
+fit <- tsne(x, perplexity = 50, backend = "cuda", seed = 1)
 ```
 
 The package does not silently run these examples on CPU and report them as GPU
@@ -261,7 +261,7 @@ table(communities$membership)
 For an embedding-space graph, pass the fit directly:
 
 ```r
-fit <- opentsne(x, perplexity = 15, backend = "cpu", seed = 1)
+fit <- tsne(x, perplexity = 15, backend = "cpu", seed = 1)
 graph <- knn_graph(fit, k = 20, weight = "snn", n.cores = 4)
 communities <- graph_cluster(graph, method = "leiden", seed = 1)
 ```
@@ -300,8 +300,8 @@ fit <- project_landmark_model(
 ```
 
 The reference fit uses the same `umap()` implementation, graph construction,
-optimizer, and parameter values as an ordinary full UMAP run. For openTSNE,
-set `method = "opentsne"` and pass `perplexity`. The resulting model can also
+optimizer, and parameter values as an ordinary full UMAP run. For t-SNE,
+set `method = "tsne"` and pass `perplexity`. The resulting model can also
 project a separate matrix of new observations in the same feature space.
 
 `precompute_query_knn(reference, query, ...)` exposes the query-only search
@@ -346,7 +346,7 @@ device resident for the projection and refinement stages.
 
 ## Automatic Parameters
 
-`opentsne()` and `opentsne_knn()` use `auto_config = TRUE` by default. Missing
+`tsne()` and `tsne_knn()` use `auto_config = TRUE` by default. Missing
 t-SNE settings are resolved in native C++ using the opt-SNE strategy:
 
 - `"auto"` learning rate becomes `n / early_exaggeration`.
@@ -371,10 +371,10 @@ supplied neighbor graph.
 | `umap_knn()` | UMAP from a supplied KNN object or matrices. |
 | `umap()` | One-call preprocessing, KNN, and UMAP embedding. |
 | `pca()` | Backend-native truncated PCA scores/loadings. |
-| `embed_knn()` | KNN dispatcher; UMAP by default, openTSNE with `method = "opentsne"`. |
-| `opentsne_knn()` | Direct native openTSNE-style optimizer from KNN. |
-| `opentsne()` | One-call preprocessing, KNN, and openTSNE-style embedding. |
-| `transform_tsne()` | Fixed-reference openTSNE-style transform for query points. |
+| `embed_knn()` | KNN dispatcher; UMAP by default, t-SNE with `method = "tsne"`. |
+| `tsne_knn()` | Direct native interpolation-based t-SNE optimizer from KNN. |
+| `tsne()` | One-call preprocessing, KNN, and interpolation-based t-SNE embedding. |
+| `transform_tsne()` | Fixed-reference interpolation-based t-SNE transform for query points. |
 | `landmark_tsne()` | Embed landmarks, then transform remaining rows. |
 | `landmark_umap()` | Embed landmarks with UMAP, then project/refine remaining rows. |
 | `evaluate_embedding()` | Embedding quality metrics. |

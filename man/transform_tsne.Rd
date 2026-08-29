@@ -5,29 +5,29 @@
 \title{Transform query points into an existing t-SNE embedding}
 \usage{
 transform_tsne(
-  reference_layout,
-  knn = NULL,
-  reference_data = NULL,
-  new_data = NULL,
-  k = NULL,
-  perplexity = 5,
-  initialization = c("median", "weighted", "random"),
-  Y_init = NULL,
-  n_iter = 250L,
-  early_exaggeration_iter = 0L,
-  learning_rate = 0.1,
-  early_exaggeration = 4,
-  exaggeration = 1.5,
-  initial_momentum = 0.8,
-  final_momentum = 0.8,
-  max_grad_norm = 0.25,
-  max_step_norm = Inf,
-  n_negatives = NULL,
-  exact_repulsion_threshold = 4096L,
-  n.cores = NULL,
-  seed = 4L,
-  backend = NULL,
-  verbose = FALSE
+    reference_layout,
+    knn = NULL,
+    reference_data = NULL,
+    new_data = NULL,
+    k = NULL,
+    perplexity = 5,
+    initialization = c("median", "weighted", "random"),
+    Y_init = NULL,
+    n_iter = 250L,
+    early_exaggeration_iter = 0L,
+    learning_rate = 0.1,
+    early_exaggeration = 4,
+    exaggeration = 1.5,
+    initial_momentum = 0.8,
+    final_momentum = 0.8,
+    max_grad_norm = 0.25,
+    max_step_norm = Inf,
+    n_negatives = NULL,
+    exact_repulsion_threshold = 4096L,
+    n.cores = NULL,
+    seed = 4L,
+    backend = NULL,
+    verbose = FALSE
 )
 }
 \arguments{
@@ -46,7 +46,7 @@ used to fit `reference_layout`. Required only when `knn` is `NULL`.}
 \item{k}{Number of reference neighbors used for transform KNN. If `NULL`,
 uses at least `3 * perplexity`, matching the usual t-SNE affinity width.}
 
-\item{perplexity}{Transform perplexity. The openTSNE default is 5.}
+\item{perplexity}{Transform perplexity. The default is 5.}
 
 \item{initialization}{Initial query placement: `"median"` from reference
 neighbors, inverse-distance `"weighted"`, or `"random"`.}
@@ -95,7 +95,7 @@ A numeric matrix with one row per query observation.
 }
 \description{
 `transform_tsne()` places query observations into a fixed reference t-SNE
-embedding. It follows the openTSNE transform design at the algorithm level:
+embedding. It follows a fixed-reference t-SNE transform design:
 query-to-reference affinities are computed from KNN distances, query points
 are initialized from nearby reference points, and optimization moves only the
 query points.
@@ -103,11 +103,11 @@ query points.
 \examples{
 reference <- matrix(c(0, 0, 1, 0, 0, 1, 1, 1), 4L, 2L, byrow = TRUE)
 query_knn <- list(
-  indices = matrix(c(1L, 2L, 3L, 4L), 2L, 2L, byrow = TRUE),
-  distances = matrix(c(0.1, 0.2, 0.15, 0.25), 2L, 2L, byrow = TRUE)
+    indices = matrix(c(1L, 2L, 3L, 4L), 2L, 2L, byrow = TRUE),
+    distances = matrix(c(0.1, 0.2, 0.15, 0.25), 2L, 2L, byrow = TRUE)
 )
 query_layout <- transform_tsne(
-  reference, knn = query_knn, perplexity = 0.5,
-  n_iter = 2, exact_repulsion_threshold = 10, seed = 1
+    reference, knn = query_knn, perplexity = 0.5,
+    n_iter = 2, exact_repulsion_threshold = 10, seed = 1
 )
 }

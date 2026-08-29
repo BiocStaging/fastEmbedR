@@ -6,424 +6,462 @@
 #' @return An integer neighborhood size.
 #' @noRd
 auto_k <- function(x, include_self = FALSE) {
-  n <- if (length(x) == 1L && is.numeric(x)) {
-    as.integer(x)
-  } else {
-    nrow(x)
-  }
-  if (length(n) != 1L || is.na(n) || !is.finite(n) || n < 2L) {
-    stop("`x` must describe at least two observations.", call. = FALSE)
-  }
+    n <- if (length(x) == 1L && is.numeric(x)) {
+        as.integer(x)
+    } else {
+        nrow(x)
+    }
+    if (length(n) != 1L || is.na(n) || !is.finite(n) || n < 2L) {
+        stop("`x` must describe at least two observations.", call. = FALSE)
+    }
 
-  k <- if (n < 500L) {
-    15L
-  } else if (n < 10000L) {
-    30L
-  } else {
-    50L
-  }
-  k <- max(1L, min(k, n - 1L))
-  if (isTRUE(include_self)) k + 1L else k
+    k <- if (n < 500L) {
+        15L
+    } else if (n < 10000L) {
+        30L
+    } else {
+        50L
+    }
+    k <- max(1L, min(k, n - 1L))
+    if (isTRUE(include_self)) k + 1L else k
 }
 
-auto_embedding_k <- function(x, method = "opentsne", include_self = FALSE) {
-  n <- if (length(x) == 1L && is.numeric(x)) {
-    as.integer(x)
-  } else {
-    nrow(x)
-  }
-  auto_k(n, include_self = include_self)
+auto_embedding_k <- function(x, method = "tsne", include_self = FALSE) {
+    n <- if (length(x) == 1L && is.numeric(x)) {
+        as.integer(x)
+    } else {
+        nrow(x)
+    }
+    auto_k(n, include_self = include_self)
 }
 
 resolve_embedding_metric <- function(metric, data = NULL) {
-  match.arg(metric, c("euclidean", "cosine", "correlation", "inner_product"))
+    match.arg(metric, c("euclidean", "cosine", "correlation", "inner_product"))
 }
 
 prepare_embedding_data <- function(data,
-                                   standardize,
-                                   pca_dims,
-                                   seed,
-                                   backend = "cpu") {
-  input_float32 <- is_float32_matrix(data)
-  x <- if (input_float32) {
-    data
-  } else {
-    x <- as.matrix(data)
-    storage.mode(x) <- "double"
-    x
-  }
-  if (nrow(x) < 2L || ncol(x) < 1L) {
-    stop("`data` must have at least two rows and one column.", call. = FALSE)
-  }
-  finite_input <- if (input_float32) {
-    float32_all_finite_cpp(x)
-  } else {
-    all(is.finite(x))
-  }
-  if (!isTRUE(finite_input)) {
-    stop("`data` must contain only finite values.", call. = FALSE)
-  }
+                                    standardize,
+                                    pca_dims,
+                                    seed,
+                                    backend = "cpu") {
+    input_float32 <- is_float32_matrix(data)
+    x <- if (input_float32) {
+        data
+    } else {
+        x <- as.matrix(data)
+        storage.mode(x) <- "double"
+        x
+    }
+    if (nrow(x) < 2L || ncol(x) < 1L) {
+        stop("`data` must have at least two rows and one column.",
+            call. = FALSE)
+    }
+    finite_input <- if (input_float32) {
+        float32_all_finite_cpp(x)
+    } else {
+        all(is.finite(x))
+    }
+    if (!isTRUE(finite_input)) {
+        stop("`data` must contain only finite values.", call. = FALSE)
+    }
 
-  preprocess <- list(
-    standardize = isTRUE(standardize),
-    pca_dims = NA_integer_,
-    standardize_backend = if (isTRUE(standardize)) "cpu" else "none",
-    pca_backend = "none",
-    pca_method = "none",
-    pca_oversample = NA_integer_,
-    pca_power = NA_integer_,
-    pca_backend_reason = NA_character_,
-    preprocess_backend = if (isTRUE(standardize)) "cpu" else "none",
-    preprocess_backend_reason = if (input_float32) "float32_input_preserved" else NA_character_
-  )
-  if (isTRUE(standardize)) {
-    used_native <- FALSE
-    if (input_float32) {
-      standardized <- standardize_float32_cpp(x)
-      x <- standardized$data
-      used_native <- TRUE
-      preprocess$standardize_backend <- "cpu_float32"
-      preprocess$preprocess_backend <- "cpu_float32"
-      preprocess$preprocess_backend_reason <- "native_float32_column_standardization"
-    } else if (identical(backend, "cuda") && cuda_metric_available()) {
-      standardized <- capture_error(standardize_cuda_cpp(x))
-      if (!is.null(standardized$value)) {
-        x <- standardized$value$data
-        used_native <- TRUE
-        preprocess$standardize_backend <- "cuda"
-        preprocess$preprocess_backend <- "cuda"
-      } else {
-        preprocess$preprocess_backend_reason <- standardized$error
-      }
-    } else if (identical(backend, "cuda")) {
-      preprocess$preprocess_backend_reason <- "cuda_preprocessing_unavailable"
-    } else if (identical(backend, "metal") && metal_metric_available()) {
-      standardized <- capture_error(standardize_metal_cpp(x))
-      if (!is.null(standardized$value)) {
-        x <- standardized$value$data
-        used_native <- TRUE
-        preprocess$standardize_backend <- "metal"
-        preprocess$preprocess_backend <- "metal"
-      } else {
-        preprocess$preprocess_backend_reason <- standardized$error
-      }
-    } else if (identical(backend, "metal")) {
-      preprocess$preprocess_backend_reason <- "metal_preprocessing_unavailable"
+    preprocess <- list(
+        standardize = isTRUE(standardize),
+        pca_dims = NA_integer_,
+        standardize_backend = if (isTRUE(standardize)) "cpu" else "none",
+        pca_backend = "none",
+        pca_method = "none",
+        pca_oversample = NA_integer_,
+        pca_power = NA_integer_,
+        pca_backend_reason = NA_character_,
+        preprocess_backend = if (isTRUE(standardize)) "cpu" else "none",
+        preprocess_backend_reason = if (
+            input_float32) {
+            "float32_input_preserved"
+        } else {
+            NA_character_
+        }
+    )
+    if (isTRUE(standardize)) {
+        used_native <- FALSE
+        if (input_float32) {
+            standardized <- standardize_float32_cpp(x)
+            x <- standardized$data
+            used_native <- TRUE
+            preprocess$standardize_backend <- "cpu_float32"
+            preprocess$preprocess_backend <- "cpu_float32"
+            preprocess$preprocess_backend_reason <-
+                "native_float32_column_standardization"
+        } else if (identical(backend, "cuda") && cuda_metric_available()) {
+            standardized <- capture_error(standardize_cuda_cpp(x))
+            if (!is.null(standardized$value)) {
+                x <- standardized$value$data
+                used_native <- TRUE
+                preprocess$standardize_backend <- "cuda"
+                preprocess$preprocess_backend <- "cuda"
+            } else {
+                preprocess$preprocess_backend_reason <- standardized$error
+            }
+        } else if (identical(backend, "cuda")) {
+            preprocess$preprocess_backend_reason <-
+                "cuda_preprocessing_unavailable"
+        } else if (identical(backend, "metal") && metal_metric_available()) {
+            standardized <- capture_error(standardize_metal_cpp(x))
+            if (!is.null(standardized$value)) {
+                x <- standardized$value$data
+                used_native <- TRUE
+                preprocess$standardize_backend <- "metal"
+                preprocess$preprocess_backend <- "metal"
+            } else {
+                preprocess$preprocess_backend_reason <- standardized$error
+            }
+        } else if (identical(backend, "metal")) {
+            preprocess$preprocess_backend_reason <-
+                "metal_preprocessing_unavailable"
+        }
+        if (!used_native) {
+            standardized <- standardize_cpu_cpp(x)
+            x <- standardized$data
+            preprocess$standardize_backend <- "cpu"
+            preprocess$preprocess_backend <- "cpu"
+        }
     }
-    if (!used_native) {
-      standardized <- standardize_cpu_cpp(x)
-      x <- standardized$data
-      preprocess$standardize_backend <- "cpu"
-      preprocess$preprocess_backend <- "cpu"
-    }
-  }
 
-  if (!is.null(pca_dims)) {
-    pca_dims <- as.integer(pca_dims)
-    if (length(pca_dims) != 1L || is.na(pca_dims) || !is.finite(pca_dims) || pca_dims < 1L) {
-      stop("`pca_dims` must be NULL or a positive integer.", call. = FALSE)
+    if (!is.null(pca_dims)) {
+        pca_dims <- as.integer(pca_dims)
+        if (length(pca_dims) != 1L || is.na(pca_dims) || !is.finite(pca_dims) ||
+            pca_dims < 1L) {
+            stop("`pca_dims` must be NULL or a positive integer.",
+                call. = FALSE)
+        }
+        rank <- min(pca_dims, nrow(x) - 1L, ncol(x))
+        if (rank >= 1L && rank < ncol(x)) {
+            pca <- if (identical(backend, "cuda")) {
+                fastembedr_cuda_tsvd_pca(
+                    x,
+                    ncomp = rank,
+                    center = FALSE,
+                    scale = FALSE,
+                    seed = seed
+                )
+            } else if (identical(backend, "metal")) {
+                fastembedr_metal_tsvd_pca(
+                    x,
+                    ncomp = rank,
+                    center = FALSE,
+                    scale = FALSE,
+                    seed = seed
+                )
+            } else {
+                fastembedr_cpu_rsvd_pca(
+                    x,
+                    ncomp = rank,
+                    center = FALSE,
+                    scale = FALSE,
+                    seed = seed,
+                    n.cores = 1L
+                )
+            }
+            x <- pca$scores
+            preprocess$pca_dims <- as.integer(ncol(x))
+            preprocess$pca_backend <- pca$backend
+            preprocess$pca_method <- pca$method
+            preprocess$pca_oversample <- pca$oversample
+            preprocess$pca_power <- pca$power
+            preprocess$pca_backend_reason <- pca$backend_reason
+            preprocess$preprocess_backend <- combine_preprocess_backends(
+                preprocess$standardize_backend,
+                pca$backend
+            )
+        }
     }
-    rank <- min(pca_dims, nrow(x) - 1L, ncol(x))
-    if (rank >= 1L && rank < ncol(x)) {
-      pca <- if (identical(backend, "cuda")) {
-        fastembedr_cuda_tsvd_pca(
-          x,
-          ncomp = rank,
-          center = FALSE,
-          scale = FALSE,
-          seed = seed
-        )
-      } else if (identical(backend, "metal")) {
-        fastembedr_metal_tsvd_pca(
-          x,
-          ncomp = rank,
-          center = FALSE,
-          scale = FALSE,
-          seed = seed
-        )
-      } else {
-        fastembedr_cpu_rsvd_pca(
-          x,
-          ncomp = rank,
-          center = FALSE,
-          scale = FALSE,
-          seed = seed,
-          n.cores = 1L
-        )
-      }
-      x <- pca$scores
-      preprocess$pca_dims <- as.integer(ncol(x))
-      preprocess$pca_backend <- pca$backend
-      preprocess$pca_method <- pca$method
-      preprocess$pca_oversample <- pca$oversample
-      preprocess$pca_power <- pca$power
-      preprocess$pca_backend_reason <- pca$backend_reason
-      preprocess$preprocess_backend <- combine_preprocess_backends(
-        preprocess$standardize_backend,
-        pca$backend
-      )
-    }
-  }
-  list(data = x, preprocess = preprocess)
+    list(data = x, preprocess = preprocess)
 }
 
 resolve_preprocess_backend <- function(backend) {
-  backend <- as.character(backend)[1L]
-  if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
-    return("cpu")
-  }
-  if (identical(backend, "gpu")) {
-    return(resolve_backend_request("gpu", need_embedding = TRUE))
-  }
-  if (backend %in% c("cuda", "metal")) {
-    return(backend)
-  }
-  "cpu"
+    backend <- as.character(backend)[1L]
+    if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
+        return("cpu")
+    }
+    if (identical(backend, "gpu")) {
+        return(resolve_backend_request("gpu", need_embedding = TRUE))
+    }
+    if (backend %in% c("cuda", "metal")) {
+        return(backend)
+    }
+    "cpu"
 }
 
 combine_preprocess_backends <- function(standardize_backend, pca_backend) {
-  standardize_backend <- if (is.null(standardize_backend)) "none" else standardize_backend
-  pca_backend <- if (is.null(pca_backend)) "none" else pca_backend
-  if (identical(standardize_backend, "none")) {
-    return(pca_backend)
-  }
-  if (identical(pca_backend, "none")) {
-    return(standardize_backend)
-  }
-  if (identical(standardize_backend, pca_backend)) {
-    return(standardize_backend)
-  }
-  paste(standardize_backend, pca_backend, sep = "_")
+    standardize_backend <- if (is.null(
+        standardize_backend
+    )) {
+        "none"
+    } else {
+        standardize_backend
+    }
+    pca_backend <- if (is.null(pca_backend)) "none" else pca_backend
+    if (identical(standardize_backend, "none")) {
+        return(pca_backend)
+    }
+    if (identical(pca_backend, "none")) {
+        return(standardize_backend)
+    }
+    if (identical(standardize_backend, pca_backend)) {
+        return(standardize_backend)
+    }
+    paste(standardize_backend, pca_backend, sep = "_")
 }
 
 validate_pca_backend <- function(backend) {
-  backend <- as.character(backend)[1L]
-  if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
-    return("cpu")
-  }
-  if (identical(backend, "gpu")) {
-    return(resolve_backend_request(backend, need_embedding = TRUE))
-  }
-  if (!backend %in% c("cpu", "cuda", "metal")) {
-    stop("`backend` must be one of 'cpu', 'cuda', or 'metal'.", call. = FALSE)
-  }
-  backend
+    backend <- as.character(backend)[1L]
+    if (length(backend) != 1L || is.na(backend) || !nzchar(backend)) {
+        return("cpu")
+    }
+    if (identical(backend, "gpu")) {
+        return(resolve_backend_request(backend, need_embedding = TRUE))
+    }
+    if (!backend %in% c("cpu", "cuda", "metal")) {
+        stop("`backend` must be one of 'cpu', 'cuda', or 'metal'.",
+            call. = FALSE)
+    }
+    backend
 }
 
 fastembedr_metal_tsvd_pca <- function(data,
-                                      ncomp,
-                                      center = TRUE,
-                                      scale = FALSE,
-                                      seed = 4L) {
-  x <- if (is_float32_matrix(data)) {
-    data
-  } else {
-    x <- as.matrix(data)
-    storage.mode(x) <- "double"
-    x
-  }
-  fit <- pca_tsvd_metal_cpp(
-    x,
-    as.integer(ncomp),
-    isTRUE(center),
-    isTRUE(scale),
-    as.integer(seed)
-  )
-  out <- list(
-    scores = fit$scores,
-    loadings = fit$loadings,
-    singular_values = fit$singular_values,
-    center = fit$center,
-    scale = fit$scale,
-    ncomp = as.integer(ncol(fit$scores)),
-    method = fit$method,
-    backend = fit$backend,
-    backend_reason = NA_character_,
-    engine = "native_metal_mps",
-    precision = fit$precision,
-    oversample = as.integer(fit$oversample),
-    power = as.integer(fit$power),
-    seed = as.integer(seed),
-    timing = fit$timing
-  )
-  class(out) <- "fastEmbedR_pca"
-  out
+                                    ncomp,
+                                    center = TRUE,
+                                    scale = FALSE,
+                                    seed = 4L) {
+    x <- if (is_float32_matrix(data)) {
+        data
+    } else {
+        x <- as.matrix(data)
+        storage.mode(x) <- "double"
+        x
+    }
+    fit <- pca_tsvd_metal_cpp(
+        x,
+        as.integer(ncomp),
+        isTRUE(center),
+        isTRUE(scale),
+        as.integer(seed)
+    )
+    out <- list(
+        scores = fit$scores,
+        loadings = fit$loadings,
+        singular_values = fit$singular_values,
+        center = fit$center,
+        scale = fit$scale,
+        ncomp = as.integer(ncol(fit$scores)),
+        method = fit$method,
+        backend = fit$backend,
+        backend_reason = NA_character_,
+        engine = "native_metal_mps",
+        precision = fit$precision,
+        oversample = as.integer(fit$oversample),
+        power = as.integer(fit$power),
+        seed = as.integer(seed),
+        timing = fit$timing
+    )
+    class(out) <- "fastEmbedR_pca"
+    out
 }
 
 fastembedr_cuda_tsvd_pca <- function(data,
-                                     ncomp,
-                                     center = TRUE,
-                                     scale = FALSE,
-                                     seed = 4L) {
-  fit <- pca_tsvd_cuda_cpp(
-    data,
-    as.integer(ncomp),
-    isTRUE(center),
-    isTRUE(scale)
-  )
-  colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
-  colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
-  out <- list(
-    scores = fit$scores,
-    loadings = fit$loadings,
-    singular_values = fit$singular_values,
-    center = fit$center,
-    scale = fit$scale,
-    ncomp = as.integer(ncol(fit$scores)),
-    method = fit$method,
-    backend = fit$backend,
-    backend_reason = NA_character_,
-    engine = "native_cuda_raft",
-    precision = fit$precision,
-    oversample = fit$oversample,
-    power = fit$power,
-    seed = as.integer(seed),
-    timing = fit$timing
-  )
-  class(out) <- "fastEmbedR_pca"
-  out
+                                    ncomp,
+                                    center = TRUE,
+                                    scale = FALSE,
+                                    seed = 4L) {
+    fit <- pca_tsvd_cuda_cpp(
+        data,
+        as.integer(ncomp),
+        isTRUE(center),
+        isTRUE(scale)
+    )
+    colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
+    colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
+    out <- list(
+        scores = fit$scores,
+        loadings = fit$loadings,
+        singular_values = fit$singular_values,
+        center = fit$center,
+        scale = fit$scale,
+        ncomp = as.integer(ncol(fit$scores)),
+        method = fit$method,
+        backend = fit$backend,
+        backend_reason = NA_character_,
+        engine = "native_cuda_raft",
+        precision = fit$precision,
+        oversample = fit$oversample,
+        power = fit$power,
+        seed = as.integer(seed),
+        timing = fit$timing
+    )
+    class(out) <- "fastEmbedR_pca"
+    out
 }
 
 attach_opentsne_pca_init <- function(fit, requested) {
-  if (!is.logical(requested) || length(requested) != 1L || is.na(requested)) {
-    stop("`opentsne_init` must be TRUE or FALSE.", call. = FALSE)
-  }
-  if (!isTRUE(requested)) return(fit)
+    if (!is.logical(requested) || length(requested) != 1L || is.na(requested)) {
+        stop("`tsne_init` must be TRUE or FALSE.", call. = FALSE)
+    }
+    if (!isTRUE(requested)) {
+        return(fit)
+    }
 
-  init <- normalize_opentsne_pca_scores(fit$scores, fit$ncomp)
-  attr(init, "fastEmbedR_init_method") <- paste0("pca_", fit$method)
-  attr(init, "fastEmbedR_init_backend") <- fit$backend
-  attr(init, "fastEmbedR_init_backend_reason") <- fit$backend_reason %||% NA_character_
-  attr(init, "fastEmbedR_init_seed") <- fit$seed
-  fit$opentsne_init <- init
-  fit
+    init <- normalize_opentsne_pca_scores(fit$scores, fit$ncomp)
+    attr(init, "fastEmbedR_init_method") <- paste0("pca_", fit$method)
+    attr(init, "fastEmbedR_init_backend") <- fit$backend
+    attr(init, "fastEmbedR_init_backend_reason") <-
+        fit$backend_reason %||% NA_character_
+    attr(init, "fastEmbedR_init_seed") <- fit$seed
+    fit$tsne_init <- init
+    fit
 }
 
 project_pca_test_scores <- function(xtest, fit) {
-  use_float32 <- is_float32_matrix(xtest) && is_float32_matrix(fit$loadings)
-  x_test <- if (use_float32) {
-    if (!requireNamespace("float", quietly = TRUE)) {
-      stop("The float package is required to project float32 `xtest`.", call. = FALSE)
-    }
-    xtest
-  } else if (is_float32_matrix(xtest)) {
-    float::dbl(xtest)
-  } else {
-    x <- as.matrix(xtest)
-    storage.mode(x) <- "double"
-    x
-  }
-
-  if (nrow(x_test) < 1L || ncol(x_test) != nrow(fit$loadings)) {
-    stop(
-      "`xtest` must have at least one row and the same number of columns as `x`.",
-      call. = FALSE
-    )
-  }
-  finite <- if (use_float32) {
-    isTRUE(float32_all_finite_cpp(x_test))
-  } else {
-    all(is.finite(x_test))
-  }
-  if (!finite) {
-    stop("`xtest` must contain only finite values.", call. = FALSE)
-  }
-
-  if (use_float32) {
-    center <- float::fl(matrix(as.numeric(fit$center), nrow = 1L))
-    scale <- float::fl(matrix(as.numeric(fit$scale), nrow = 1L))
-    scaled <- float::sweep(x_test, 2L, center, "-", check.margin = FALSE)
-    scaled <- float::sweep(scaled, 2L, scale, "/", check.margin = FALSE)
-    scores <- scaled %*% fit$loadings
-  } else {
-    loadings <- if (is_float32_matrix(fit$loadings)) {
-      float::dbl(fit$loadings)
+    use_float32 <- is_float32_matrix(xtest) && is_float32_matrix(fit$loadings)
+    x_test <- if (use_float32) {
+        if (!requireNamespace("float", quietly = TRUE)) {
+            stop("The float package is required to project float32 `xtest`.",
+                call. = FALSE
+            )
+        }
+        xtest
+    } else if (is_float32_matrix(xtest)) {
+        float::dbl(xtest)
     } else {
-      as.matrix(fit$loadings)
+        x <- as.matrix(xtest)
+        storage.mode(x) <- "double"
+        x
     }
-    scaled <- sweep(x_test, 2L, as.numeric(fit$center), "-", check.margin = FALSE)
-    scaled <- sweep(scaled, 2L, as.numeric(fit$scale), "/", check.margin = FALSE)
-    scores <- scaled %*% loadings
-  }
-  colnames(scores) <- colnames(fit$scores)
-  scores
+
+    if (nrow(x_test) < 1L || ncol(x_test) != nrow(fit$loadings)) {
+        stop(
+    "`xtest` must have at least one row and the same number of columns as `x`.",
+            call. = FALSE
+        )
+    }
+    finite <- if (use_float32) {
+        isTRUE(float32_all_finite_cpp(x_test))
+    } else {
+        all(is.finite(x_test))
+    }
+    if (!finite) {
+        stop("`xtest` must contain only finite values.", call. = FALSE)
+    }
+
+    if (use_float32) {
+        center <- float::fl(matrix(as.numeric(fit$center), nrow = 1L))
+        scale <- float::fl(matrix(as.numeric(fit$scale), nrow = 1L))
+        scaled <- float::sweep(x_test, 2L, center, "-", check.margin = FALSE)
+        scaled <- float::sweep(scaled, 2L, scale, "/", check.margin = FALSE)
+        scores <- scaled %*% fit$loadings
+    } else {
+        loadings <- if (is_float32_matrix(fit$loadings)) {
+            float::dbl(fit$loadings)
+        } else {
+            as.matrix(fit$loadings)
+        }
+        scaled <- sweep(x_test, 2L, as.numeric(fit$center), "-",
+            check.margin = FALSE
+        )
+        scaled <- sweep(scaled, 2L, as.numeric(fit$scale), "/",
+            check.margin = FALSE
+        )
+        scores <- scaled %*% loadings
+    }
+    colnames(scores) <- colnames(fit$scores)
+    scores
 }
 
-finalize_pca_fit <- function(fit, xtest, opentsne_init) {
-  if (!is.null(xtest)) {
-    fit$scores_test <- project_pca_test_scores(xtest, fit)
-  }
-  attach_opentsne_pca_init(fit, opentsne_init)
+finalize_pca_fit <- function(fit, xtest, tsne_init) {
+    if (!is.null(xtest)) {
+        fit$scores_test <- project_pca_test_scores(xtest, fit)
+    }
+    attach_opentsne_pca_init(fit, tsne_init)
 }
 
 normalize_pca_threads <- function(n.cores) {
-  n.cores <- integer_scalar(n.cores)
-  if (length(n.cores) != 1L || is.na(n.cores) ||
-      !is.finite(n.cores) || n.cores < 1L) {
-    stop("`n.cores` must be a positive integer.", call. = FALSE)
-  }
-  n.cores
+    n.cores <- integer_scalar(n.cores)
+    if (length(n.cores) != 1L || is.na(n.cores) ||
+        !is.finite(n.cores) || n.cores < 1L) {
+        stop("`n.cores` must be a positive integer.", call. = FALSE)
+    }
+    n.cores
 }
 
 with_pca_cpu_threads <- function(n_threads, code) {
-  n_threads <- normalize_pca_threads(n_threads)
-  thread_vars <- c(
-    "OMP_NUM_THREADS",
-    "OPENBLAS_NUM_THREADS",
-    "MKL_NUM_THREADS",
-    "VECLIB_MAXIMUM_THREADS",
-    "BLIS_NUM_THREADS",
-    "RCPP_PARALLEL_NUM_THREADS"
-  )
-  previous_env <- Sys.getenv(thread_vars, unset = NA_character_)
-  on.exit({
-    for (name in thread_vars) {
-      previous <- previous_env[[name]]
-      if (is.na(previous)) {
-        Sys.unsetenv(name)
-      } else {
-        do.call(Sys.setenv, stats::setNames(list(previous), name))
-      }
+    n_threads <- normalize_pca_threads(n_threads)
+    thread_vars <- c(
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "RCPP_PARALLEL_NUM_THREADS"
+    )
+    previous_env <- Sys.getenv(thread_vars, unset = NA_character_)
+    on.exit(
+        {
+            for (name in thread_vars) {
+                previous <- previous_env[[name]]
+                if (is.na(previous)) {
+                    Sys.unsetenv(name)
+                } else {
+                    do.call(Sys.setenv, stats::setNames(list(previous), name))
+                }
+            }
+        },
+        add = TRUE
+    )
+    do.call(
+        Sys.setenv,
+        stats::setNames(
+            rep(list(as.character(n_threads)), length(thread_vars)),
+            thread_vars
+        )
+    )
+
+    control <- "environment"
+    effective <- NA_integer_
+    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+        previous_blas <- tryCatch(
+            RhpcBLASctl::blas_get_num_procs(),
+            error = function(e) NA_integer_
+        )
+        previous_omp <- tryCatch(
+            RhpcBLASctl::omp_get_max_threads(),
+            error = function(e) NA_integer_
+        )
+        on.exit(
+            {
+                if (length(previous_blas) == 1L && !is.na(previous_blas)) {
+                    try(RhpcBLASctl::blas_set_num_threads(previous_blas),
+                        silent = TRUE)
+                }
+                if (length(previous_omp) == 1L && !is.na(previous_omp)) {
+                    try(RhpcBLASctl::omp_set_num_threads(previous_omp),
+                        silent = TRUE)
+                }
+            },
+            add = TRUE
+        )
+        try(RhpcBLASctl::blas_set_num_threads(n_threads), silent = TRUE)
+        try(RhpcBLASctl::omp_set_num_threads(n_threads), silent = TRUE)
+        effective <- tryCatch(
+            as.integer(RhpcBLASctl::blas_get_num_procs()),
+            error = function(e) NA_integer_
+        )
+        control <- "RhpcBLASctl+environment"
     }
-  }, add = TRUE)
-  do.call(
-    Sys.setenv,
-    stats::setNames(rep(list(as.character(n_threads)), length(thread_vars)), thread_vars)
-  )
 
-  control <- "environment"
-  effective <- NA_integer_
-  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-    previous_blas <- tryCatch(
-      RhpcBLASctl::blas_get_num_procs(),
-      error = function(e) NA_integer_
+    list(
+        value = force(code),
+        control = control,
+        effective = effective
     )
-    previous_omp <- tryCatch(
-      RhpcBLASctl::omp_get_max_threads(),
-      error = function(e) NA_integer_
-    )
-    on.exit({
-      if (length(previous_blas) == 1L && !is.na(previous_blas)) {
-        try(RhpcBLASctl::blas_set_num_threads(previous_blas), silent = TRUE)
-      }
-      if (length(previous_omp) == 1L && !is.na(previous_omp)) {
-        try(RhpcBLASctl::omp_set_num_threads(previous_omp), silent = TRUE)
-      }
-    }, add = TRUE)
-    try(RhpcBLASctl::blas_set_num_threads(n_threads), silent = TRUE)
-    try(RhpcBLASctl::omp_set_num_threads(n_threads), silent = TRUE)
-    effective <- tryCatch(
-      as.integer(RhpcBLASctl::blas_get_num_procs()),
-      error = function(e) NA_integer_
-    )
-    control <- "RhpcBLASctl+environment"
-  }
-
-  list(
-    value = force(code),
-    control = control,
-    effective = effective
-  )
 }
 
 fastembedr_cpu_rsvd_pca <- function(data,
@@ -432,74 +470,75 @@ fastembedr_cpu_rsvd_pca <- function(data,
                                     scale = FALSE,
                                     seed = 4L,
                                     n.cores = 1L) {
-  x <- if (is_float32_matrix(data)) {
-    data
-  } else {
-    x <- as.matrix(data)
-    if (!is.numeric(x) && !is.integer(x)) {
-      storage.mode(x) <- "double"
+    x <- if (is_float32_matrix(data)) {
+        data
+    } else {
+        x <- as.matrix(data)
+        if (!is.numeric(x) && !is.integer(x)) {
+            storage.mode(x) <- "double"
+        }
+        x
     }
-    x
-  }
-  dimensions <- dim(x)
-  if (length(dimensions) != 2L || dimensions[[1L]] < 2L ||
-      dimensions[[2L]] < 1L) {
-    stop("`data` must have at least two rows and one column.", call. = FALSE)
-  }
-  rank <- min(
-    as.integer(ncomp),
-    as.integer(dimensions[[1L]] - 1L),
-    as.integer(dimensions[[2L]])
-  )
-  if (rank < 1L) stop("`data` has no usable PCA rank.", call. = FALSE)
-  tuning <- fastembedr_rsvd_tuning(
-    dimensions[[1L]],
-    dimensions[[2L]],
-    rank,
-    "cpu"
-  )
-  sketch_rank <- min(
-    as.integer(min(dimensions)),
-    rank + tuning$oversample
-  )
-  power <- if (sketch_rank >= min(dimensions)) 0L else tuning$power
-  restore_seed <- set_local_seed(seed)
-  on.exit(restore_seed(), add = TRUE)
-  omega <- matrix(
-    stats::rnorm(dimensions[[2L]] * sketch_rank),
-    nrow = dimensions[[2L]],
-    ncol = sketch_rank
-  )
-  fit <- pca_rsvd_cpu_cpp(
-    x,
-    rank,
-    isTRUE(center),
-    isTRUE(scale),
-    omega,
-    power,
-    normalize_pca_threads(n.cores)
-  )
-  colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
-  colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
-  out <- list(
-    scores = fit$scores,
-    loadings = fit$loadings,
-    singular_values = fit$singular_values,
-    center = fit$center,
-    scale = fit$scale,
-    ncomp = as.integer(ncol(fit$scores)),
-    method = "rsvd",
-    backend = "cpu_rsvd",
-    backend_reason = NA_character_,
-    engine = "native_cpu_float32",
-    precision = "float32",
-    oversample = as.integer(fit$oversample),
-    power = as.integer(fit$power),
-    seed = as.integer(seed),
-    timing = fit$timing
-  )
-  class(out) <- "fastEmbedR_pca"
-  out
+    dimensions <- dim(x)
+    if (length(dimensions) != 2L || dimensions[[1L]] < 2L ||
+        dimensions[[2L]] < 1L) {
+        stop("`data` must have at least two rows and one column.",
+            call. = FALSE)
+    }
+    rank <- min(
+        as.integer(ncomp),
+        as.integer(dimensions[[1L]] - 1L),
+        as.integer(dimensions[[2L]])
+    )
+    if (rank < 1L) stop("`data` has no usable PCA rank.", call. = FALSE)
+    tuning <- fastembedr_rsvd_tuning(
+        dimensions[[1L]],
+        dimensions[[2L]],
+        rank,
+        "cpu"
+    )
+    sketch_rank <- min(
+        as.integer(min(dimensions)),
+        rank + tuning$oversample
+    )
+    power <- if (sketch_rank >= min(dimensions)) 0L else tuning$power
+    restore_seed <- set_local_seed(seed)
+    on.exit(restore_seed(), add = TRUE)
+    omega <- matrix(
+        stats::rnorm(dimensions[[2L]] * sketch_rank),
+        nrow = dimensions[[2L]],
+        ncol = sketch_rank
+    )
+    fit <- pca_rsvd_cpu_cpp(
+        x,
+        rank,
+        isTRUE(center),
+        isTRUE(scale),
+        omega,
+        power,
+        normalize_pca_threads(n.cores)
+    )
+    colnames(fit$scores) <- paste0("PC", seq_len(ncol(fit$scores)))
+    colnames(fit$loadings) <- paste0("PC", seq_len(ncol(fit$loadings)))
+    out <- list(
+        scores = fit$scores,
+        loadings = fit$loadings,
+        singular_values = fit$singular_values,
+        center = fit$center,
+        scale = fit$scale,
+        ncomp = as.integer(ncol(fit$scores)),
+        method = "rsvd",
+        backend = "cpu_rsvd",
+        backend_reason = NA_character_,
+        engine = "native_cpu_float32",
+        precision = "float32",
+        oversample = as.integer(fit$oversample),
+        power = as.integer(fit$power),
+        seed = as.integer(seed),
+        timing = fit$timing
+    )
+    class(out) <- "fastEmbedR_pca"
+    out
 }
 
 #' Backend-native truncated PCA
@@ -538,28 +577,28 @@ fastembedr_cpu_rsvd_pca <- function(data,
 #' @param seed Random seed for backends that use a Gaussian subspace sketch.
 #'   The native RAFT covariance-eigensolver route records this value for
 #'   provenance but does not consume random numbers.
-#' @param opentsne_init If `TRUE`, add `opentsne_init` to the returned PCA
+#' @param tsne_init If `TRUE`, add `tsne_init` to the returned PCA
 #'   object. This matrix is centered and rescaled so its largest component
-#'   standard deviation is `1e-4`, ready to pass as `Y_init` to [opentsne()]
-#'   or [opentsne_knn()].
+#'   standard deviation is `1e-4`, ready to pass as `Y_init` to [tsne()]
+#'   or [tsne_knn()].
 #' @return A `fastEmbedR_pca` list with `scores`, `loadings`,
 #'   `singular_values`, centering/scaling vectors, backend metadata, and
-#'   decomposition metadata. When `opentsne_init = TRUE`, the list also
-#'   contains `opentsne_init`; when `xtest` is supplied, it also contains
+#'   decomposition metadata. When `tsne_init = TRUE`, the list also
+#'   contains `tsne_init`; when `xtest` is supplied, it also contains
 #'   `scores_test`. Metal and CUDA preserve `float::float32` scores, loadings,
 #'   initialization, and compatible test projections when the input is
 #'   float32. CPU results also record `n.cores_requested`,
 #'   `n.cores_effective`, and `core_control`.
 #' @examples
 #' fit <- pca(
-#'   as.matrix(iris[, 1:4]),
-#'   ncomp = 2,
-#'   n.cores = 2,
-#'   seed = 1,
-#'   opentsne_init = TRUE
+#'     as.matrix(iris[, 1:4]),
+#'     ncomp = 2,
+#'     n.cores = 2,
+#'     seed = 1,
+#'     tsne_init = TRUE
 #' )
 #' plot(fit$scores, pch = 21, bg = iris$Species)
-#' plot(fit$opentsne_init, pch = 21, bg = iris$Species)
+#' plot(fit$tsne_init, pch = 21, bg = iris$Species)
 #' @export
 pca <- function(x,
                 ncomp = 2L,
@@ -569,510 +608,567 @@ pca <- function(x,
                 backend = NULL,
                 n.cores = 1L,
                 seed = 4L,
-                opentsne_init = FALSE) {
-  backend <- validate_pca_backend(resolve_embedding_backend(backend))
-  if (!is.logical(opentsne_init) || length(opentsne_init) != 1L ||
-      is.na(opentsne_init)) {
-    stop("`opentsne_init` must be TRUE or FALSE.", call. = FALSE)
-  }
-  ncomp <- as.integer(ncomp)
-  if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) || ncomp < 1L) {
-    stop("`ncomp` must be a positive integer.", call. = FALSE)
-  }
-  n_threads <- normalize_pca_threads(n.cores)
-
-  run_pca <- function() {
-    if (identical(backend, "cpu")) {
-      fit <- fastembedr_cpu_rsvd_pca(
-        x,
-        ncomp = ncomp,
-        center = center,
-        scale = scale,
-        seed = seed,
-        n.cores = n_threads
-      )
-      return(finalize_pca_fit(fit, xtest, opentsne_init))
+                tsne_init = FALSE) {
+    backend <- validate_pca_backend(resolve_embedding_backend(backend))
+    if (!is.logical(tsne_init) || length(tsne_init) != 1L ||
+        is.na(tsne_init)) {
+        stop("`tsne_init` must be TRUE or FALSE.", call. = FALSE)
     }
-    if (identical(backend, "metal")) {
-      fit <- fastembedr_metal_tsvd_pca(
-        x,
-        ncomp = ncomp,
-        center = center,
-        scale = scale,
-        seed = seed
-      )
-      return(finalize_pca_fit(fit, xtest, opentsne_init))
+    ncomp <- as.integer(ncomp)
+    if (length(ncomp) != 1L || is.na(ncomp) || !is.finite(ncomp) ||
+        ncomp < 1L) {
+        stop("`ncomp` must be a positive integer.", call. = FALSE)
     }
-    fit <- fastembedr_cuda_tsvd_pca(
-      x,
-      ncomp = ncomp,
-      center = center,
-      scale = scale,
-      seed = seed
-    )
-    finalize_pca_fit(fit, xtest, opentsne_init)
-  }
+    n_threads <- normalize_pca_threads(n.cores)
 
-  if (!identical(backend, "cpu")) return(run_pca())
+    run_pca <- function() {
+        if (identical(backend, "cpu")) {
+            fit <- fastembedr_cpu_rsvd_pca(
+                x,
+                ncomp = ncomp,
+                center = center,
+                scale = scale,
+                seed = seed,
+                n.cores = n_threads
+            )
+            return(finalize_pca_fit(fit, xtest, tsne_init))
+        }
+        if (identical(backend, "metal")) {
+            fit <- fastembedr_metal_tsvd_pca(
+                x,
+                ncomp = ncomp,
+                center = center,
+                scale = scale,
+                seed = seed
+            )
+            return(finalize_pca_fit(fit, xtest, tsne_init))
+        }
+        fit <- fastembedr_cuda_tsvd_pca(
+            x,
+            ncomp = ncomp,
+            center = center,
+            scale = scale,
+            seed = seed
+        )
+        finalize_pca_fit(fit, xtest, tsne_init)
+    }
 
-  threaded <- with_pca_cpu_threads(n_threads, run_pca())
-  fit <- threaded$value
-  fit$n.cores_requested <- n_threads
-  fit$n.cores_effective <- threaded$effective
-  fit$core_control <- threaded$control
-  fit
+    if (!identical(backend, "cpu")) {
+        return(run_pca())
+    }
+
+    threaded <- with_pca_cpu_threads(n_threads, run_pca())
+    fit <- threaded$value
+    fit$n.cores_requested <- n_threads
+    fit$n.cores_effective <- threaded$effective
+    fit$core_control <- threaded$control
+    fit
 }
 
 fastembedr_rsvd_tuning <- function(n, p, rank, backend) {
-  backend <- if (is.null(backend)) "cpu" else backend
-  if (identical(backend, "cuda")) {
-    oversample <- if (n * p >= 5e6) 16L else 10L
-    power <- if (rank <= 20L || p <= 128L) 2L else 1L
-  } else if (identical(backend, "metal")) {
-    oversample <- if (n * p >= 5e6) 16L else 10L
-    power <- if (rank <= 30L) 1L else 0L
-  } else {
-    oversample <- 20L
-    power <- if (rank <= 20L) 1L else 2L
-  }
-  list(
-    oversample = as.integer(max(0L, oversample)),
-    power = as.integer(max(0L, power))
-  )
+    backend <- if (is.null(backend)) "cpu" else backend
+    if (identical(backend, "cuda")) {
+        oversample <- if (n * p >= 5e6) 16L else 10L
+        power <- if (rank <= 20L || p <= 128L) 2L else 1L
+    } else if (identical(backend, "metal")) {
+        oversample <- if (n * p >= 5e6) 16L else 10L
+        power <- if (rank <= 30L) 1L else 0L
+    } else {
+        oversample <- 20L
+        power <- if (rank <= 20L) 1L else 2L
+    }
+    list(
+        oversample = as.integer(max(0L, oversample)),
+        power = as.integer(max(0L, power))
+    )
 }
 
-normalize_supplied_knn <- function(nn, n, n_neighbors = NULL, keep_self = FALSE) {
-  if (!all(c("indices", "distances") %in% names(nn))) {
-    stop("`nn` must contain `indices` and `distances`.", call. = FALSE)
-  }
-  indices <- nn$indices
-  distances <- nn$distances
-  if (!is.matrix(indices)) indices <- as.matrix(indices)
-  distance_is_float32 <- is_float32_matrix(distances)
-  if (!distance_is_float32 && !is.matrix(distances)) distances <- as.matrix(distances)
-  if (!is.integer(indices)) storage.mode(indices) <- "integer"
-  if (!distance_is_float32 && !identical(typeof(distances), "double")) {
-    storage.mode(distances) <- "double"
-  }
-  if (!identical(dim(indices), dim(distances))) {
-    stop("KNN `indices` and `distances` must have the same dimensions.", call. = FALSE)
-  }
-  if (nrow(indices) != n) {
-    stop("KNN matrix row count must match `nrow(data)`.", call. = FALSE)
-  }
-  if (ncol(indices) < 1L) {
-    stop("KNN matrices must have at least one neighbor column.", call. = FALSE)
-  }
-  if (!distance_is_float32 && (any(!is.finite(distances)) || any(distances < 0))) {
-    stop("KNN `distances` must be finite and non-negative.", call. = FALSE)
-  }
-
-  stripped <- if (distance_is_float32) {
-    strip_self_neighbors_float_cpp(indices, distances)
-  } else {
-    strip_self_neighbors(indices, distances)
-  }
-  has_self <- stripped$has_self
-  knn_with_self <- if (isTRUE(keep_self) && has_self) {
-    list(indices = indices, distances = distances)
-  } else {
-    NULL
-  }
-  if (has_self) {
-    indices <- stripped$indices
-    distances <- stripped$distances
-  }
-  if (ncol(indices) < 1L) {
-    stop("KNN matrices must contain at least one non-self neighbor.", call. = FALSE)
-  }
-
-  if (is.null(n_neighbors)) {
-    n_neighbors <- ncol(indices)
-  } else {
-    n_neighbors <- as.integer(n_neighbors)
-    invalid_n_neighbors <- length(n_neighbors) != 1L ||
-      is.na(n_neighbors) ||
-      !is.finite(n_neighbors) ||
-      n_neighbors < 1L
-    if (invalid_n_neighbors) {
-      stop("`n_neighbors` must be NULL or a positive integer.", call. = FALSE)
+normalize_supplied_knn <- function(
+    nn, n, n_neighbors = NULL,
+    keep_self = FALSE
+) {
+    if (!all(c("indices", "distances") %in% names(nn))) {
+        stop("`nn` must contain `indices` and `distances`.", call. = FALSE)
     }
-    if (n_neighbors > ncol(indices)) {
-      stop("`n_neighbors` is larger than the supplied KNN width.", call. = FALSE)
+    indices <- nn$indices
+    distances <- nn$distances
+    if (!is.matrix(indices)) indices <- as.matrix(indices)
+    distance_is_float32 <- is_float32_matrix(distances)
+    if (!distance_is_float32 && !is.matrix(distances)) {
+        distances <- as.matrix(
+            distances
+        )
     }
-    indices <- indices[, seq_len(n_neighbors), drop = FALSE]
-    distances <- distances[, seq_len(n_neighbors), drop = FALSE]
-  }
-  list(
-    indices = indices,
-    distances = distances,
-    n_neighbors = as.integer(n_neighbors),
-    has_self = isTRUE(has_self),
-    knn_with_self = knn_with_self
-  )
+    if (!is.integer(indices)) storage.mode(indices) <- "integer"
+    if (!distance_is_float32 && !identical(typeof(distances), "double")) {
+        storage.mode(distances) <- "double"
+    }
+    if (!identical(dim(indices), dim(distances))) {
+        stop("KNN `indices` and `distances` must have the same dimensions.",
+            call. = FALSE
+        )
+    }
+    if (nrow(indices) != n) {
+        stop("KNN matrix row count must match `nrow(data)`.", call. = FALSE)
+    }
+    if (ncol(indices) < 1L) {
+        stop("KNN matrices must have at least one neighbor column.",
+            call. = FALSE)
+    }
+    if (!distance_is_float32 && (any(!is.finite(distances)) || any(
+        distances < 0
+    ))) {
+        stop("KNN `distances` must be finite and non-negative.", call. = FALSE)
+    }
+
+    stripped <- if (distance_is_float32) {
+        strip_self_neighbors_float_cpp(indices, distances)
+    } else {
+        strip_self_neighbors(indices, distances)
+    }
+    has_self <- stripped$has_self
+    knn_with_self <- if (isTRUE(keep_self) && has_self) {
+        list(indices = indices, distances = distances)
+    } else {
+        NULL
+    }
+    if (has_self) {
+        indices <- stripped$indices
+        distances <- stripped$distances
+    }
+    if (ncol(indices) < 1L) {
+        stop("KNN matrices must contain at least one non-self neighbor.",
+            call. = FALSE
+        )
+    }
+
+    if (is.null(n_neighbors)) {
+        n_neighbors <- ncol(indices)
+    } else {
+        n_neighbors <- as.integer(n_neighbors)
+        invalid_n_neighbors <- length(n_neighbors) != 1L ||
+            is.na(n_neighbors) ||
+            !is.finite(n_neighbors) ||
+            n_neighbors < 1L
+        if (invalid_n_neighbors) {
+            stop("`n_neighbors` must be NULL or a positive integer.",
+                call. = FALSE)
+        }
+        if (n_neighbors > ncol(indices)) {
+            stop("`n_neighbors` is larger than the supplied KNN width.",
+                call. = FALSE)
+        }
+        indices <- indices[, seq_len(n_neighbors), drop = FALSE]
+        distances <- distances[, seq_len(n_neighbors), drop = FALSE]
+    }
+    list(
+        indices = indices,
+        distances = distances,
+        n_neighbors = as.integer(n_neighbors),
+        has_self = isTRUE(has_self),
+        knn_with_self = knn_with_self
+    )
 }
 
 embedding_scores <- function(layout,
-                             labels,
-                             indices,
-                             silhouette_sample,
-                             preserve_sample,
-                             preserve_k,
-                             seed,
-                             preserve_keep = NULL,
-                             backend = "cpu") {
-  n <- nrow(layout)
-  labels_factor <- if (is.null(labels)) NULL else as.factor(labels)
-  labels_int <- if (is.null(labels_factor)) NULL else as.integer(labels_factor)
-  n_label_levels <- if (is.null(labels_factor)) 0L else length(levels(labels_factor))
-  silhouette_keep <- sample_indices(n, silhouette_sample, seed)
-  if (is.null(preserve_keep)) {
-    preserve_keep <- sample_indices(n, preserve_sample, seed)
-  }
-  preserve_k <- if (is.null(preserve_k)) {
-    ncol(indices)
-  } else {
-    min(as.integer(preserve_k), ncol(indices))
-  }
+                            labels,
+                            indices,
+                            silhouette_sample,
+                            preserve_sample,
+                            preserve_k,
+                            seed,
+                            preserve_keep = NULL,
+                            backend = "cpu") {
+    n <- nrow(layout)
+    labels_factor <- if (is.null(labels)) NULL else as.factor(labels)
+    labels_int <- if (is.null(labels_factor)) {
+        NULL
+    } else {
+        as.integer(
+            labels_factor
+        )
+    }
+    n_label_levels <- if (is.null(labels_factor)) {
+        0L
+    } else {
+        length(levels(
+            labels_factor
+        ))
+    }
+    silhouette_keep <- sample_indices(n, silhouette_sample, seed)
+    if (is.null(preserve_keep)) {
+        preserve_keep <- sample_indices(n, preserve_sample, seed)
+    }
+    preserve_k <- if (is.null(preserve_k)) {
+        ncol(indices)
+    } else {
+        min(as.integer(preserve_k), ncol(indices))
+    }
 
-  silhouette_result <- if (is.null(labels_int) || length(silhouette_keep) == 0L) {
-    list(
-      value = NA_real_,
-      backend = if (is.null(labels_int)) "none" else "skipped",
-      reason = NA_character_
+    silhouette_result <- if (is.null(labels_int) || length(silhouette_keep) ==
+        0L) {
+        list(
+            value = NA_real_,
+            backend = if (is.null(labels_int)) "none" else "skipped",
+            reason = NA_character_
+        )
+    } else {
+        silhouette_score_with_backend(
+            labels_int[silhouette_keep],
+            layout[silhouette_keep, , drop = FALSE],
+            n_label_levels,
+            backend = backend
+        )
+    }
+    structure_result <- structure_score_with_backend(
+        layout,
+        indices,
+        preserve_keep,
+        preserve_k,
+        if (is.null(labels_int)) integer(0L) else labels_int,
+        n_label_levels,
+        backend = backend
     )
-  } else {
-    silhouette_score_with_backend(
-      labels_int[silhouette_keep],
-      layout[silhouette_keep, , drop = FALSE],
-      n_label_levels,
-      backend = backend
+    structure <- structure_result$values
+    out <- data.frame(
+        silhouette = silhouette_result$value,
+        knn_preservation = unname(structure["knn_preservation"]),
+        local_trustworthiness = unname(structure["local_trustworthiness"]),
+        local_continuity = unname(structure["local_continuity"]),
+        structure_score = unname(structure["structure_score"]),
+        embedding_knn_accuracy = unname(structure["embedding_knn_accuracy"]),
+        stringsAsFactors = FALSE
     )
-  }
-  structure_result <- structure_score_with_backend(
-    layout,
-    indices,
-    preserve_keep,
-    preserve_k,
-    if (is.null(labels_int)) integer(0L) else labels_int,
-    n_label_levels,
-    backend = backend
-  )
-  structure <- structure_result$values
-  out <- data.frame(
-    silhouette = silhouette_result$value,
-    knn_preservation = unname(structure["knn_preservation"]),
-    local_trustworthiness = unname(structure["local_trustworthiness"]),
-    local_continuity = unname(structure["local_continuity"]),
-    structure_score = unname(structure["structure_score"]),
-    embedding_knn_accuracy = unname(structure["embedding_knn_accuracy"]),
-    stringsAsFactors = FALSE
-  )
-  attr(out, "structure_backend") <- structure_result$backend
-  attr(out, "structure_backend_reason") <- structure_result$reason
-  attr(out, "silhouette_backend") <- silhouette_result$backend
-  attr(out, "silhouette_backend_reason") <- silhouette_result$reason
-  attr(out, "backend") <- paste(
-    paste0("structure:", structure_result$backend),
-    paste0("silhouette:", silhouette_result$backend),
-    sep = ";"
-  )
-  out
+    attr(out, "structure_backend") <- structure_result$backend
+    attr(out, "structure_backend_reason") <- structure_result$reason
+    attr(out, "silhouette_backend") <- silhouette_result$backend
+    attr(out, "silhouette_backend_reason") <- silhouette_result$reason
+    attr(out, "backend") <- paste(
+        paste0("structure:", structure_result$backend),
+        paste0("silhouette:", silhouette_result$backend),
+        sep = ";"
+    )
+    out
 }
 
 auto_landmark_count <- function(n) {
-  if (n <= 3L) {
-    return(n)
-  }
-  if (n <= 80L) {
-    return(as.integer(min(n - 1L, max(2L, ceiling(n * 0.5)))))
-  }
-  if (n <= 1000L) {
-    return(as.integer(min(n - 1L, max(80L, ceiling(sqrt(n) * 7)))))
-  }
-  as.integer(min(n - 1L, max(300L, ceiling(sqrt(n) * 7))))
+    if (n <= 3L) {
+        return(n)
+    }
+    if (n <= 80L) {
+        return(as.integer(min(n - 1L, max(2L, ceiling(n * 0.5)))))
+    }
+    if (n <= 1000L) {
+        return(as.integer(min(n - 1L, max(80L, ceiling(sqrt(n) * 7)))))
+    }
+    as.integer(min(n - 1L, max(300L, ceiling(sqrt(n) * 7))))
 }
 
 resolve_landmarks <- function(landmarks, x, seed, n_threads = NULL) {
-  n <- nrow(x)
-  if (is.null(landmarks) || identical(landmarks, FALSE)) {
-    return(NULL)
-  }
+    n <- nrow(x)
+    if (is.null(landmarks) || identical(landmarks, FALSE)) {
+        return(NULL)
+    }
 
-  if (identical(landmarks, TRUE)) {
-    count <- auto_landmark_count(n)
-    return(select_landmark_rows(x, count, seed, n_threads = n_threads))
-  }
+    if (identical(landmarks, TRUE)) {
+        count <- auto_landmark_count(n)
+        return(select_landmark_rows(x, count, seed, n_threads = n_threads))
+    }
 
-  if (length(landmarks) == 1L && is.numeric(landmarks)) {
-    value <- as.numeric(landmarks)
-    if (!is.finite(value) || value <= 0) {
-      stop(
-        "`landmarks` must be NULL, TRUE, a positive count, ",
-        "a fraction in (0, 1), or row indices.",
-        call. = FALSE
-      )
+    if (length(landmarks) == 1L && is.numeric(landmarks)) {
+        value <- as.numeric(landmarks)
+        if (!is.finite(value) || value <= 0) {
+            stop(
+                "`landmarks` must be NULL, TRUE, a positive count, ",
+                "a fraction in (0, 1), or row indices.",
+                call. = FALSE
+            )
+        }
+        count <- if (value > 0 && value < 1) {
+            ceiling(n * value)
+        } else {
+            as.integer(round(value))
+        }
+        if (count < 2L) {
+            stop("Landmark mode requires at least two landmarks.",
+                call. = FALSE)
+        }
+        if (count >= n) {
+            return(NULL)
+        }
+        return(select_landmark_rows(x, count, seed, n_threads = n_threads))
     }
-    count <- if (value > 0 && value < 1) {
-      ceiling(n * value)
-    } else {
-      as.integer(round(value))
-    }
-    if (count < 2L) {
-      stop("Landmark mode requires at least two landmarks.", call. = FALSE)
-    }
-    if (count >= n) {
-      return(NULL)
-    }
-    return(select_landmark_rows(x, count, seed, n_threads = n_threads))
-  }
 
-  if (!is.numeric(landmarks)) {
-    stop(
-      "`landmarks` must be NULL, TRUE, a positive count, ",
-      "a fraction in (0, 1), or row indices.",
-      call. = FALSE
-    )
-  }
-  idx <- sort(unique(as.integer(landmarks)))
-  if (length(idx) < 2L || any(is.na(idx)) || any(idx < 1L) || any(idx > n)) {
-    stop("Landmark row indices must contain at least two valid row numbers.", call. = FALSE)
-  }
-  if (length(idx) >= n) {
-    return(NULL)
-  }
-  idx
+    if (!is.numeric(landmarks)) {
+        stop(
+            "`landmarks` must be NULL, TRUE, a positive count, ",
+            "a fraction in (0, 1), or row indices.",
+            call. = FALSE
+        )
+    }
+    idx <- sort(unique(as.integer(landmarks)))
+    if (length(idx) < 2L || any(is.na(idx)) || any(idx < 1L) || any(idx > n)) {
+        stop(
+            "Landmark row indices must contain at least two valid row numbers.",
+            call. = FALSE
+        )
+    }
+    if (length(idx) >= n) {
+        return(NULL)
+    }
+    idx
 }
 
 select_landmark_rows <- function(x, count, seed, n_threads = NULL) {
-  n <- nrow(x)
-  count <- as.integer(min(max(2L, count), n))
-  if (count >= n) {
-    return(seq_len(n))
-  }
+    n <- nrow(x)
+    count <- as.integer(min(max(2L, count), n))
+    if (count >= n) {
+        return(seq_len(n))
+    }
 
-  z <- landmark_selection_features(x, seed, n_threads = n_threads)
-  if (count <= 2000L) {
-    candidate_count <- min(n, max(count, min(12000L, max(500L, 4L * count))))
-    candidates <- projection_quantile_rows(z, candidate_count, seed)
-    picked <- farthest_landmark_subset(z[candidates, , drop = FALSE], count)
-    selected <- candidates[picked]
-    method <- "projected_farthest"
-  } else {
-    selected <- projection_quantile_rows(z, count, seed)
-    method <- "multi_projection_quantiles"
-  }
-  selected <- sort(unique(as.integer(selected)))
-  if (length(selected) < count) {
-    selected <- fill_landmark_rows(selected, n, count, seed)
-  }
-  selected <- sort(selected[seq_len(count)])
-  attr(selected, "selection_method") <- method
-  selected
+    z <- landmark_selection_features(x, seed, n_threads = n_threads)
+    if (count <= 2000L) {
+        candidate_count <- min(n, max(count, min(12000L, max(500L, 4L *
+            count))))
+        candidates <- projection_quantile_rows(z, candidate_count, seed)
+        picked <- farthest_landmark_subset(z[candidates, , drop = FALSE], count)
+        selected <- candidates[picked]
+        method <- "projected_farthest"
+    } else {
+        selected <- projection_quantile_rows(z, count, seed)
+        method <- "multi_projection_quantiles"
+    }
+    selected <- sort(unique(as.integer(selected)))
+    if (length(selected) < count) {
+        selected <- fill_landmark_rows(selected, n, count, seed)
+    }
+    selected <- sort(selected[seq_len(count)])
+    attr(selected, "selection_method") <- method
+    selected
 }
 
 landmark_selection_features <- function(x, seed, n_threads = NULL) {
-  n <- nrow(x)
-  p <- ncol(x)
-  n_direct <- min(4L, p)
-  n_random <- min(4L, p)
+    n <- nrow(x)
+    p <- ncol(x)
+    n_direct <- min(4L, p)
+    n_random <- min(4L, p)
 
-  restore_seed <- set_local_seed(seed)
-  on.exit(restore_seed(), add = TRUE)
-  directions <- matrix(stats::rnorm(p * n_random), nrow = p, ncol = n_random)
-  norms <- sqrt(colSums(directions * directions))
-  norms[!is.finite(norms) | norms == 0] <- 1
-  directions <- sweep(directions, 2L, norms, "/")
-  if (is_float32_matrix(x)) {
-    z <- landmark_projection_float32_cpp(
-      x,
-      directions,
-      n_direct = n_direct,
-      n_threads = as.integer(normalize_nn_threads(n_threads))
-    )
-  } else {
-    x <- as.matrix(x)
-    direct <- x[, seq_len(n_direct), drop = FALSE]
-    z <- cbind(direct, x %*% directions)
-  }
-  z <- as.matrix(z)
-  storage.mode(z) <- "double"
+    restore_seed <- set_local_seed(seed)
+    on.exit(restore_seed(), add = TRUE)
+    directions <- matrix(stats::rnorm(p * n_random), nrow = p, ncol = n_random)
+    norms <- sqrt(colSums(directions * directions))
+    norms[!is.finite(norms) | norms == 0] <- 1
+    directions <- sweep(directions, 2L, norms, "/")
+    if (is_float32_matrix(x)) {
+        z <- landmark_projection_float32_cpp(
+            x,
+            directions,
+            n_direct = n_direct,
+            n_threads = as.integer(normalize_nn_threads(n_threads))
+        )
+    } else {
+        x <- as.matrix(x)
+        direct <- x[, seq_len(n_direct), drop = FALSE]
+        z <- cbind(direct, x %*% directions)
+    }
+    z <- as.matrix(z)
+    storage.mode(z) <- "double"
 
-  center <- colMeans(z)
-  z <- sweep(z, 2L, center, "-")
-  scale <- sqrt(colSums(z * z) / max(1L, n - 1L))
-  keep <- is.finite(scale) & scale > 0
-  if (!any(keep)) {
-    return(matrix(seq_len(n), ncol = 1L))
-  }
-  sweep(z[, keep, drop = FALSE], 2L, scale[keep], "/")
+    center <- colMeans(z)
+    z <- sweep(z, 2L, center, "-")
+    scale <- sqrt(colSums(z * z) / max(1L, n - 1L))
+    keep <- is.finite(scale) & scale > 0
+    if (!any(keep)) {
+        return(matrix(seq_len(n), ncol = 1L))
+    }
+    sweep(z[, keep, drop = FALSE], 2L, scale[keep], "/")
 }
 
 projection_quantile_rows <- function(z, count, seed) {
-  n <- nrow(z)
-  count <- as.integer(min(max(1L, count), n))
-  n_axes <- ncol(z)
-  per_axis <- max(2L, ceiling(1.25 * count / max(1L, n_axes)))
-  selected <- integer(0)
+    n <- nrow(z)
+    count <- as.integer(min(max(1L, count), n))
+    n_axes <- ncol(z)
+    per_axis <- max(2L, ceiling(1.25 * count / max(1L, n_axes)))
+    selected <- integer(0)
 
-  center_order <- order(rowSums(z * z), seq_len(n))
-  selected <- c(selected, center_order[1L])
-  for (axis in seq_len(n_axes)) {
-    ordered <- order(z[, axis], seq_len(n))
-    positions <- unique(round(seq(1, n, length.out = per_axis)))
-    selected <- c(selected, ordered[positions])
-  }
-  selected <- unique(as.integer(selected))
+    center_order <- order(rowSums(z * z), seq_len(n))
+    selected <- c(selected, center_order[1L])
+    for (axis in seq_len(n_axes)) {
+        ordered <- order(z[, axis], seq_len(n))
+        positions <- unique(round(seq(1, n, length.out = per_axis)))
+        selected <- c(selected, ordered[positions])
+    }
+    selected <- unique(as.integer(selected))
 
-  if (length(selected) < count) {
-    selected <- fill_landmark_rows(selected, n, count, seed)
-  }
-  if (length(selected) > count) {
-    ordered <- order(z[selected, 1L], selected)
-    positions <- unique(round(seq(1, length(selected), length.out = count)))
-    selected <- selected[ordered[positions]]
-  }
-  sort(unique(as.integer(selected)))[seq_len(count)]
+    if (length(selected) < count) {
+        selected <- fill_landmark_rows(selected, n, count, seed)
+    }
+    if (length(selected) > count) {
+        ordered <- order(z[selected, 1L], selected)
+        positions <- unique(round(seq(1, length(selected), length.out = count)))
+        selected <- selected[ordered[positions]]
+    }
+    sort(unique(as.integer(selected)))[seq_len(count)]
 }
 
 farthest_landmark_subset <- function(z, count) {
-  n <- nrow(z)
-  count <- as.integer(min(max(1L, count), n))
-  if (count >= n) {
-    return(seq_len(n))
-  }
-
-  z_norm <- rowSums(z * z)
-  selected <- integer(count)
-  selected[1L] <- which.min(z_norm)
-  min_dist <- rep(Inf, n)
-
-  for (i in seq_len(count)) {
-    if (i > 1L) {
-      selected[i] <- which.max(min_dist)
+    n <- nrow(z)
+    count <- as.integer(min(max(1L, count), n))
+    if (count >= n) {
+        return(seq_len(n))
     }
-    center <- z[selected[i], , drop = FALSE]
-    dist <- z_norm + z_norm[selected[i]] - 2 * drop(z %*% t(center))
-    min_dist <- pmin(min_dist, pmax(0, dist))
-    min_dist[selected[seq_len(i)]] <- -Inf
-  }
-  selected
+
+    z_norm <- rowSums(z * z)
+    selected <- integer(count)
+    selected[1L] <- which.min(z_norm)
+    min_dist <- rep(Inf, n)
+
+    for (i in seq_len(count)) {
+        if (i > 1L) {
+            selected[i] <- which.max(min_dist)
+        }
+        center <- z[selected[i], , drop = FALSE]
+        dist <- z_norm + z_norm[selected[i]] - 2 * drop(z %*% t(center))
+        min_dist <- pmin(min_dist, pmax(0, dist))
+        min_dist[selected[seq_len(i)]] <- -Inf
+    }
+    selected
 }
 
 fill_landmark_rows <- function(selected, n, count, seed) {
-  selected <- unique(as.integer(selected))
-  if (length(selected) >= count) {
-    return(selected[seq_len(count)])
-  }
-  restore_seed <- set_local_seed(seed + 1009L)
-  on.exit(restore_seed(), add = TRUE)
-  remaining <- setdiff(seq_len(n), selected)
-  need <- count - length(selected)
-  c(selected, sort(sample(remaining, need)))
+    selected <- unique(as.integer(selected))
+    if (length(selected) >= count) {
+        return(selected[seq_len(count)])
+    }
+    restore_seed <- set_local_seed(seed + 1009L)
+    on.exit(restore_seed(), add = TRUE)
+    remaining <- setdiff(seq_len(n), selected)
+    need <- count - length(selected)
+    c(selected, sort(sample(remaining, need)))
 }
 
 sampled_score_indices <- function(x,
-                                  keep,
-                                  preserve_k,
-                                  backend,
-                                  n_threads = NULL) {
-  n <- nrow(x)
-  preserve_k <- as.integer(max(1L, min(preserve_k, n - 1L)))
-  keep <- as.integer(keep)
-  if (length(keep) == 0L) {
-    return(matrix(integer(0L), nrow = 0L, ncol = preserve_k))
-  }
-  out <- matrix(1L, nrow = length(keep), ncol = preserve_k)
-  query_k <- min(n, preserve_k + 1L)
-  batch_size <- max(256L, min(length(keep), as.integer(floor(2e6 / max(1L, query_k)))))
-  starts <- seq.int(1L, length(keep), by = batch_size)
-  for (start in starts) {
-    end <- min(length(keep), start + batch_size - 1L)
-    rows <- start:end
-    batch_keep <- keep[rows]
-    raw <- fastembedr_native_query_knn(
-      x,
-      x[batch_keep, , drop = FALSE],
-      k = query_k,
-      metric = "euclidean",
-      n_threads = n_threads
-    )
-    for (local_i in seq_along(batch_keep)) {
-      row <- unique(raw$indices[local_i, raw$indices[local_i, ] != batch_keep[local_i]])
-      if (length(row) < preserve_k) {
-        fill <- setdiff(seq_len(n), c(batch_keep[local_i], row))
-        row <- c(row, fill)
-      }
-      out[rows[local_i], ] <- row[seq_len(preserve_k)]
+                                keep,
+                                preserve_k,
+                                backend,
+                                n_threads = NULL) {
+    n <- nrow(x)
+    preserve_k <- as.integer(max(1L, min(preserve_k, n - 1L)))
+    keep <- as.integer(keep)
+    if (length(keep) == 0L) {
+        return(matrix(integer(0L), nrow = 0L, ncol = preserve_k))
     }
-    rm(raw)
-    if (length(starts) > 1L) gc(FALSE)
-  }
-  out
+    out <- matrix(1L, nrow = length(keep), ncol = preserve_k)
+    query_k <- min(n, preserve_k + 1L)
+    batch_size <- max(256L, min(length(keep), as.integer(floor(2e6 / max(
+        1L,
+        query_k
+    )))))
+    starts <- seq.int(1L, length(keep), by = batch_size)
+    for (start in starts) {
+        end <- min(length(keep), start + batch_size - 1L)
+        rows <- start:end
+        batch_keep <- keep[rows]
+        raw <- fastembedr_native_query_knn(
+            x,
+            x[batch_keep, , drop = FALSE],
+            k = query_k,
+            metric = "euclidean",
+            n_threads = n_threads
+        )
+        for (local_i in seq_along(batch_keep)) {
+            row <- unique(raw$indices[local_i, raw$indices[local_i, ] !=
+                batch_keep[
+                local_i
+            ]])
+            if (length(row) < preserve_k) {
+                fill <- setdiff(seq_len(n), c(batch_keep[local_i], row))
+                row <- c(row, fill)
+            }
+            out[rows[local_i], ] <- row[seq_len(preserve_k)]
+        }
+        rm(raw)
+        if (length(starts) > 1L) gc(FALSE)
+    }
+    out
 }
 
 #' @export
 print.fastEmbedR_embedding <- function(x, ...) {
-  cat("fastEmbedR embedding\n")
-  cat("  method: ", x$parameters$method, "\n", sep = "")
-  cat("  observations: ", x$parameters$n, "\n", sep = "")
-  cat("  dimensions: ", ncol(x$layout), "\n", sep = "")
-  cat("  neighbors: ", x$parameters$n_neighbors, "\n", sep = "")
-  if (isTRUE(x$parameters$landmark)) {
-    cat("  landmarks: ", x$parameters$n_landmarks, "\n", sep = "")
-  }
-  cat("  embedding backend: ", x$parameters$backend, "\n", sep = "")
-  cat("  KNN backend: ", x$parameters$nn_backend, "\n", sep = "")
-  cat("  elapsed: ", format(round(x$metrics$elapsed, 3L), nsmall = 3L), " sec\n", sep = "")
-  silhouette <- if ("silhouette" %in% names(x$metrics)) x$metrics$silhouette[[1L]] else NA_real_
-  if (length(silhouette) == 1L && is.finite(silhouette)) {
-    cat("  silhouette: ", format(round(silhouette, 4L), nsmall = 4L), "\n", sep = "")
-  }
-  knn_preservation <- if ("knn_preservation" %in% names(x$metrics)) {
-    x$metrics$knn_preservation[[1L]]
-  } else {
-    NA_real_
-  }
-  if (length(knn_preservation) == 1L && is.finite(knn_preservation)) {
-    cat("  KNN preservation: ", format(round(knn_preservation, 4L), nsmall = 4L), "\n", sep = "")
-  }
-  invisible(x)
+    cat("fastEmbedR embedding\n")
+    cat("  method: ", x$parameters$method, "\n", sep = "")
+    cat("  observations: ", x$parameters$n, "\n", sep = "")
+    cat("  dimensions: ", ncol(x$layout), "\n", sep = "")
+    cat("  neighbors: ", x$parameters$n_neighbors, "\n", sep = "")
+    if (isTRUE(x$parameters$landmark)) {
+        cat("  landmarks: ", x$parameters$n_landmarks, "\n", sep = "")
+    }
+    cat("  embedding backend: ", x$parameters$backend, "\n", sep = "")
+    cat("  KNN backend: ", x$parameters$nn_backend, "\n", sep = "")
+    cat("  elapsed: ", format(round(x$metrics$elapsed, 3L), nsmall = 3L),
+        " sec\n",
+        sep = ""
+    )
+    silhouette <- if ("silhouette" %in% names(x$metrics)) {
+        x$metrics$silhouette[[
+            1L
+        ]]
+    } else {
+        NA_real_
+    }
+    if (length(silhouette) == 1L && is.finite(silhouette)) {
+        cat("  silhouette: ", format(round(silhouette, 4L), nsmall = 4L), "\n",
+            sep = ""
+        )
+    }
+    knn_preservation <- if ("knn_preservation" %in% names(x$metrics)) {
+        x$metrics$knn_preservation[[1L]]
+    } else {
+        NA_real_
+    }
+    if (length(knn_preservation) == 1L && is.finite(knn_preservation)) {
+        cat("  KNN preservation: ", format(round(knn_preservation, 4L),
+            nsmall = 4L
+        ), "\n", sep = "")
+    }
+    invisible(x)
 }
 
 #' @export
 plot.fastEmbedR_embedding <- function(x,
-                                      labels = x$labels,
-                                      pch = 21,
-                                      bg = NULL,
-                                      col = "black",
-                                      xlab = "Component 1",
-                                      ylab = "Component 2",
-                                      main = NULL,
-                                      ...) {
-  layout <- embedding_dense_double_matrix(x$layout)
-  if (ncol(layout) < 2L) {
-    stop("Plotting requires at least two embedding dimensions.", call. = FALSE)
-  }
-  if (is.null(main)) {
-    main <- paste0("fastEmbedR ", x$parameters$method)
-  }
-  if (is.null(bg)) {
-    bg <- if (is.null(labels)) {
-      "white"
-    } else {
-      as.integer(as.factor(labels))
+                                    labels = x$labels,
+                                    pch = 21,
+                                    bg = NULL,
+                                    col = "black",
+                                    xlab = "Component 1",
+                                    ylab = "Component 2",
+                                    main = NULL,
+                                    ...) {
+    layout <- embedding_dense_double_matrix(x$layout)
+    if (ncol(layout) < 2L) {
+        stop("Plotting requires at least two embedding dimensions.",
+            call. = FALSE)
     }
-  }
-  graphics::plot(
-    layout[, 1L],
-    layout[, 2L],
-    pch = pch,
-    bg = bg,
-    col = col,
-    xlab = xlab,
-    ylab = ylab,
-    main = main,
-    ...
-  )
-  invisible(x)
+    if (is.null(main)) {
+        main <- paste0("fastEmbedR ", x$parameters$method)
+    }
+    if (is.null(bg)) {
+        bg <- if (is.null(labels)) {
+            "white"
+        } else {
+            as.integer(as.factor(labels))
+        }
+    }
+    graphics::plot(
+        layout[, 1L],
+        layout[, 2L],
+        pch = pch,
+        bg = bg,
+        col = col,
+        xlab = xlab,
+        ylab = ylab,
+        main = main,
+        ...
+    )
+    invisible(x)
 }

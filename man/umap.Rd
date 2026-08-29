@@ -3,23 +3,24 @@
 \title{Run opinionated fixed-policy UMAP from data or precomputed KNN}
 \usage{
 umap(
-  data,
-  n_neighbors = NULL,
-  n_components = 2L,
-  standardize = FALSE,
-  pca_dims = NULL,
-  metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  nn = NULL,
-  seed = 4L,
-  backend = NULL,
-  n.cores = NULL,
-  keep_knn = FALSE,
-  graph_mode = c("fuzzy", "binary"),
-  verbose = FALSE
+    data,
+    n_neighbors = NULL,
+    n_components = 2L,
+    standardize = FALSE,
+    pca_dims = NULL,
+    metric = c("euclidean", "cosine", "correlation", "inner_product"),
+    nn = NULL,
+    seed = 4L,
+    backend = NULL,
+    n.cores = NULL,
+    keep_knn = FALSE,
+    graph_mode = c("fuzzy", "binary"),
+    verbose = FALSE
 )
 }
 \arguments{
-\item{data}{Numeric matrix/data frame, or a KNN object with \code{indices} and \code{distances} fields.}
+\item{data}{Numeric matrix/data frame, or a KNN object with \code{indices}
+and \code{distances} fields.}
 
 \item{n_neighbors}{Number of non-self neighbors. \code{NULL} chooses the
 package default for the data size.}
@@ -41,7 +42,13 @@ from the supplied matrix.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. CPU KNN uses package-native HNSW. Metal uses package-native exact or recall-tuned IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct RAPIDS cuVS IVF-Flat above that threshold; the KNN result stays on the device through graph construction and optimization. GPU requests must resolve to a real native backend; the package does not relabel CPU work as GPU.}
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
+\code{"metal"}. CPU KNN uses package-native HNSW. Metal uses package-native
+exact or recall-tuned IVF-Flat search. CUDA uses direct FAISS GPU exact
+search below 100,000 rows and direct RAPIDS cuVS IVF-Flat above that
+threshold; the KNN result stays on the device through graph construction
+and optimization. GPU requests must resolve to a real native backend; the
+package does not relabel CPU work as GPU.}
 
 \item{n.cores}{Number of CPU cores for KNN and CPU UMAP.}
 
@@ -81,7 +88,8 @@ externally controlled KNN graph. These controls are scientifically
 consequential; fixing them is a scope decision made to keep one tested
 objective and update schedule aligned across CPU, Metal, and CUDA, not a claim
 that the values are universally optimal. Users requiring arbitrary UMAP
-parameter sweeps should use a general-purpose implementation; fastEmbedR does not claim
+parameter sweeps should use a general-purpose implementation; fastEmbedR
+does not claim
 API or parameter interchangeability with those packages.
 }
 \examples{

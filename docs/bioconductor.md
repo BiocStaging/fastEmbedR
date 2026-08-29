@@ -17,9 +17,11 @@ submission of `fastEmbedR`.
 
 `fastEmbedR` is under review in
 [BiocContributions issue 142](https://github.com/Bioconductor/BiocContributions/issues/142).
-The version 0.99.9 review build completed with 0 errors, 0 warnings, and 7
-notes. Version 0.99.10 removes the source-level warning-suppression note and
-records the maintainer's verified ORCID. One persistent note is:
+The local version 0.99.13 source check completed with 0 errors and 0 warnings.
+`R CMD check --as-cran --no-manual` reports only the expected new-submission
+note. BiocCheck reports five notes and no errors or warnings. The package code,
+manuals, namespace, and vignette sources now pass its coding-practice and
+formatting checks. The remaining findings are described below.
 
 > No Bioconductor dependencies detected. Note that some infrastructure
 > packages may not have Bioconductor dependencies.
@@ -37,38 +39,45 @@ Bioconductor reviewer. Version 0.99.10 therefore declares the accurate
 infrastructure packages as a note rather than a warning; no artificial package
 dependency is added.
 
-The accompanying notes are triaged as follows:
+The remaining BiocCheck notes are triaged as follows:
 
-- a runnable example is provided for `fastEmbedR_backend()`;
-- the maintainer ORCID is recorded from the author's existing CRAN identity;
-  funder metadata will be added only when verified;
-- the suggested `ATACSeq` and `DNASeq` views are not used because fastEmbedR
-  is not specific to either assay;
-- condition handling is written without nonlocal assignment in the openTSNE
-  PCA initialization path;
-- failed device-name queries are handled explicitly without
-  `suppressWarnings()` and have regression coverage;
-- remaining findings about long functions, line width, and indentation are
-  tracked as maintainability work. A formatter-only trial changed 45 files and
-  approximately 30,000 diff lines without resolving the function-length note,
-  so these changes will be made incrementally with CPU, Metal, and CUDA
-  regression tests instead of as high-churn review-time formatting.
+- the automatically suggested `ATACSeq` and `DNASeq` views are not used because
+  fastEmbedR is not specific to either assay;
+- the package is deliberately independent of Bioconductor runtime packages and
+  does not add an artificial dependency solely to silence the infrastructure
+  note;
+- `Authors@R` includes the verified maintainer ORCID; a `fnd` role will be
+  added only if a genuine funder or grant is verified;
+- the function-length recommendation is tracked as a staged maintainability
+  refactor because splitting backend orchestration requires CPU, Metal, and
+  CUDA regression testing and is not a formatting-only change;
+- the local mailing-list subscription probe cannot be completed without
+  Bioconductor administrative credentials. The maintainer must verify the
+  subscription externally.
+
+The previously reported line-width and indentation notes are resolved: all
+files covered by BiocCheck use lines of at most 80 columns and indentation in
+multiples of four spaces. Directly constructed condition messages were also
+rewritten so the coding-practice check passes.
 
 ## Dependency Classes
 
 | Class | Dependency | Role | Required For Core Build |
 | --- | --- | --- | --- |
 | R package | `Rcpp` | R/C++ interface and exported native routines. | yes |
-| R package | `BiocStyle` | Vignette rendering in Bioconductor style. | suggested |
 | R package | `float` | Optional float32 R matrices and reduced host memory use. | suggested |
 | R package | `jsonlite` | Optional benchmark and reproducibility metadata serialization. | suggested |
 | R package | `knitr`, `rmarkdown` | Vignette and documentation rendering. | suggested |
 | R package | `testthat` | Unit tests. | suggested |
-| R package | `igraph` | Optional graph-clustering validation and examples. | suggested |
-| R package | `Rtsne`, `uwot`, `umap` | Optional reference benchmarks only. | suggested |
+| R package | `igraph` | Graph-clustering correctness tests against a reference implementation. | suggested |
+| R package | `RhpcBLASctl` | Optional CPU BLAS and OpenMP thread control. | suggested |
 | System library | C++17 compiler | Native CPU code and numerical helper compilation. | yes |
 | System library | Apple Metal framework | Native Metal KNN and embedding backends on macOS. | optional |
 | System library | CUDA Toolkit, FAISS GPU, cuFFT, cuBLAS, cuSOLVER, RAPIDS RAFT and cuVS C libraries | Native CUDA KNN, embedding backend, and CUDA TSVD initialization. | optional |
+
+Reference packages such as `Rtsne`, `uwot`, and `umap` are installed only in
+the separate benchmark environment; they are not part of the package
+dependency graph.
 
 `fastEmbedR` does not vendor the full FAISS, cuVS, RAFT, or cuML libraries, or
 `uwot`, `Rtsne`, or Python openTSNE source. Its compact FAISS-derived HNSW and
@@ -81,9 +90,9 @@ fastEmbedR owns the internal CPU/Metal KNN and direct FAISS/cuVS CUDA KNN used
 by one-call embeddings. The following are available without another KNN R
 package:
 
-- `opentsne_knn()` works from supplied neighbor indices and distances;
+- `tsne_knn()` works from supplied neighbor indices and distances;
 - `umap_knn()` works from supplied neighbor indices and distances;
-- `prepare_opentsne_knn()` and `prepare_umap_knn()` can prepare reusable
+- `prepare_tsne_knn()` and `prepare_umap_knn()` can prepare reusable
   native embedding inputs;
 - `knn_graph()` and `graph_cluster()` provide native graph construction and
   community detection;
@@ -115,8 +124,8 @@ tested when the corresponding toolchain is available.
   `.Rbuildignore`.
 - Examples and vignettes use small built-in data or guard optional packages
   with `requireNamespace()`.
-- Optional reference benchmarks (`Rtsne`, `uwot`, `umap`) are in `Suggests`,
-  not `Imports`.
+- Optional reference benchmarks (`Rtsne`, `uwot`, `umap`) are isolated in the
+  external benchmark environment rather than declared as package dependencies.
 - CUDA and Metal failures are explicit, not silent CPU fallbacks.
 - The maintainer email should be registered on the Bioconductor Support Site
   before submission.
@@ -129,8 +138,8 @@ A CPU-only check should be possible without FAISS/cuVS installed:
 LC_ALL=C \
 FASTEMBEDR_USE_CUDA=0 R CMD build .
 
-LC_ALL=C \
-FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.10.tar.gz
+LC_ALL=en_US.UTF-8 \
+FASTEMBEDR_USE_CUDA=0 R CMD check --as-cran fastEmbedR_0.99.13.tar.gz
 ```
 
 GPU-enabled builds should be validated separately on machines with the relevant
@@ -140,17 +149,17 @@ CUDA or Apple Metal.
 The local submission preflight used for this repository is:
 
 ```sh
-LC_ALL=C \
+LC_ALL=en_US.UTF-8 \
 FASTEMBEDR_USE_CUDA=0 \
-R CMD check --no-manual --no-build-vignettes fastEmbedR_0.99.10.tar.gz
+R CMD check --as-cran --no-manual fastEmbedR_0.99.13.tar.gz
 
-LC_ALL=C \
-Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.10.tar.gz", `quit-with-status`=FALSE)'
+LC_ALL=en_US.UTF-8 \
+Rscript -e 'BiocCheck::BiocCheck("fastEmbedR_0.99.13.tar.gz")'
 ```
 
-The `--no-build-vignettes` check mode is useful during development, but it
-reports vignette-output warnings because `inst/doc` is intentionally not built.
-The final submission should build vignettes.
+The final submission check builds and rebuilds the vignette. The local
+BiocCheck run used the same source archive; an external Bioconductor index
+probe can still depend on network availability.
 
 Current Bioconductor-specific follow-up items:
 
@@ -158,5 +167,6 @@ Current Bioconductor-specific follow-up items:
 - obtain the assigned reviewer's decision on eligibility without a mandatory
   Bioconductor dependency;
 - keep the verified maintainer ORCID in `Authors@R`;
-- continue replacing broad warning suppression with explicit condition handling;
-- gradually shorten very long R helper functions as maintenance work.
+- add a `fnd` role only when funder metadata are verified;
+- gradually split long backend-orchestration functions while preserving
+  CPU, Metal, and CUDA behavior.

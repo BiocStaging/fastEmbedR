@@ -326,7 +326,7 @@ run_prefix <- function(backend, method, iterations, learning_rate = 1) {
     }
     knn_input$distances <- float::fl(knn_input$distances)
   }
-  result <- opentsne_knn(
+  result <- tsne_knn(
     knn_input,
     n_neighbors = 15L,
     perplexity = 5,
@@ -370,7 +370,7 @@ for (backend in requested_backends) {
       case_knn$distances <- float::fl(case_knn$distances)
     }
     result <- tryCatch(
-      opentsne_knn(
+      tsne_knn(
         case_knn,
         n_neighbors = ncol(case$knn$indices),
         perplexity = 2,
@@ -419,7 +419,7 @@ for (backend in requested_backends) {
     invalid_knn$distances <- float::fl(invalid_knn$distances)
   }
   invalid_public <- tryCatch(
-    opentsne_knn(
+    tsne_knn(
       invalid_knn,
       n_neighbors = ncol(knn_path$indices),
       perplexity = 2,

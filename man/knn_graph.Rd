@@ -4,14 +4,14 @@
 \title{Build a compact nearest-neighbor graph}
 \usage{
 knn_graph(
-  x,
-  k = 30L,
-  backend = NULL,
-  metric = c("euclidean", "cosine", "correlation"),
-  weight = c("snn", "distance", "binary"),
-  mutual = FALSE,
-  prune = 0,
-  n.cores = 1L
+    x,
+    k = 30L,
+    backend = NULL,
+    metric = c("euclidean", "cosine", "correlation"),
+    weight = c("snn", "distance", "binary"),
+    mutual = FALSE,
+    prune = 0,
+    n.cores = 1L
 )
 }
 \arguments{

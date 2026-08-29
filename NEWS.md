@@ -1,3 +1,17 @@
+# fastEmbedR 0.99.13
+
+- Rename the canonical public interpolation-based t-SNE API to `tsne()`,
+  `tsne_knn()`, `landmark_tsne()`, and `transform_tsne()`. Related prepared-KNN
+  and PCA-initialization helpers now use `prepare_tsne_knn()`,
+  `tsne_pca_init()`, and `tsne_init`; result method tags and benchmark IDs use
+  `tsne` consistently. Compiled implementation symbols remain private.
+- Apply the Bioconductor four-space source style across R, namespace, manual,
+  and vignette sources; wrap all checked lines to 80 columns; and replace
+  constructed `paste0()` condition messages with direct `sprintf()` signals.
+- Split the embedded Metal shader into adjacent C++ raw-string literals to
+  remain within portable compiler literal-size limits without changing the
+  compiled Metal source.
+
 # fastEmbedR 0.99.12
 
 - Build one canonical source tarball on Linux and check that identical archive

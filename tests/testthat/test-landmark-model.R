@@ -72,7 +72,7 @@ test_that("staged openTSNE uses the ordinary reference optimizer", {
   model <- fit_landmark_model(
     x,
     selection,
-    method = "opentsne",
+    method = "tsne",
     n_neighbors = 12L,
     perplexity = 4,
     backend = "cpu",
@@ -92,7 +92,7 @@ test_that("staged openTSNE uses the ordinary reference optimizer", {
     n.cores = 2L
   )
 
-  expect_identical(model$fit$method, "opentsne")
+  expect_identical(model$fit$method, "tsne")
   expect_identical(model$n_neighbors, 12L)
   expect_identical(model$affinity_support, "standard")
   expect_identical(model$fit$parameters$affinity_support_k, 12L)

@@ -26,12 +26,12 @@ queries are best effort. The compiled native probes, not `nvidia-smi` or
 | `umap_init()` | native sparse graph initialization | native Metal initialization from prepared graph state | native CUDA initialization when compiled | Returns reusable graph and initial coordinates; a raw CUDA diagnostic call may materialize KNN on the host, whereas ordinary one-call CUDA UMAP remains resident. |
 | `umap_knn()` | native C++ CSR graph and optimizer | native Metal `atomic_inplace` optimizer | native CUDA pure-atomic optimizer | Metal/CUDA optimizers use the supplied graph; unavailable GPU backends fail clearly. |
 | `umap()` | native HNSW, then `umap_knn()` | native exact/IVF-Flat, then native Metal UMAP | native FAISS/cuVS device KNN, then native CUDA UMAP | CUDA KNN is not copied through R. Metal IVF exact-reranks candidates in the original dimensions and records its pilot recall. |
-| `opentsne_knn()` | native C++ FFT-grid optimizer | native Metal FFT-grid optimizer | native CUDA FFT-grid optimizer using cuFFT | Use `Y_init` or `init_data` for explicit PCA initialization. |
-| `opentsne()` | native HNSW, then `opentsne_knn()` | native exact/IVF-Flat, then Metal openTSNE | native FAISS/cuVS device KNN, then CUDA openTSNE | The package does not call Python openTSNE in public functions. |
-| `pca()` / openTSNE PCA init | native float32 blocked RSVD | native float32 MPS block-subspace TSVD | native RAPIDS RAFT TSVD when compiled | GPU requests do not route through Python or silently fall back to CPU. |
-| `transform_tsne()` | native fixed-reference transform | native Metal projection/transform kernels where available | native CUDA projection/transform kernels where built | Used by openTSNE landmarking. |
+| `tsne_knn()` | native C++ FFT-grid optimizer | native Metal FFT-grid optimizer | native CUDA FFT-grid optimizer using cuFFT | Use `Y_init` or `init_data` for explicit PCA initialization. |
+| `tsne()` | native HNSW, then `tsne_knn()` | native exact/IVF-Flat, then Metal t-SNE | native FAISS/cuVS device KNN, then CUDA t-SNE | The package does not call Python openTSNE in public functions. |
+| `pca()` / t-SNE PCA init | native float32 blocked RSVD | native float32 MPS block-subspace TSVD | native RAPIDS RAFT TSVD when compiled | GPU requests do not route through Python or silently fall back to CPU. |
+| `transform_tsne()` | native fixed-reference transform | native Metal projection/transform kernels where available | native CUDA projection/transform kernels where built | Used by t-SNE landmarking. |
 | `select_landmarks()` | native selection | shared selection | shared selection | Selection is independent of the embedding method and can be reused. |
-| `fit_landmark_model()` | ordinary CPU UMAP/openTSNE reference fit | ordinary Metal UMAP/openTSNE reference fit | ordinary CUDA UMAP/openTSNE reference fit | UMAP graph mode and optimizer parameters are preserved explicitly. |
+| `fit_landmark_model()` | ordinary CPU UMAP/t-SNE reference fit | ordinary Metal UMAP/t-SNE reference fit | ordinary CUDA UMAP/t-SNE reference fit | UMAP graph mode and optimizer parameters are preserved explicitly. |
 | `precompute_query_knn()` | native HNSW reference-query search | native exact/recall-tuned IVF-Flat reference-query search | native exact/IVF-Flat reference-query search | Searches only the fixed reference; CUDA output remains device resident. |
 | `project_landmark_model()` | native projection/transform/refinement | native Metal projection/transform/refinement | native CUDA resident projection/transform/refinement | Projects held-out or genuinely new observations while reference coordinates remain fixed. |
 | `landmark_umap()` | one-call landmark embed/project/refine | one-call Metal path | one-call CUDA path | Convenience wrapper; landmarking remains an explicit approximation. |
@@ -44,7 +44,7 @@ queries are best effort. The compiled native probes, not `nvidia-smi` or
 
 | Metric | CPU | Metal | CUDA | Notes |
 | --- | --- | --- | --- | --- |
-| `euclidean` | native HNSW | native exact/IVF-Flat | FAISS GPU exact or cuVS IVF-Flat | Validated default for UMAP/openTSNE. |
+| `euclidean` | native HNSW | native exact/IVF-Flat | FAISS GPU exact or cuVS IVF-Flat | Validated default for UMAP/t-SNE. |
 | `cosine` | row normalization plus native HNSW | row normalization plus native exact/IVF-Flat | row normalization plus native cuVS | Candidate selection is approximate; returned distances use the transformed full-dimensional vectors. |
 | `correlation` | row centering/normalization plus native HNSW | row centering/normalization plus native exact/IVF-Flat | row centering/normalization plus native cuVS | Correlation is represented by Euclidean distance on centered unit rows. |
 | `inner_product` | not supported | not supported | native CUDA route | Explicit unsupported requests fail; they do not fall back to another backend. |
@@ -69,13 +69,13 @@ parallelize. Current CPU priorities are:
 - reuse KNN graphs instead of recomputing them;
 - keep graph data in compact integer/float arrays;
 - use CSR graph storage for UMAP;
-- keep openTSNE attractive affinities sparse;
+- keep t-SNE attractive affinities sparse;
 - avoid unnecessary copies between R matrices and C++ buffers.
 
 ## Metal
 
 Metal is implemented with Objective-C++ and Metal kernels. Public Metal and CUDA
-UMAP/openTSNE paths do not call Python, Torch, MLX, or `reticulate`.
+UMAP/t-SNE paths do not call Python, Torch, MLX, or `reticulate`.
 
 The build-supported target is Apple Silicon with macOS 14 or newer and a full
 Xcode 15 or newer toolchain. Full Metal performance benchmarking has been
@@ -86,7 +86,7 @@ called tested, and they do not inherit the M3 performance results. Intel Macs
 are not a supported Metal target. The CPU backend remains available on Intel
 macOS.
 
-UMAP initialization/optimization, openTSNE FFT-grid optimization, and the
+UMAP initialization/optimization, t-SNE FFT-grid optimization, and the
 current Metal transformation/refinement routes are two-dimensional. The
 capability matrix labels mixed operations explicitly: Metal KNN followed by
 CPU graph assembly is not described as a fully Metal graph workflow, and CPU
@@ -110,7 +110,7 @@ domain.
 The validated UMAP Metal path is `atomic_inplace`; other slower or distorted
 Metal UMAP optimizer experiments were removed from the public API.
 
-The validated openTSNE Metal path is the package-native FFT-grid path with PCA
+The validated t-SNE Metal path is the package-native FFT-grid path with PCA
 initialization. Its PCA initialization uses a single resident float32 workspace,
 MPS matrix products, a small float32 eigensolve, and one final Metal score
 projection. Standalone MPSGraph FFT diagnostic helpers were removed after MNIST
@@ -122,7 +122,7 @@ CUDA support is optional at build time. The package can use:
 
 - direct FAISS GPU `bfKnn` for exact KNN and RAPIDS cuVS C API for IVF-Flat;
 - native CUDA UMAP kernels;
-- native CUDA FFT-grid openTSNE kernels with cuFFT.
+- native CUDA FFT-grid t-SNE kernels with cuFFT.
 
 FAISS, cuVS, CUDA, and cuFFT are not vendored into the package. They must be installed
 on the CUDA machine and matched to the driver/toolkit stack. If CUDA is not

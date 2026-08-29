@@ -5,21 +5,21 @@
 \title{Fit an embedding model on selected landmarks}
 \usage{
 fit_landmark_model(
-  data,
-  selection,
-  method = c("umap", "opentsne"),
-  n_neighbors = NULL,
-  perplexity = NULL,
-  affinity_support = c("standard", "compact"),
-  n_components = 2L,
-  metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  seed = 4L,
-  backend = NULL,
-  n.cores = NULL,
-  graph_mode = c("fuzzy", "binary"),
-  keep_knn = FALSE,
-  verbose = FALSE,
-  ...
+    data,
+    selection,
+    method = c("umap", "tsne"),
+    n_neighbors = NULL,
+    perplexity = NULL,
+    affinity_support = c("standard", "compact"),
+    n_components = 2L,
+    metric = c("euclidean", "cosine", "correlation", "inner_product"),
+    seed = 4L,
+    backend = NULL,
+    n.cores = NULL,
+    graph_mode = c("fuzzy", "binary"),
+    keep_knn = FALSE,
+    verbose = FALSE,
+    ...
 )
 }
 \arguments{
@@ -29,14 +29,14 @@ calling this staged API when centering, scaling, or PCA is required.}
 \item{selection}{A result from [select_landmarks()] or explicit landmark row
 indices.}
 
-\item{method}{`"umap"` or `"opentsne"`.}
+\item{method}{`"umap"` or `"tsne"`.}
 
-\item{n_neighbors}{UMAP neighborhood size. For openTSNE this is the
+\item{n_neighbors}{UMAP neighborhood size. For t-SNE this is the
 precomputed KNN support width; `NULL` derives it from `perplexity`.}
 
-\item{perplexity}{openTSNE perplexity.}
+\item{perplexity}{t-SNE perplexity.}
 
-\item{affinity_support}{openTSNE affinity support policy. `"standard"`
+\item{affinity_support}{t-SNE affinity support policy. `"standard"`
 uses `ceiling(3 * perplexity)` neighbors; `"compact"` is the explicit
 `ceiling(perplexity)` approximation.}
 
@@ -57,14 +57,14 @@ standard `"fuzzy"` graph is the default.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{...}{Additional optimizer arguments passed to [opentsne()].}
+\item{...}{Additional optimizer arguments passed to [tsne()].}
 }
 \value{
 A `fastEmbedR_landmark_model`.
 }
 \description{
 `fit_landmark_model()` runs the ordinary production [umap()] or
-[opentsne()] implementation on the selected reference rows. The returned
+[tsne()] implementation on the selected reference rows. The returned
 object stores the reference data and embedding needed to project the
 complementary rows or genuinely new observations.
 }
@@ -72,7 +72,7 @@ complementary rows or genuinely new observations.
 x <- scale(as.matrix(iris[, 1:4]))
 selection <- select_landmarks(x, 0.5, seed = 1)
 model <- fit_landmark_model(
-  x, selection, method = "umap", n_neighbors = 10,
-  graph_mode = "fuzzy", seed = 1
+    x, selection, method = "umap", n_neighbors = 10,
+    graph_mode = "fuzzy", seed = 1
 )
 }

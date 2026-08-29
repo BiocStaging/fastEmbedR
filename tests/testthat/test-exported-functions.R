@@ -10,12 +10,12 @@ expect_embedding <- function(layout, n) {
   expect_true(all(is.finite(layout)))
 }
 
-test_that("public API is KNN and openTSNE focused", {
+test_that("public API is KNN and t-SNE focused", {
   exports <- getNamespaceExports("fastEmbedR")
   expect_true(all(c(
-    "umap", "umap_knn", "opentsne", "opentsne_knn", "embed_knn",
+    "umap", "umap_knn", "tsne", "tsne_knn", "embed_knn",
     "evaluate_embedding", "transform_tsne", "landmark_tsne",
-    "umap_init", "prepare_umap_knn", "prepare_opentsne_knn", "precompute_knn",
+    "umap_init", "prepare_umap_knn", "prepare_tsne_knn", "precompute_knn",
     "precompute_query_knn", "select_landmarks", "fit_landmark_model",
     "project_landmark_model", "pca", "fastEmbedR_capabilities",
     "knn_graph", "graph_cluster"
@@ -26,11 +26,11 @@ test_that("public API is KNN and openTSNE focused", {
     pca_args[seq_len(6L)],
     c("x", "ncomp", "xtest", "center", "scale", "backend")
   )
-  expect_true(all(c("n.cores", "seed", "opentsne_init") %in% pca_args))
+  expect_true(all(c("n.cores", "seed", "tsne_init") %in% pca_args))
   expect_false("method" %in% pca_args)
-  expect_identical(formals(pca)$opentsne_init, FALSE)
+  expect_identical(formals(pca)$tsne_init, FALSE)
   expect_false(any(c(
-    "supervised_umap", "tsne", "infotsne", "pacmap", "trimap",
+    "supervised_umap", "infotsne", "pacmap", "trimap",
     "localmap", "transform_embedding",
     "nn", "nn_without_self", "candidate_knn", "fast_kmeans",
     "knn_fit", "predict_proba", "knn_recall", "faiss_available",
@@ -42,9 +42,9 @@ test_that("public API is KNN and openTSNE focused", {
     c("data", "k", "metric", "backend", "n.cores")
   )
 
-  expect_true("n.cores" %in% names(formals(opentsne)))
-  expect_true("n.cores" %in% names(formals(opentsne_knn)))
-  expect_true("n.cores" %in% names(formals(opentsne_pca_init)))
+  expect_true("n.cores" %in% names(formals(tsne)))
+  expect_true("n.cores" %in% names(formals(tsne_knn)))
+  expect_true("n.cores" %in% names(formals(tsne_pca_init)))
   expect_true("n.cores" %in% names(formals(umap)))
   expect_true("n.cores" %in% names(formals(umap_knn)))
   expect_true("n.cores" %in% names(formals(embed_knn)))
@@ -55,7 +55,7 @@ test_that("public API is KNN and openTSNE focused", {
   expect_true("backend" %in% names(formals(graph_cluster)))
 })
 
-test_that("core exported functions have tiny openTSNE smoke tests", {
+test_that("core exported functions have tiny t-SNE smoke tests", {
   set.seed(101)
   fixture <- make_cluster_data()
   x <- fixture$x
@@ -86,9 +86,9 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
   expect_equal(dim(knn$indices), c(n, fastEmbedR:::auto_k(x, include_self = TRUE)))
   expect_equal(dim(knn$distances), c(n, fastEmbedR:::auto_k(x, include_self = TRUE)))
   expect_equal(attr(knn, "backend"), "test_exact")
-  layout <- embed_knn(knn, method = "opentsne", perplexity = 1, early_exaggeration_iter = 2L, n_iter = 3L)
+  layout <- embed_knn(knn, method = "tsne", perplexity = 1, early_exaggeration_iter = 2L, n_iter = 3L)
   expect_embedding(layout, n)
-  expect_equal(attr(layout, "fastEmbedR_config")$method, "opentsne")
+  expect_equal(attr(layout, "fastEmbedR_config")$method, "tsne")
 
   layout_umap <- embed_knn(knn, method = "umap")
   expect_embedding(layout_umap, n)
@@ -102,16 +102,16 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
     "cpp_knn_distance_profile"
   )
 
-  layout_knn <- opentsne_knn(knn, perplexity = 1, early_exaggeration_iter = 2L, n_iter = 3L)
+  layout_knn <- tsne_knn(knn, perplexity = 1, early_exaggeration_iter = 2L, n_iter = 3L)
   expect_embedding(layout_knn, n)
-  expect_equal(attr(layout_knn, "fastEmbedR_config")$method, "opentsne")
+  expect_equal(attr(layout_knn, "fastEmbedR_config")$method, "tsne")
 
-  prep_tsne <- prepare_opentsne_knn(knn, perplexity = 1)
-  expect_s3_class(prep_tsne, "fastEmbedR_opentsne_prepared")
-  layout_prepared_tsne <- opentsne_knn(prep_tsne,
+  prep_tsne <- prepare_tsne_knn(knn, perplexity = 1)
+  expect_s3_class(prep_tsne, "fastEmbedR_tsne_prepared")
+  layout_prepared_tsne <- tsne_knn(prep_tsne,
     early_exaggeration_iter = 2L, n_iter = 3L)
   expect_embedding(layout_prepared_tsne, n)
-  expect_equal(attr(layout_prepared_tsne, "fastEmbedR_config")$method, "opentsne")
+  expect_equal(attr(layout_prepared_tsne, "fastEmbedR_config")$method, "tsne")
 
   prep_umap <- prepare_umap_knn(knn, graph_mode = "binary")
   expect_s3_class(prep_umap, "fastEmbedR_umap_prepared")
@@ -130,17 +130,17 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
     attr(layout_initialized_umap, "fastEmbedR_config")$initialization_reuse_hit
   ))
 
-  fit <- opentsne(x, perplexity = 1,
+  fit <- tsne(x, perplexity = 1,
     early_exaggeration_iter = 2L, n_iter = 3L,
     n.cores = 2L)
   expect_s3_class(fit, "fastEmbedR_embedding")
   expect_embedding(fit$layout, n)
-  expect_equal(fit$parameters$method, "opentsne")
+  expect_equal(fit$parameters$method, "tsne")
   expect_equal(fit$parameters$n.cores, 2L)
   expect_null(fit$knn)
-  expect_false("n_neighbors" %in% names(formals(opentsne)))
+  expect_false("n_neighbors" %in% names(formals(tsne)))
 
-  fit_knn <- opentsne(knn, perplexity = 1,
+  fit_knn <- tsne(knn, perplexity = 1,
     early_exaggeration_iter = 2L, n_iter = 3L)
   expect_s3_class(fit_knn, "fastEmbedR_embedding")
   expect_embedding(fit_knn$layout, n)
@@ -154,7 +154,7 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
     sample_size_for_global_metrics = n,
     sample_size_for_local_metrics = n,
     use_cache = FALSE,
-    method = "opentsne",
+    method = "tsne",
     backend = "cpu",
     dataset = "toy"
   )
@@ -170,7 +170,7 @@ test_that("core exported functions have tiny openTSNE smoke tests", {
     sample_size_for_global_metrics = n,
     sample_size_for_local_metrics = n,
     use_cache = FALSE,
-    method = "opentsne",
+    method = "tsne",
     backend = "gpu",
     n.cores = 2L,
     dataset = "toy"

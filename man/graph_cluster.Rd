@@ -4,14 +4,14 @@
 \title{Native graph community detection}
 \usage{
 graph_cluster(
-  graph,
-  method = c("leiden", "louvain", "walktrap"),
-  backend = NULL,
-  resolution = 1,
-  n_iterations = 10L,
-  n_runs = 1L,
-  steps = 4L,
-  seed = 1L
+    graph,
+    method = c("leiden", "louvain", "walktrap"),
+    backend = NULL,
+    resolution = 1,
+    n_iterations = 10L,
+    n_runs = 1L,
+    steps = 4L,
+    seed = 1L
 )
 }
 \arguments{

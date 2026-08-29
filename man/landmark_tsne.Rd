@@ -2,30 +2,30 @@
 % Please edit documentation in R/transform_tsne.R
 \name{landmark_tsne}
 \alias{landmark_tsne}
-\title{Landmark t-SNE with openTSNE-style transform}
+\title{Landmark t-SNE with fixed-reference transform}
 \usage{
 landmark_tsne(
-  data,
-  landmarks = TRUE,
-  reference_method = c("opentsne"),
-  n_neighbors = NULL,
-  perplexity = NULL,
-  affinity_support = c("standard", "compact"),
-  n_components = 2L,
-  standardize = TRUE,
-  pca_dims = NULL,
-  seed = 4L,
-  backend = NULL,
-  transform_k = NULL,
-  transform_perplexity = 5,
-  transform_iter = 250L,
-  transform_early_exaggeration_iter = 0L,
-  transform_n_negatives = NULL,
-  initialization = c("median", "weighted", "random"),
-  keep_knn = FALSE,
-  verbose = FALSE,
-  n.cores = NULL,
-  ...
+    data,
+    landmarks = TRUE,
+    reference_method = c("tsne"),
+    n_neighbors = NULL,
+    perplexity = NULL,
+    affinity_support = c("standard", "compact"),
+    n_components = 2L,
+    standardize = TRUE,
+    pca_dims = NULL,
+    seed = 4L,
+    backend = NULL,
+    transform_k = NULL,
+    transform_perplexity = 5,
+    transform_iter = 250L,
+    transform_early_exaggeration_iter = 0L,
+    transform_n_negatives = NULL,
+    initialization = c("median", "weighted", "random"),
+    keep_knn = FALSE,
+    verbose = FALSE,
+    n.cores = NULL,
+    ...
 )
 }
 \arguments{
@@ -34,12 +34,12 @@ landmark_tsne(
 \item{landmarks}{`TRUE` for an automatic subset, a fraction such as `0.5`, a
 landmark count, or explicit row indices.}
 
-\item{reference_method}{Kept for compatibility. Only `"opentsne"` is
+\item{reference_method}{Kept for compatibility. Only `"tsne"` is
 accepted in the cleaned package API.}
 
 \item{n_neighbors}{Number of non-self neighbors used to embed the landmark
 reference set. If `NULL`, it follows the same neighbor policy as
-[opentsne()]: `ceiling(3 * perplexity)` under standard support.}
+[tsne()]: `ceiling(3 * perplexity)` under standard support.}
 
 \item{perplexity}{t-SNE perplexity for the landmark reference embedding. If
 `NULL`, the optimizer chooses a safe value from the reference KNN width and
@@ -88,25 +88,24 @@ is native and experimental for large reference sets.}
 \item{n.cores}{Number of CPU cores used by CPU KNN and CPU
 transform optimization. Native GPU stages ignore this argument.}
 
-\item{...}{Additional low-level parameters passed to [opentsne_knn()].}
+\item{...}{Additional low-level parameters passed to [tsne_knn()].}
 }
 \value{
 A `fastEmbedR_embedding` object.
 }
 \description{
-`landmark_tsne()` embeds a subset of observations with [opentsne()], then
-places the remaining observations with `transform_tsne()`. This mirrors the
-practical landmark workflow exposed by openTSNE while keeping the
-implementation native to this package. Projection KNN searches only the
+`landmark_tsne()` embeds a subset of observations with [tsne()], then
+places the remaining observations with `transform_tsne()`. Projection KNN
+searches only the
 fixed landmark reference: CPU uses native HNSW, Metal uses native exact or
 recall-tuned IVF-Flat, and CUDA keeps native exact or IVF-Flat results
 resident on the device.
 }
 \examples{
 fit <- landmark_tsne(
-  as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
-  early_exaggeration_iter = 5, n_iter = 10,
-  transform_iter = 5, seed = 1
+    as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
+    early_exaggeration_iter = 5, n_iter = 10,
+    transform_iter = 5, seed = 1
 )
 plot(fit, labels = iris$Species)
 }

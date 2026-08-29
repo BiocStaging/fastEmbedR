@@ -63,7 +63,7 @@ test_that("precompute_knn exposes the native CPU policy without self neighbors",
   expect_identical(dim(layout), c(240L, 2L))
   expect_true(all(is.finite(layout)))
 
-  tsne_layout <- opentsne_knn(
+  tsne_layout <- tsne_knn(
     observed,
     perplexity = 4,
     init_data = x,

@@ -5,11 +5,11 @@
 \title{Precompute native nearest neighbors}
 \usage{
 precompute_knn(
-  data,
-  k = 30L,
-  metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  backend = NULL,
-  n.cores = NULL
+    data,
+    k = 30L,
+    metric = c("euclidean", "cosine", "correlation", "inner_product"),
+    backend = NULL,
+    n.cores = NULL
 )
 }
 \arguments{
@@ -29,12 +29,12 @@ this argument.}
 }
 \value{
 A `fastEmbedR_knn` object. Host results contain `indices` and
-  `distances`; CUDA results additionally inherit from `fastEmbedR_gpu_knn`
-  and own device-resident index and distance buffers.
+    `distances`; CUDA results additionally inherit from `fastEmbedR_gpu_knn`
+    and own device-resident index and distance buffers.
 }
 \description{
 `precompute_knn()` exposes the same package-native nearest-neighbor search
-used internally by [umap()] and [opentsne()]. The search algorithm is chosen
+used internally by [umap()] and [tsne()]. The search algorithm is chosen
 by fastEmbedR for the requested backend and is deliberately not a user
 parameter.
 }
@@ -46,7 +46,7 @@ larger inputs. CUDA uses package-native direct FAISS GPU exact search below
 The internal recall target is 0.99.
 
 The CUDA result remains on the GPU and can be passed directly to
-[umap_knn()] or [opentsne_knn()] with `backend = "cuda"`. CPU and Metal
+[umap_knn()] or [tsne_knn()] with `backend = "cuda"`. CPU and Metal
 results contain one-based `indices` and `distances` matrices. Every result
 excludes the observation itself. An unavailable requested backend raises an
 error; no CPU fallback is reported as GPU work.

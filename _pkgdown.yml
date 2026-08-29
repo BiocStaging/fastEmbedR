@@ -11,23 +11,22 @@ navbar:
 
 home:
   title: fastEmbedR
-  description: Opinionated fixed-policy UMAP and configurable openTSNE-style embeddings from data or precomputed nearest neighbors.
+  description: Native UMAP and interpolation-based t-SNE from data or precomputed nearest neighbors.
 
 articles:
   - title: Start Here
     navbar: ~
     contents:
       - getting-started
-      - algorithmic-design
 
 reference:
-  - title: openTSNE Embeddings
-    desc: Native openTSNE-style embedding, transform, and landmark workflows.
+  - title: t-SNE Embeddings
+    desc: Native interpolation-based t-SNE, transform, and landmark workflows.
     contents:
-      - opentsne
-      - opentsne_knn
-      - opentsne_pca_init
-      - prepare_opentsne_knn
+      - tsne
+      - tsne_knn
+      - tsne_pca_init
+      - prepare_tsne_knn
       - embed_knn
       - transform_tsne
       - landmark_tsne
@@ -45,7 +44,7 @@ reference:
       - fastEmbedR_capabilities
       - fastEmbedR_api
       - pca
-      - opentsne_pca_init
+      - tsne_pca_init
       - umap_init
   - title: Nearest-Neighbor Precomputation
     desc: Build reusable reference and query neighbor structures.

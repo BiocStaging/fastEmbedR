@@ -14,7 +14,7 @@ test_that("fastEmbedR backend precedence is explicit, option, environment, CPU",
 })
 
 test_that("principal public functions defer omitted backends", {
-  functions <- list(umap, opentsne, pca, knn_graph, graph_cluster,
+  functions <- list(umap, tsne, pca, knn_graph, graph_cluster,
                     transform_tsne,
                     precompute_knn, precompute_query_knn, embed_knn)
   expect_true(all(vapply(functions, function(fn) is.null(formals(fn)$backend), logical(1))))

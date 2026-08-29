@@ -133,7 +133,7 @@ License decision:
 - Commit inspected: `c6d15e3d4c0372ea8e7f652014819c98354a3325`
 - License: BSD-3-Clause
 - Current use in `fastEmbedR`: algorithmic behaviour reference for automatic
-  openTSNE parameter selection. No Multicore-opt-SNE source files are vendored,
+  t-SNE parameter selection. No Multicore-opt-SNE source files are vendored,
   linked, called, or copied into the package.
 
 Ideas implemented:
@@ -174,8 +174,8 @@ Ideas/code behaviour used:
   FFT-grid in the MNIST 70k benchmark. The Metal backend has a package-native
   FFT-grid path. The CUDA backend uses package-native kernels plus cuFFT for
   the FFT-grid convolution.
-- Expose `opentsne()` and `embed_knn(method = "opentsne")` as a separate
-  native C++ path with openTSNE-style early exaggeration, normal optimization,
+- Expose `tsne()` and `embed_knn(method = "tsne")` as a separate native C++
+  path with two-phase early-exaggeration and normal optimization,
   automatic learning-rate selection, momentum/gain updates, and max-step
   clipping.
 - Separate sparse KNN attractive forces from approximate negative forces.
@@ -268,10 +268,10 @@ Ideas translated now:
 Implemented location:
 
 - `src/embedding_metal_impl.mm::tsne_transform_epoch`: native Metal kernel for
-  the openTSNE-style fixed-reference transform.
+  the fixed-reference t-SNE transform.
 - `src/embedding_metal_impl.mm::tsne_probability_dense_rows`,
   `tsne_global_sum_q`, and `tsne_full_exact_dense_epoch`: native Metal exact
-  openTSNE-style optimizer from KNN for moderate datasets.
+  t-SNE optimizer from KNN for moderate datasets.
 - `R/transform_tsne.R::transform_tsne`: explicit `backend = "metal"` dispatch.
 - CUDA full-embedding kernels are shipped as package-owned float32 code using
   installed CUDA/cuFFT primitives. t-SNE-CUDA remains an architecture
@@ -425,7 +425,7 @@ Implemented locations:
 - `src/native_knn_cuda_impl.cpp` calls the installed cuVS C API and owns the
   resulting device buffers; fastEmbedR does not vendor RAPIDS source.
 - `src/embedding_cuda_impl.cpp` and `src/embedding_cuda_kernels.cpp`:
-  package-native CUDA UMAP and openTSNE kernels when CUDA support is compiled.
+  package-native CUDA UMAP and t-SNE kernels when CUDA support is compiled.
 
 ## mlx-vis
 
@@ -439,17 +439,17 @@ Ideas used:
 
 - GPU-resident KNN/embedding pipeline structure as a Metal design reference.
 - FFT-grid/scatter/gather architecture as a reference while validating the
-  native Metal openTSNE path.
+  native Metal t-SNE path.
 
 Implemented locations:
 
-- `src/embedding_metal_impl.mm`: native Metal UMAP/openTSNE kernels.
+- `src/embedding_metal_impl.mm`: native Metal UMAP/t-SNE kernels.
 
 ## Apple Metal Performance Shaders Matrix
 
 - Documentation: <https://developer.apple.com/documentation/metalperformanceshaders/matrices_and_vectors>
 - Current use in `fastEmbedR`: package-native float32 block-subspace TSVD for
-  Metal PCA and openTSNE initialization. MPS matrix multiplication executes the
+  Metal PCA and t-SNE initialization. MPS matrix multiplication executes the
   large forward/back projections while buffers remain resident in Apple unified
   memory. A package-native float32 Jacobi eigensolver handles only the small
   projected Gram matrix.
@@ -462,7 +462,7 @@ Implemented location:
 
 - Documentation: <https://developer.apple.com/documentation/metalperformanceshadersgraph>
 - Current use in `fastEmbedR`: diagnostic-only FFT and convolution comparison
-  for Metal openTSNE. It is not the default public openTSNE backend because the
+  for Metal t-SNE. It is not the default public t-SNE backend because the
   MNIST 70k flattened-image benchmark showed only a small speed gain and a
   small quality/plot shift compared with the package-native Metal FFT-grid
   path.

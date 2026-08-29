@@ -8,11 +8,11 @@ fastEmbedR_capabilities()
 }
 \value{
 A data frame with one row per backend or backend component. In
-  addition to logical availability columns, the result records the public
-  backend name, detected device, native KNN engine, internal precision,
-  linked runtime families, and an explanation when a component is
-  unavailable. Device-name queries are best effort and do not change the
-  capability decision made by the compiled native probes.
+    addition to logical availability columns, the result records the public
+    backend name, detected device, native KNN engine, internal precision,
+    linked runtime families, and an explanation when a component is
+    unavailable. Device-name queries are best effort and do not change the
+    capability decision made by the compiled native probes.
 }
 \description{
 Reports whether the installed fastEmbedR build can provide nearest-neighbor

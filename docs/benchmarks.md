@@ -31,7 +31,7 @@ CSV are shown on the [Examples](examples.md) page.
 
 The example R code compares:
 
-- `fastEmbedR::opentsne()`;
+- `fastEmbedR::tsne()`;
 - `Rtsne::Rtsne()`;
 - `fastEmbedR::umap(..., graph_mode = "fuzzy")`;
 - `uwot::umap(..., fast_sgd = TRUE)`.
@@ -115,7 +115,7 @@ The script writes:
 
 The validation compares:
 
-- `fastEmbedR::opentsne_knn()` against `Rtsne::Rtsne_neighbors()` using the
+- `fastEmbedR::tsne_knn()` against `Rtsne::Rtsne_neighbors()` using the
   same exact KNN matrix and fixed PCA initialization. Because iris is a small
   correctness check, the fastEmbedR run uses the exact negative-gradient path
   rather than the large-data FFT-grid approximation;
@@ -133,7 +133,7 @@ validation asks whether the native implementation preserves the same local
 structure, reaches a comparable t-SNE objective value, and builds a UMAP graph
 consistent with the reference implementation.
 
-For the current iris validation run, fastEmbedR openTSNE-style t-SNE and
+For the current iris validation run, fastEmbedR interpolation-based t-SNE and
 `Rtsne_neighbors()` reached nearly identical final KL values (`0.30910` versus
 `0.30887`), the same embedding-space KNN label accuracy (`0.967`), and a
 Procrustes-aligned coordinate correlation of `0.848` under the fixed PCA

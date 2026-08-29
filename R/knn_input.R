@@ -1,249 +1,299 @@
 coerce_knn_input <- function(indices,
-                             distances = NULL,
-                             arg_name = "indices") {
-  input_backend <- NA_character_
-  input_gpu_resident_source <- FALSE
-  if (is.null(distances)) {
-    if (fastembedr_is_gpu_knn(indices)) {
-      indices <- fastembedr_gpu_knn_to_host(indices)
-      input_gpu_resident_source <- TRUE
+                            distances = NULL,
+                            arg_name = "indices") {
+    input_backend <- NA_character_
+    input_gpu_resident_source <- FALSE
+    if (is.null(distances)) {
+        if (fastembedr_is_gpu_knn(indices)) {
+            indices <- fastembedr_gpu_knn_to_host(indices)
+            input_gpu_resident_source <- TRUE
+        }
+        if (!is.list(indices) || !all(c("indices", "distances") %in% names(
+            indices
+        ))) {
+            stop(
+                "`distances` is required unless `", arg_name,
+                "` is a list containing `indices` and `distances`.",
+                call. = FALSE
+            )
+        }
+        input_gpu_resident_source <- input_gpu_resident_source ||
+            isTRUE(attr(indices, "gpu_resident_source"))
+        input_backend <- attr(indices, "backend")
+        distances <- indices$distances
+        indices <- indices$indices
     }
-    if (!is.list(indices) || !all(c("indices", "distances") %in% names(indices))) {
-      stop(
-        "`distances` is required unless `", arg_name,
-        "` is a list containing `indices` and `distances`.",
-        call. = FALSE
-      )
+
+    distance_is_float32 <- is_float32_matrix(distances)
+    if (!is.matrix(indices)) indices <- as.matrix(indices)
+    if (!distance_is_float32 && !is.matrix(distances)) {
+        distances <- as.matrix(
+            distances
+        )
     }
-    input_gpu_resident_source <- input_gpu_resident_source ||
-      isTRUE(attr(indices, "gpu_resident_source"))
-    input_backend <- attr(indices, "backend")
-    distances <- indices$distances
-    indices <- indices$indices
-  }
+    if (!is.integer(indices)) storage.mode(indices) <- "integer"
+    if (!distance_is_float32 && !identical(typeof(distances), "double")) {
+        storage.mode(distances) <- "double"
+    }
 
-  distance_is_float32 <- is_float32_matrix(distances)
-  if (!is.matrix(indices)) indices <- as.matrix(indices)
-  if (!distance_is_float32 && !is.matrix(distances)) distances <- as.matrix(distances)
-  if (!is.integer(indices)) storage.mode(indices) <- "integer"
-  if (!distance_is_float32 && !identical(typeof(distances), "double")) {
-    storage.mode(distances) <- "double"
-  }
+    if (!identical(dim(indices), dim(distances))) {
+        stop("KNN `indices` and `distances` must have the same dimensions.",
+            call. = FALSE
+        )
+    }
+    if (nrow(indices) < 2L || ncol(indices) < 1L) {
+        stop("KNN input must have at least two rows and one neighbor column.",
+            call. = FALSE
+        )
+    }
 
-  if (!identical(dim(indices), dim(distances))) {
-    stop("KNN `indices` and `distances` must have the same dimensions.", call. = FALSE)
-  }
-  if (nrow(indices) < 2L || ncol(indices) < 1L) {
-    stop("KNN input must have at least two rows and one neighbor column.", call. = FALSE)
-  }
+    stripped <- if (distance_is_float32) {
+        strip_self_neighbors_float_cpp(indices, distances)
+    } else {
+        strip_self_neighbors_cpp(indices, distances)
+    }
+    indices <- stripped$indices
+    distances <- stripped$distances
+    has_self <- isTRUE(stripped$has_self)
+    col_start <- stripped$col_start
+    n_neighbors <- stripped$n_neighbors
+    if (n_neighbors < 1L) {
+        stop("KNN input must contain at least one non-self neighbor.",
+            call. = FALSE
+        )
+    }
 
-  stripped <- if (distance_is_float32) {
-    strip_self_neighbors_float_cpp(indices, distances)
-  } else {
-    strip_self_neighbors_cpp(indices, distances)
-  }
-  indices <- stripped$indices
-  distances <- stripped$distances
-  has_self <- isTRUE(stripped$has_self)
-  col_start <- stripped$col_start
-  n_neighbors <- stripped$n_neighbors
-  if (n_neighbors < 1L) {
-    stop("KNN input must contain at least one non-self neighbor.", call. = FALSE)
-  }
-
-  list(
-    indices = indices,
-    distances = distances,
-    has_self = has_self,
-    col_start = as.integer(col_start),
-    n_neighbors = as.integer(n_neighbors),
-    materialized = isTRUE(stripped$materialized),
-    input_backend = if (is.null(input_backend)) NA_character_ else input_backend,
-    input_gpu_resident_source = input_gpu_resident_source,
-    distance_type = stripped$distance_type %||%
-      if (distance_is_float32) "float32" else "double"
-  )
+    list(
+        indices = indices,
+        distances = distances,
+        has_self = has_self,
+        col_start = as.integer(col_start),
+        n_neighbors = as.integer(n_neighbors),
+        materialized = isTRUE(stripped$materialized),
+        input_backend = if (is.null(
+            input_backend
+        )) {
+            NA_character_
+        } else {
+            input_backend
+        },
+        input_gpu_resident_source = input_gpu_resident_source,
+        distance_type = stripped$distance_type %||%
+            if (distance_is_float32) "float32" else "double"
+    )
 }
 
 is_knn_input <- function(x) {
-  fastembedr_is_gpu_knn(x) ||
-    (is.list(x) && all(c("indices", "distances") %in% names(x)))
+    fastembedr_is_gpu_knn(x) ||
+        (is.list(x) && all(c("indices", "distances") %in% names(x)))
 }
 
 is_float32_matrix <- function(x) {
-  inherits(x, "float32")
+    inherits(x, "float32")
 }
 
 public_core_config <- function(config) {
-  if (!is.list(config)) return(config)
-  if (!is.null(config$n_threads)) {
-    config$n.cores <- config$n_threads
-    config$n_threads <- NULL
-  }
-  config
+    if (!is.list(config)) {
+        return(config)
+    }
+    if (!is.null(config$n_threads)) {
+        config$n.cores <- config$n_threads
+        config$n_threads <- NULL
+    }
+    config
 }
 
 fastembedr_knn_output_type <- function(data, backend) {
-  if (!requireNamespace("float", quietly = TRUE)) return("double")
-  if (is_float32_matrix(data)) return("float")
-  if (backend %in% c("cpu", "cuda")) return("float")
-  "double"
+    if (!requireNamespace("float", quietly = TRUE)) {
+        return("double")
+    }
+    if (is_float32_matrix(data)) {
+        return("float")
+    }
+    if (backend %in% c("cpu", "cuda")) {
+        return("float")
+    }
+    "double"
 }
 
 knn_index_base <- function(indices, n = nrow(indices)) {
-  observed <- indices[!is.na(indices)]
-  if (!length(observed)) {
-    return("zero")
-  }
-  min_idx <- min(observed)
-  max_idx <- max(observed)
-  if (is.finite(min_idx) && is.finite(max_idx) && min_idx >= 1L && max_idx <= n) {
-    return("one")
-  }
-  "zero"
+    observed <- indices[!is.na(indices)]
+    if (!length(observed)) {
+        return("zero")
+    }
+    min_idx <- min(observed)
+    max_idx <- max(observed)
+    if (is.finite(min_idx) && is.finite(max_idx) && min_idx >= 1L && max_idx <=
+        n) {
+        return("one")
+    }
+    "zero"
 }
 
 strip_self_neighbors <- function(indices, distances) {
-  if (ncol(indices) < 1L) {
-    return(list(
-      indices = indices, distances = distances, has_self = FALSE,
-      col_start = 0L, n_neighbors = 0L, materialized = FALSE
-    ))
-  }
-  n <- nrow(indices)
-  k <- ncol(indices)
-  expected <- if (identical(knn_index_base(indices, n), "one")) seq_len(n) else seq_len(n) - 1L
-  tolerance <- max(sqrt(.Machine$double.eps), 1e-12)
+    if (ncol(indices) < 1L) {
+        return(list(
+            indices = indices, distances = distances, has_self = FALSE,
+            col_start = 0L, n_neighbors = 0L, materialized = FALSE
+        ))
+    }
+    n <- nrow(indices)
+    k <- ncol(indices)
+    expected <- if (identical(knn_index_base(indices, n), "one")) {
+        seq_len(
+            n
+        )
+    } else {
+        seq_len(n) - 1L
+    }
+    tolerance <- max(sqrt(.Machine$double.eps), 1e-12)
 
-  first_self <- indices[, 1L] == expected & distances[, 1L] <= tolerance
-  if (all(first_self)) {
-    return(list(
-      indices = indices,
-      distances = distances,
-      has_self = TRUE,
-      col_start = 1L,
-      n_neighbors = as.integer(k - 1L),
-      materialized = FALSE
-    ))
-  }
+    first_self <- indices[, 1L] == expected & distances[, 1L] <= tolerance
+    if (all(first_self)) {
+        return(list(
+            indices = indices,
+            distances = distances,
+            has_self = TRUE,
+            col_start = 1L,
+            n_neighbors = as.integer(k - 1L),
+            materialized = FALSE
+        ))
+    }
 
-  self_mask <- indices == expected & distances <= tolerance
-  has_self <- all(rowSums(self_mask) > 0L)
-  if (!has_self) {
-    return(list(
-      indices = indices, distances = distances, has_self = FALSE,
-      col_start = 0L, n_neighbors = as.integer(k), materialized = FALSE
-    ))
-  }
-  if (k == 1L) {
-    return(list(
-      indices = indices[, 0L, drop = FALSE],
-      distances = distances[, 0L, drop = FALSE],
-      has_self = TRUE,
-      col_start = 0L,
-      n_neighbors = 0L,
-      materialized = TRUE
-    ))
-  }
-  out_indices <- matrix(0L, nrow = n, ncol = k - 1L)
-  out_distances <- matrix(0, nrow = n, ncol = k - 1L)
-  storage.mode(out_indices) <- "integer"
-  storage.mode(out_distances) <- "double"
-  cols <- seq_len(k)
-  for (i in seq_len(n)) {
-    self_pos <- which(self_mask[i, ])[1L]
-    keep <- cols[-self_pos]
-    out_indices[i, ] <- indices[i, keep]
-    out_distances[i, ] <- distances[i, keep]
-  }
-  list(
-    indices = out_indices,
-    distances = out_distances,
-    has_self = TRUE,
-    col_start = 0L,
-    n_neighbors = as.integer(k - 1L),
-    materialized = TRUE
-  )
+    self_mask <- indices == expected & distances <= tolerance
+    has_self <- all(rowSums(self_mask) > 0L)
+    if (!has_self) {
+        return(list(
+            indices = indices, distances = distances, has_self = FALSE,
+            col_start = 0L, n_neighbors = as.integer(k), materialized = FALSE
+        ))
+    }
+    if (k == 1L) {
+        return(list(
+            indices = indices[, 0L, drop = FALSE],
+            distances = distances[, 0L, drop = FALSE],
+            has_self = TRUE,
+            col_start = 0L,
+            n_neighbors = 0L,
+            materialized = TRUE
+        ))
+    }
+    out_indices <- matrix(0L, nrow = n, ncol = k - 1L)
+    out_distances <- matrix(0, nrow = n, ncol = k - 1L)
+    storage.mode(out_indices) <- "integer"
+    storage.mode(out_distances) <- "double"
+    cols <- seq_len(k)
+    for (i in seq_len(n)) {
+        self_pos <- which(self_mask[i, ])[1L]
+        keep <- cols[-self_pos]
+        out_indices[i, ] <- indices[i, keep]
+        out_distances[i, ] <- distances[i, keep]
+    }
+    list(
+        indices = out_indices,
+        distances = out_distances,
+        has_self = TRUE,
+        col_start = 0L,
+        n_neighbors = as.integer(k - 1L),
+        materialized = TRUE
+    )
 }
 
 materialize_knn_range <- function(indices,
-                                  distances,
-                                  col_start = 0L,
-                                  n_neighbors = ncol(indices) - col_start) {
-  col_start <- as.integer(col_start)
-  n_neighbors <- as.integer(n_neighbors)
-  if (col_start == 0L && n_neighbors == ncol(indices)) {
-    return(list(indices = indices, distances = distances))
-  }
-  cols <- seq.int(col_start + 1L, length.out = n_neighbors)
-  list(
-    indices = indices[, cols, drop = FALSE],
-    distances = distances[, cols, drop = FALSE]
-  )
+                                distances,
+                                col_start = 0L,
+                                n_neighbors = ncol(indices) - col_start) {
+    col_start <- as.integer(col_start)
+    n_neighbors <- as.integer(n_neighbors)
+    if (col_start == 0L && n_neighbors == ncol(indices)) {
+        return(list(indices = indices, distances = distances))
+    }
+    cols <- seq.int(col_start + 1L, length.out = n_neighbors)
+    list(
+        indices = indices[, cols, drop = FALSE],
+        distances = distances[, cols, drop = FALSE]
+    )
 }
 
 knn_has_self_column <- function(indices, distances) {
-  strip_self_neighbors(indices, distances)$has_self
+    strip_self_neighbors(indices, distances)$has_self
 }
 
 set_embedding_colnames <- function(layout, prefix) {
-  if (!is.matrix(layout) && !is_float32_matrix(layout)) layout <- as.matrix(layout)
-  dimnames(layout)[[2L]] <- paste0(prefix, seq_len(ncol(layout)))
-  layout
+    if (!is.matrix(layout) && !is_float32_matrix(layout)) {
+        layout <- as.matrix(
+            layout
+        )
+    }
+    dimnames(layout)[[2L]] <- paste0(prefix, seq_len(ncol(layout)))
+    layout
 }
 
 embedding_dense_double_matrix <- function(x) {
-  if (is_float32_matrix(x)) {
-    if (!requireNamespace("float", quietly = TRUE)) {
-      stop("The float package is required to decode float32 matrices.", call. = FALSE)
+    if (is_float32_matrix(x)) {
+        if (!requireNamespace("float", quietly = TRUE)) {
+            stop("The float package is required to decode float32 matrices.",
+                call. = FALSE
+            )
+        }
+        x <- float::dbl(x)
+    } else {
+        x <- as.matrix(x)
     }
-    x <- float::dbl(x)
-  } else {
-    x <- as.matrix(x)
-  }
-  storage.mode(x) <- "double"
-  x
+    storage.mode(x) <- "double"
+    x
 }
 
 finalize_embedding_layout <- function(layout, prefix, return_float32 = FALSE) {
-  attrs <- attributes(layout)
-  layout <- if (isTRUE(return_float32) && requireNamespace("float", quietly = TRUE)) {
-    if (is_float32_matrix(layout)) layout else float::fl(as.matrix(layout))
-  } else {
-    embedding_dense_double_matrix(layout)
-  }
-  layout <- set_embedding_colnames(layout, prefix)
-  keep <- setdiff(names(attrs), c("dim", "dimnames", "names", "class", "Data"))
-  for (name in keep) {
-    attr(layout, name) <- attrs[[name]]
-  }
-  attr(layout, "precision") <- if (is_float32_matrix(layout)) "float32" else "double"
-  layout
+    attrs <- attributes(layout)
+    layout <- if (isTRUE(return_float32) && requireNamespace("float",
+        quietly = TRUE
+    )) {
+        if (is_float32_matrix(layout)) layout else float::fl(as.matrix(layout))
+    } else {
+        embedding_dense_double_matrix(layout)
+    }
+    layout <- set_embedding_colnames(layout, prefix)
+    keep <- setdiff(names(attrs), c(
+        "dim", "dimnames", "names", "class",
+        "Data"
+    ))
+    for (name in keep) {
+        attr(layout, name) <- attrs[[name]]
+    }
+    attr(layout, "precision") <- if (is_float32_matrix(
+        layout
+    )) {
+        "float32"
+    } else {
+        "double"
+    }
+    layout
 }
 
 validate_n_components <- function(n_components) {
-  n_components <- as.integer(n_components)
-  invalid <- length(n_components) != 1L ||
-    is.na(n_components) ||
-    !is.finite(n_components) ||
-    n_components < 1L
-  if (invalid) {
-    stop("`n_components` must be a positive integer.", call. = FALSE)
-  }
-  n_components
+    n_components <- as.integer(n_components)
+    invalid <- length(n_components) != 1L ||
+        is.na(n_components) ||
+        !is.finite(n_components) ||
+        n_components < 1L
+    if (invalid) {
+        stop("`n_components` must be a positive integer.", call. = FALSE)
+    }
+    n_components
 }
 
 finish_nn_result <- function(out,
-                             backend,
-                             k,
-                             self_query,
-                             exact = TRUE,
-                             metric = "euclidean") {
-  attr(out, "backend") <- backend
-  attr(out, "k") <- as.integer(k)
-  attr(out, "self_query") <- isTRUE(self_query)
-  attr(out, "exact") <- isTRUE(exact)
-  attr(out, "metric") <- metric
-  class(out) <- c("fastEmbedR_nn", "list")
-  out
+                            backend,
+                            k,
+                            self_query,
+                            exact = TRUE,
+                            metric = "euclidean") {
+    attr(out, "backend") <- backend
+    attr(out, "k") <- as.integer(k)
+    attr(out, "self_query") <- isTRUE(self_query)
+    attr(out, "exact") <- isTRUE(exact)
+    attr(out, "metric") <- metric
+    class(out) <- c("fastEmbedR_nn", "list")
+    out
 }

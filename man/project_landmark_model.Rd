@@ -5,20 +5,20 @@
 \title{Project observations into a fitted landmark embedding}
 \usage{
 project_landmark_model(
-  model,
-  data,
-  query_indices = NULL,
-  transform_k = NULL,
-  refinement_epochs = 50L,
-  transform_perplexity = 5,
-  transform_iter = 250L,
-  transform_early_exaggeration_iter = 0L,
-  transform_n_negatives = NULL,
-  initialization = c("median", "weighted", "random"),
-  keep_knn = FALSE,
-  n.cores = NULL,
-  verbose = FALSE,
-  ...
+    model,
+    data,
+    query_indices = NULL,
+    transform_k = NULL,
+    refinement_epochs = 50L,
+    transform_perplexity = 5,
+    transform_iter = 250L,
+    transform_early_exaggeration_iter = 0L,
+    transform_n_negatives = NULL,
+    initialization = c("median", "weighted", "random"),
+    keep_knn = FALSE,
+    n.cores = NULL,
+    verbose = FALSE,
+    ...
 )
 }
 \arguments{
@@ -35,15 +35,15 @@ always treats `data` as new query observations.}
 
 \item{refinement_epochs}{Fixed-reference UMAP refinement epochs.}
 
-\item{transform_perplexity}{Perplexity of the openTSNE transform.}
+\item{transform_perplexity}{Perplexity of the t-SNE transform.}
 
-\item{transform_iter}{Number of openTSNE transform iterations.}
+\item{transform_iter}{Number of t-SNE transform iterations.}
 
 \item{transform_early_exaggeration_iter}{Transform exaggeration iterations.}
 
-\item{transform_n_negatives}{Number of reference negatives for openTSNE.}
+\item{transform_n_negatives}{Number of reference negatives for t-SNE.}
 
-\item{initialization}{openTSNE query initialization.}
+\item{initialization}{t-SNE query initialization.}
 
 \item{keep_knn}{Retain query-to-reference KNN output.}
 
@@ -51,14 +51,14 @@ always treats `data` as new query observations.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{...}{Low-level openTSNE transform controls.}
+\item{...}{Low-level t-SNE transform controls.}
 }
 \value{
 A `fastEmbedR_embedding`. For a strict landmark-subset model, passing
-  the original full matrix reassembles `layout` in original row order.
-  Otherwise `layout` contains only the supplied query rows. The returned
-  parameters record `projection_scope` as `"original_reconstruction"` or
-  `"held_out_query"`.
+    the original full matrix reassembles `layout` in original row order.
+    Otherwise `layout` contains only the supplied query rows. The returned
+    parameters record `projection_scope` as `"original_reconstruction"` or
+    `"held_out_query"`.
 }
 \description{
 `project_landmark_model()` computes query-to-reference KNN with the same
@@ -70,7 +70,7 @@ fixed.
 x <- scale(as.matrix(iris[, 1:4]))
 selection <- select_landmarks(x, 0.5, seed = 1)
 model <- fit_landmark_model(
-  x, selection, method = "umap", n_neighbors = 10, seed = 1
+    x, selection, method = "umap", n_neighbors = 10, seed = 1
 )
 fit <- project_landmark_model(model, x, refinement_epochs = 2)
 }

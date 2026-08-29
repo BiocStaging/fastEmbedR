@@ -3,8 +3,8 @@
 \title{Backend-native truncated PCA}
 \usage{
 pca(x, ncomp = 2L, xtest = NULL, center = TRUE, scale = FALSE,
-  backend = NULL, n.cores = 1L, seed = 4L,
-  opentsne_init = FALSE)
+    backend = NULL, n.cores = 1L, seed = 4L,
+    tsne_init = FALSE)
 }
 \arguments{
 \item{x}{Numeric matrix/data frame or \code{float::float32} matrix with
@@ -30,16 +30,16 @@ Metal and CUDA.}
 The native RAFT covariance-eigensolver route records this value for
 provenance but does not consume random numbers.}
 
-\item{opentsne_init}{If \code{TRUE}, add \code{opentsne_init} to the
+\item{tsne_init}{If \code{TRUE}, add \code{tsne_init} to the
 returned PCA object. This matrix is centered and rescaled so its largest
 component standard deviation is \code{1e-4}, ready to pass as \code{Y_init}
-to \code{opentsne()} or \code{opentsne_knn()}.}
+to \code{tsne()} or \code{tsne_knn()}.}
 }
 \value{
 A \code{fastEmbedR_pca} list with \code{scores}, \code{loadings},
 \code{singular_values}, centering/scaling vectors, backend metadata, and
-decomposition metadata. When \code{opentsne_init = TRUE}, the list also
-contains \code{opentsne_init}; when \code{xtest} is supplied, it also contains
+decomposition metadata. When \code{tsne_init = TRUE}, the list also
+contains \code{tsne_init}; when \code{xtest} is supplied, it also contains
 \code{scores_test}. Metal and CUDA preserve \code{float::float32} scores,
 loadings, initialization, and compatible test projections when the input is
 float32. CPU preserves float32 scores and loadings for float32 input and records
@@ -68,12 +68,12 @@ Explicit unavailable GPU requests fail instead of being reported as GPU work.
 }
 \examples{
 fit <- pca(
-  as.matrix(iris[, 1:4]),
-  ncomp = 2,
-  n.cores = 2,
-  seed = 1,
-  opentsne_init = TRUE
+    as.matrix(iris[, 1:4]),
+    ncomp = 2,
+    n.cores = 2,
+    seed = 1,
+    tsne_init = TRUE
 )
 plot(fit$scores, pch = 21, bg = iris$Species)
-plot(fit$opentsne_init, pch = 21, bg = iris$Species)
+plot(fit$tsne_init, pch = 21, bg = iris$Species)
 }

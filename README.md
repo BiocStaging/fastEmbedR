@@ -21,19 +21,16 @@ CUDA, rather than a drop-in interface for arbitrary UMAP parameter sweeps. Its
 primary contributions are:
 
 - UMAP from KNN input;
-- openTSNE-style t-SNE from KNN input;
+- interpolation-based t-SNE from KNN input;
 - native CPU, Apple Metal, and CUDA embedding backends where available;
 - float32 input/output support with float32 native optimizer buffers;
 - explicit backend reporting, with no silent CPU fallback labelled as GPU;
 - native CPU HNSW and Apple Metal exact/IVF-Flat KNN for one-call embeddings;
 - optional GPU-resident CUDA KNN through direct FAISS GPU and RAPIDS cuVS APIs.
 
-Here, **openTSNE-style** describes algorithmic lineage: sparse perplexity
-affinities, two-phase t-SNE optimization, FIt-SNE interpolation/FFT repulsion,
-and fixed-reference transformation. It does not mean that fastEmbedR wraps,
-ports, or is API-compatible with the Python `openTSNE` package. fastEmbedR
-defines its own R API, defaults, objects, float32 storage, and native
-CPU/Metal/CUDA kernels. The production default uses
+The t-SNE implementation combines sparse perplexity affinities, two-phase
+optimization, interpolation/FFT repulsion, and fixed-reference transformation
+in native CPU, Metal, and CUDA kernels. The production default uses
 `affinity_support = "standard"`, corresponding to
 `ceiling(3 * perplexity)` non-self candidate neighbors. The older
 `"compact"` policy uses only `ceiling(perplexity)` and is exposed solely as an
@@ -55,19 +52,19 @@ for an untested GPU. See the [hardware evidence contract](docs/backend-validatio
 
 The intended workflow is:
 
-1. call `opentsne()` or `umap()` and let fastEmbedR select its native KNN path,
+1. call `tsne()` or `umap()` and let fastEmbedR select its native KNN path,
    or call `precompute_knn()` explicitly with a CPU, Metal, or CUDA backend;
-2. reuse that KNN object in `fastEmbedR::opentsne_knn()` or
+2. reuse that KNN object in `fastEmbedR::tsne_knn()` or
    `fastEmbedR::umap_knn()`;
 3. evaluate or plot the embedding.
 
-For the one-call functions `opentsne()` and `umap()`, the embedding backend is
+For the one-call functions `tsne()` and `umap()`, the embedding backend is
 deliberately limited to `backend = "cpu"`, `"metal"`, or `"cuda"`. Internal
 CPU one-call embeddings use the package-native float32 HNSW path. Metal uses
 native exact search for small inputs and recall-tuned IVF-Flat for larger
 inputs. CUDA uses direct FAISS GPU exact search below 100,000 rows and direct
 cuVS IVF-Flat above that threshold, then passes package-owned device pointers
-into UMAP or openTSNE. It does not call another R package for KNN. No
+into UMAP or t-SNE. It does not call another R package for KNN. No
 unavailable GPU backend is silently relabelled as CPU.
 
 ## Quick Start
@@ -78,7 +75,7 @@ library(fastEmbedR)
 x <- scale(as.matrix(iris[, 1:4]))
 labels <- iris$Species
 
-y_tsne <- fastEmbedR::opentsne(
+y_tsne <- fastEmbedR::tsne(
   x,
   perplexity = 10,
   backend = "cpu",
@@ -128,14 +125,14 @@ available from `fastEmbedR::fastEmbedR_api()` and in the
 | Function | Purpose |
 | --- | --- |
 | `precompute_knn()` | Native non-self KNN search on CPU, Metal, or CUDA, with backend-specific algorithm selection kept internal. |
-| `opentsne_knn()` | Native openTSNE-style t-SNE from a supplied KNN object. |
-| `opentsne()` | One-call KNN plus openTSNE-style t-SNE. |
+| `tsne_knn()` | Native interpolation-based t-SNE from a supplied KNN object. |
+| `tsne()` | One-call KNN plus interpolation-based t-SNE. |
 | `umap_init()` | Build and retain a reusable UMAP graph plus its independent sparse initialization. |
 | `umap_knn()` | Native UMAP from a supplied KNN object. |
 | `umap()` | One-call KNN plus UMAP. |
-| `pca()` | Backend-native truncated PCA; CPU calls expose `n.cores`, and `opentsne_init = TRUE` returns a ready-to-use openTSNE initialization. |
+| `pca()` | Backend-native truncated PCA; CPU calls expose `n.cores`, and `tsne_init = TRUE` returns a ready-to-use t-SNE initialization. |
 | `select_landmarks()` | Select and retain a reusable landmark/reference split. |
-| `fit_landmark_model()` | Fit ordinary UMAP or openTSNE on the landmark reference. |
+| `fit_landmark_model()` | Fit ordinary UMAP or t-SNE on the landmark reference. |
 | `project_landmark_model()` | Project held-out or new observations into the fixed reference. |
 | `landmark_tsne()` / `landmark_umap()` | One-call landmark embedding and projection workflows. |
 | `evaluate_embedding()` | Trustworthiness, neighbor preservation, label accuracy, and related metrics. |
@@ -168,7 +165,7 @@ See [Installation](docs/installation.md) for `fastEmbedR` CPU, Metal, and CUDA
 embedding builds, including direct FAISS GPU and RAPIDS cuVS linkage for CUDA KNN.
 See [Bioconductor](docs/bioconductor.md) for the dependency split used for
 submission: native CPU/Metal code in `fastEmbedR`, optional direct FAISS/cuVS CUDA
-KNN, and reference packages only in `Suggests`.
+KNN, and reference packages isolated in the separate benchmark environment.
 
 ## License
 
@@ -178,7 +175,8 @@ runtime dependencies or vendored source. Native KNN derivatives and optional
 linked libraries retain the FAISS MIT, Faiss-mlx Apache-2.0, and RAPIDS cuVS
 Apache-2.0 notices under `inst/LICENSES/`.
 
-Source-level provenance is auditable in [`inst/NOTICE`](inst/NOTICE),
+See [Source provenance and licensing](docs/provenance-and-licensing.md) for the
+audit structure. Source-level records are maintained in [`inst/NOTICE`](inst/NOTICE),
 [`inst/COPYRIGHTS`](inst/COPYRIGHTS), and the machine-readable
 [`inst/THIRD_PARTY_DEPENDENCIES.json`](inst/THIRD_PARTY_DEPENDENCIES.json).
 These files distinguish adapted or vendored code from optional linked

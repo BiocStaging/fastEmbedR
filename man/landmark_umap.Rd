@@ -3,19 +3,19 @@
 \title{Run Landmark UMAP}
 \usage{
 landmark_umap(
-  data,
-  landmarks = 0.5,
-  n_neighbors = NULL,
-  n_components = 2L,
-  standardize = TRUE,
-  pca_dims = NULL,
-  seed = 4L,
-  backend = NULL,
-  transform_k = NULL,
-  n.cores = NULL,
-  keep_knn = FALSE,
-  graph_mode = c("fuzzy", "binary"),
-  verbose = FALSE
+    data,
+    landmarks = 0.5,
+    n_neighbors = NULL,
+    n_components = 2L,
+    standardize = TRUE,
+    pca_dims = NULL,
+    seed = 4L,
+    backend = NULL,
+    transform_k = NULL,
+    n.cores = NULL,
+    keep_knn = FALSE,
+    graph_mode = c("fuzzy", "binary"),
+    verbose = FALSE
 )
 }
 \description{
@@ -34,7 +34,8 @@ KNN, local affine placement, and optional fixed-reference refinement.
 \item{seed}{Random seed.}
 \item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
 \code{"metal"}. CPU uses native HNSW; Metal uses native exact/IVF-Flat;
-CUDA requests package-native RAPIDS cuVS KNN with \code{target_recall = 0.99}. GPU requests must use a
+CUDA requests package-native RAPIDS cuVS KNN with
+\code{target_recall = 0.99}. GPU requests must use a
 real native backend and are not silently relabelled as CPU.}
 \item{transform_k}{Number of landmark neighbors used to project
 non-landmark observations. Defaults to \code{n_neighbors}.}

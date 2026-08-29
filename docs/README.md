@@ -9,6 +9,7 @@
 [Benchmarks](benchmarks.md) |
 [API](usage-api.md) |
 [API Map](api-map.md) |
+[Provenance](provenance-and-licensing.md) |
 [Development](development.md) |
 [References](references.md)
 
@@ -16,7 +17,7 @@
 
 - [Installation](installation.md): `fastEmbedR` CPU, Metal, and CUDA embedding
   builds, including optional direct FAISS GPU/cuVS linkage.
-- [Implementation](implementation.md): how UMAP and openTSNE are implemented
+- [Implementation](implementation.md): how UMAP and t-SNE are implemented
   across CPU, Metal, and CUDA.
 - [Backend performance engineering](backend-performance-engineering.md):
   profiler results, retained CPU/Metal/CUDA optimizations, rejected
@@ -31,6 +32,8 @@
 - [Hardware evidence contract](backend-validation.md): the distinction between
   full benchmark validation, strict hardware smoke testing, and build-level
   architectural compatibility.
+- [Source provenance and licensing](provenance-and-licensing.md): file-level
+  attribution, SPDX inventory, linked-library boundaries, and release audit.
 - [Development and software quality](development.md): CI, coverage,
   real-hardware validation, contribution, and release evidence.
 - [References](references.md): AACR-style literature and software references.

@@ -41,7 +41,7 @@ inherited. This policy has three reasons:
    native HNSW benchmark, so it was not retained.
 
 The native Metal KNN shader is the one narrow exception: it enables Apple's
-runtime fast arithmetic for float32 candidate search. UMAP and openTSNE
+runtime fast arithmetic for float32 candidate search. UMAP and t-SNE
 embedding kernels do not obtain a global host-compiler fast-math flag.
 
 Inspect the flags resolved by the active R installation before comparing
@@ -83,7 +83,7 @@ remotes::install_github(paste0("tkcaccia/fastEmbedR@", ref))
 ```
 
 The configuration summary printed during installation must report
-`C++17 (R CXX17/CXX17FLAGS)`. CPU HNSW, UMAP, openTSNE, PCA, transforms, and
+`C++17 (R CXX17/CXX17FLAGS)`. CPU HNSW, UMAP, t-SNE, PCA, transforms, and
 clustering are package-native.
 
 ## Apple Metal Installation
@@ -251,7 +251,7 @@ knn <- precompute_knn(x, k = 15, backend = "cuda")
 stopifnot(identical(attr(knn, "backend"), "cuda"))
 
 u <- umap(x, n_neighbors = 15, backend = "cuda", graph_mode = "fuzzy")
-t <- opentsne(x, perplexity = 15, backend = "cuda")
+t <- tsne(x, perplexity = 15, backend = "cuda")
 stopifnot(nrow(u$layout) == 5000L, nrow(t$layout) == 5000L)
 ```
 

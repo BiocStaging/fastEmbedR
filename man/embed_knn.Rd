@@ -5,15 +5,15 @@
 \title{Embed from precomputed KNN}
 \usage{
 embed_knn(
-  indices,
-  distances = NULL,
-  method = "umap",
-  n_components = 2L,
-  seed = 4L,
-  verbose = FALSE,
-  backend = NULL,
-  n.cores = NULL,
-  ...
+    indices,
+    distances = NULL,
+    method = "umap",
+    n_components = 2L,
+    seed = 4L,
+    verbose = FALSE,
+    backend = NULL,
+    n.cores = NULL,
+    ...
 )
 }
 \arguments{
@@ -24,7 +24,7 @@ automatically.}
 \item{distances}{Numeric KNN distance matrix matching `indices`. Leave as
 `NULL` when `indices` is a KNN list.}
 
-\item{method}{Embedding method: `"opentsne"` or `"umap"`.}
+\item{method}{Embedding method: `"tsne"` or `"umap"`.}
 
 \item{n_components}{Output dimensionality.}
 
@@ -37,13 +37,13 @@ automatically.}
 \item{n.cores}{Number of CPU cores used by the CPU optimizer.
 Native GPU optimizers ignore this argument.}
 
-\item{...}{Additional openTSNE-specific parameters such as `perplexity`,
+\item{...}{Additional t-SNE-specific parameters such as `perplexity`,
 iteration controls, `Y_init`, learning-rate controls, and exaggeration
 controls.}
 }
 \value{
 A numeric embedding matrix with resolved settings stored in
-  `attr(layout, "fastEmbedR_config")`.
+    `attr(layout, "fastEmbedR_config")`.
 }
 \description{
 Embed from precomputed KNN
@@ -55,8 +55,8 @@ diag(d) <- Inf
 k <- 5L
 indices <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
 distances <- matrix(
-  d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
-  nrow = nrow(d), byrow = TRUE
+    d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
+    nrow = nrow(d), byrow = TRUE
 )
 layout <- embed_knn(indices, distances, method = "umap", seed = 1)
 }

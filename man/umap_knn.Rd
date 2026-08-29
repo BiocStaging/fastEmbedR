@@ -3,14 +3,14 @@
 \title{Run UMAP from precomputed KNN}
 \usage{
 umap_knn(
-  indices,
-  distances = NULL,
-  n_components = 2L,
-  seed = 42L,
-  verbose = FALSE,
-  backend = NULL,
-  n.cores = NULL,
-  graph_mode = c("fuzzy", "binary")
+    indices,
+    distances = NULL,
+    n_components = 2L,
+    seed = 42L,
+    verbose = FALSE,
+    backend = NULL,
+    n.cores = NULL,
+    graph_mode = c("fuzzy", "binary")
 )
 }
 \arguments{
@@ -66,7 +66,7 @@ diag(d) <- Inf
 k <- 10L
 idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
 dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
-  nrow = nrow(d), byrow = TRUE)
+    nrow = nrow(d), byrow = TRUE)
 layout <- umap_knn(idx, dst, seed = 1)
 plot(layout, pch = 21, bg = iris$Species)
 }

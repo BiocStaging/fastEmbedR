@@ -82,8 +82,9 @@ can be replaced with `std::pow`/backend-native `pow` after benchmarking.
 
 - Do not claim a GPL package implementation is inside `fastEmbedR`.
 - Do not copy or closely adapt `uwot` source while keeping `fastEmbedR` MIT.
-- Keep `uwot`, `umap`, `Rtsne`, and similar R packages in `Suggests` or
-  benchmark scripts only.
+- Keep `uwot`, `umap`, `Rtsne`, and similar comparator packages in the
+  separate benchmark environment and scripts, not in the package dependency
+  graph unless a shipped package feature directly requires them.
 - Keep optional GPU libraries explicit: no silent CPU fallback reported as GPU.
 - Preserve upstream notices when permissive code is copied or substantially
   adapted, especially MIT/BSD/Apache code.

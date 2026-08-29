@@ -2421,6 +2421,8 @@ kernel void opentsne_fft_load_inputs(
   kernel_q[fft_pos] = float2(q, 0.0f);
   kernel_q2[fft_pos] = float2(q2, 0.0f);
 }
+)METAL"
+R"METAL(
 
 kernel void opentsne_mpsgraph_load_real_inputs(
   device const atomic_float* mass [[buffer(0)]],

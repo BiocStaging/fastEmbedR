@@ -5,7 +5,7 @@ test_that("embed_knn runs native openTSNE from supplied neighbours", {
 
   layout <- embed_knn(
     knn,
-    method = "opentsne",
+    method = "tsne",
     perplexity = 5,
     early_exaggeration_iter = 3L,
     n_iter = 4L,
@@ -18,7 +18,7 @@ test_that("embed_knn runs native openTSNE from supplied neighbours", {
   expect_equal(dim(layout), c(nrow(x), 2L))
   expect_true(all(is.finite(layout)))
   cfg <- attr(layout, "fastEmbedR_config")
-  expect_equal(cfg$method, "opentsne")
+  expect_equal(cfg$method, "tsne")
   expect_match(cfg$optimizer, "^opentsne_fitsne_fft_grid_sparse_knn")
   expect_equal(cfg$repulsion, "fft_grid")
   expect_equal(cfg$early_exaggeration_iter, 3L)
@@ -57,16 +57,15 @@ test_that("openTSNE auto configuration exposes opt-SNE policy metadata", {
   expect_false(large_fft$auto_kld_stop)
 })
 
-test_that("removed embedding methods fail at the public KNN dispatcher", {
+test_that("unsupported embedding methods fail at the public KNN dispatcher", {
   set.seed(320)
   x <- matrix(rnorm(32L * 4L), 32L, 4L)
   knn <- test_exact_knn(x, k = 10L, backend = "cpu")
 
-  expect_error(embed_knn(knn, method = "tsne"), "opentsne", fixed = TRUE)
-  expect_error(embed_knn(knn, method = "infotsne"), "opentsne", fixed = TRUE)
+  expect_error(embed_knn(knn, method = "infotsne"), "tsne", fixed = TRUE)
 })
 
-test_that("openTSNE exposes FFT and exact negative-gradient choices without Barnes-Hut or sampled GPU math", {
+test_that("t-SNE exposes FFT and exact negative-gradient choices", {
   set.seed(312)
   x <- matrix(rnorm(42L * 4L), 42L, 4L)
   knn <- test_exact_knn(x, k = 13L, backend = "cpu")
@@ -74,7 +73,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
   expect_error(
     embed_knn(
       knn,
-      method = "opentsne",
+      method = "tsne",
       perplexity = 4,
       negative_gradient_method = "bh",
       early_exaggeration_iter = 2L,
@@ -87,7 +86,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
   expect_error(
     embed_knn(
       knn,
-      method = "opentsne",
+      method = "tsne",
       perplexity = 4,
       negative_gradient_method = "sampled",
       early_exaggeration_iter = 2L,
@@ -100,7 +99,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
 
   exact <- embed_knn(
     knn,
-    method = "opentsne",
+    method = "tsne",
     perplexity = 4,
     negative_gradient_method = "exact",
     early_exaggeration_iter = 2L,
@@ -112,7 +111,7 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
 
   fft <- embed_knn(
     knn,
-    method = "opentsne",
+    method = "tsne",
     perplexity = 4,
     negative_gradient_method = "fft",
     early_exaggeration_iter = 2L,
@@ -124,13 +123,13 @@ test_that("openTSNE exposes FFT and exact negative-gradient choices without Barn
   expect_match(attr(fft, "fastEmbedR_config")$optimizer, "^opentsne_fitsne_fft_grid_sparse_knn")
 })
 
-test_that("opentsne has direct KNN input functions", {
+test_that("tsne has direct KNN input functions", {
   set.seed(322)
   x <- matrix(rnorm(54L * 5L), 54L, 5L)
   labels <- rep(1:3, length.out = nrow(x))
   knn <- test_exact_knn(x, k = 19L, backend = "cpu")
 
-  layout <- opentsne_knn(
+  layout <- tsne_knn(
     knn$indices,
     knn$distances,
     n_neighbors = 12L,
@@ -143,7 +142,7 @@ test_that("opentsne has direct KNN input functions", {
   expect_equal(dim(layout), c(nrow(x), 2L))
   expect_true(all(is.finite(layout)))
   cfg <- attr(layout, "fastEmbedR_config")
-  expect_equal(cfg$method, "opentsne")
+  expect_equal(cfg$method, "tsne")
   expect_equal(cfg$n_neighbors, 12L)
   expect_equal(cfg$perplexity, 3)
   expect_equal(cfg$affinity_support, "expanded")
@@ -153,7 +152,7 @@ test_that("opentsne has direct KNN input functions", {
   expect_identical(attr(layout, "precision"), "double")
   expect_identical(cfg$output_precision, "double")
 
-  fit <- opentsne(
+  fit <- tsne(
     knn,
     perplexity = 3,
     early_exaggeration_iter = 2L,
@@ -171,7 +170,7 @@ test_that("opentsne has direct KNN input functions", {
   expect_equal(fit$metrics$preprocess_elapsed, 0)
   expect_equal(fit$metrics$knn_elapsed, 0)
 
-  compact <- opentsne(
+  compact <- tsne(
     knn,
     perplexity = 3,
     affinity_support = "compact",
@@ -192,7 +191,7 @@ test_that("openTSNE standard support rejects a compact precomputed KNN", {
   compact_knn <- test_exact_knn(x, k = 6L, backend = "cpu")
 
   expect_error(
-    opentsne_knn(
+    tsne_knn(
       compact_knn,
       perplexity = 5,
       early_exaggeration_iter = 1L,
@@ -201,7 +200,7 @@ test_that("openTSNE standard support rejects a compact precomputed KNN", {
     "fewer non-self columns"
   )
 
-  layout <- opentsne_knn(
+  layout <- tsne_knn(
     compact_knn,
     perplexity = 5,
     affinity_support = "compact",
@@ -217,7 +216,7 @@ test_that("post-fit KL diagnostic matches the optimizer's exact final KL", {
   set.seed(325)
   x <- matrix(rnorm(80L * 6L), 80L, 6L)
   knn <- test_exact_knn(x, k = 16L, backend = "cpu")
-  layout <- opentsne_knn(
+  layout <- tsne_knn(
     knn,
     perplexity = 5,
     early_exaggeration_iter = 1L,
@@ -238,13 +237,13 @@ test_that("post-fit KL diagnostic matches the optimizer's exact final KL", {
   expect_equal(diagnostic, recorded, tolerance = 1e-6)
 })
 
-test_that("opentsne_knn preserves the documented float32 return contract", {
+test_that("tsne_knn preserves the documented float32 return contract", {
   skip_if_not_installed("float")
   set.seed(324)
   x <- float::fl(matrix(rnorm(48L * 5L), 48L, 5L))
   knn <- precompute_knn(x, k = 12L, backend = "cpu", n.cores = 2L)
 
-  layout <- opentsne_knn(
+  layout <- tsne_knn(
     knn,
     perplexity = 3,
     early_exaggeration_iter = 1L,
@@ -261,7 +260,7 @@ test_that("opentsne_knn preserves the documented float32 return contract", {
   )
 })
 
-test_that("native Metal openTSNE runs FFT-grid without CPU fallback", {
+test_that("native Metal t-SNE runs FFT-grid without CPU fallback", {
   skip_if_not(fastEmbedR:::embedding_metal_available_cpp())
   skip_if_not(fastEmbedR:::metal_opentsne_native_available())
 
@@ -278,7 +277,7 @@ test_that("native Metal openTSNE runs FFT-grid without CPU fallback", {
   set.seed(323)
   x <- matrix(rnorm(96L * 5L), 96L, 5L)
   knn <- test_exact_knn(x, k = 16L, backend = "cpu")
-  metal <- opentsne_knn(
+  metal <- tsne_knn(
     knn,
     n_neighbors = 15L,
     perplexity = 5,
@@ -303,7 +302,7 @@ test_that("openTSNE GPU optimizers are native and fail clearly when unavailable"
 
   if (isTRUE(fastEmbedR:::embedding_metal_available_cpp()) &&
       isTRUE(fastEmbedR:::metal_opentsne_native_available())) {
-    metal <- opentsne_knn(
+    metal <- tsne_knn(
       knn,
       perplexity = 3,
       early_exaggeration_iter = 1L,
@@ -318,20 +317,20 @@ test_that("openTSNE GPU optimizers are native and fail clearly when unavailable"
     expect_equal(cfg$probabilities, "symmetric_sparse_knn_cpu_prepared_for_metal")
   } else {
     expect_error(
-      opentsne_knn(
+      tsne_knn(
         knn,
         perplexity = 3,
         early_exaggeration_iter = 1L,
         n_iter = 1L,
         backend = "metal"
       ),
-      "Native Metal openTSNE optimizer was requested",
+      "Native Metal t-SNE optimizer was requested",
       fixed = TRUE
     )
   }
   if (isTRUE(fastEmbedR:::embedding_cuda_available_cpp()) &&
       isTRUE(fastEmbedR:::cuda_opentsne_native_available())) {
-    cuda <- opentsne_knn(
+    cuda <- tsne_knn(
       knn,
       perplexity = 3,
       early_exaggeration_iter = 1L,
@@ -346,7 +345,7 @@ test_that("openTSNE GPU optimizers are native and fail clearly when unavailable"
     expect_true(all(is.finite(cuda)))
   } else {
     expect_error(
-      opentsne(
+      tsne(
         knn,
         perplexity = 3,
         early_exaggeration_iter = 1L,
@@ -358,11 +357,11 @@ test_that("openTSNE GPU optimizers are native and fail clearly when unavailable"
   }
 })
 
-test_that("opentsne rejects low-level KNN backend names", {
+test_that("tsne rejects low-level KNN backend names", {
   set.seed(313)
   x <- matrix(rnorm(36L * 4L), 36L, 4L)
   expect_error(
-    opentsne(
+    tsne(
       x,
       perplexity = 2,
       early_exaggeration_iter = 2L,
@@ -384,7 +383,7 @@ test_that("CPU openTSNE reports native affinity and optimization timings", {
     d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(indices)))],
     nrow = nrow(d), byrow = TRUE
   )
-  layout <- opentsne_knn(
+  layout <- tsne_knn(
     indices, distances, perplexity = 5, affinity_support = "standard",
     Y_init = matrix(rnorm(360, sd = 1e-4), ncol = 2),
     backend = "cpu", n.cores = 2,

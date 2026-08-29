@@ -11,7 +11,7 @@
 [References](references.md)
 
 `fastEmbedR` contains the compact native KNN routes required by its one-call
-embeddings, UMAP, openTSNE-style t-SNE, landmark transforms, embedding metrics,
+embeddings, UMAP, interpolation-based t-SNE, landmark transforms, embedding metrics,
 KNN graph construction, and native community detection.
 
 ## R Packages
@@ -24,17 +24,19 @@ ref <- "REPLACE_WITH_FROZEN_TAG_OR_COMMIT"
 remotes::install_github(paste0("tkcaccia/fastEmbedR@", ref))
 ```
 
-Suggested benchmark/reference packages:
+Optional packages that enable float32 R input, graph-validation helpers,
+provenance serialization, or CPU thread control can be installed with:
 
 ```r
 install.packages(c(
-  "Rtsne", "uwot", "umap",
-  "igraph", "jsonlite", "knitr", "rmarkdown", "float"
+  "float", "igraph", "jsonlite", "RhpcBLASctl"
 ))
 ```
 
-`Rtsne`, `uwot`, and `umap` are optional comparison packages. They are not
-required by the core `fastEmbedR` embedding functions.
+`knitr`, `rmarkdown`, and `testthat` are suggested only for building package
+documentation and running its tests. Comparator packages such as `Rtsne`,
+`uwot`, and `umap` belong to the separate benchmark environment and are not
+package dependencies.
 
 ## Core Build Dependencies
 
@@ -50,7 +52,7 @@ required by the core `fastEmbedR` embedding functions.
 one-call KNN. Follow the [backend build guide](installation-backends.md) for
 the exact compiler, GPU-architecture, host-compiler, header, library, and
 runtime requirements. CPU, Metal, and correctly compiled CUDA
-`opentsne()`/`umap()` do not call another R package for neighbor search.
+`tsne()`/`umap()` do not call another R package for neighbor search.
 
 The portable C++ core inherits `CXX17` and `CXX17FLAGS` from R and adds only
 `-pthread`. The package does not globally force `-march=native`,
@@ -60,7 +62,7 @@ changing floating-point-sensitive KNN and embedding trajectories.
 ## CUDA Embedding Build
 
 CUDA KNN uses direct FAISS GPU exact search and direct cuVS IVF-Flat linkage.
-CUDA builds also compile the native UMAP/openTSNE kernels.
+CUDA builds also compile the native UMAP/t-SNE kernels.
 
 ```sh
 CUDA_HOME=/usr/local/cuda \
@@ -100,14 +102,14 @@ Objective-C++/Metal embedding kernels for:
 
 - exact and recall-tuned IVF-Flat KNN;
 - UMAP layout optimization from KNN;
-- openTSNE FFT-grid optimization;
+- t-SNE FFT-grid optimization;
 - selected projection/refinement operations.
 
 No Python, Torch, MLX, or `reticulate` call is required for the public Metal
 embedding paths.
 
 Metal feature parity is explicit rather than inferred from a backend label.
-Core KNN, PCA, two-dimensional UMAP/openTSNE, transformation, and landmark
+Core KNN, PCA, two-dimensional UMAP/t-SNE, transformation, and landmark
 paths are native. `knn_graph()` uses Metal for neighbor search but constructs
 the graph object on CPU; `evaluate_embedding()` computes metrics on CPU after
 the final layout transfer; and Walktrap clustering is CPU-only. See the

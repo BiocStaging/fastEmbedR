@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
-Title: Opinionated Native UMAP and openTSNE Embeddings
-Version: 0.99.12
+Title: Native UMAP and Interpolation-Based t-SNE Embeddings
+Version: 0.99.13
 Authors@R: c(
     person(given = "Moussa", family = "Kassim", role = "aut",
         email = "Moussa.Kassim@icgeb.org"),
@@ -24,8 +24,8 @@ Authors@R: c(
     )
 Copyright: See inst/COPYRIGHTS and inst/NOTICE for source-level ownership,
     adapted components, and optional linked dependencies.
-Description: An opinionated, fixed-policy float32 UMAP implementation and a
-    configurable native openTSNE-style implementation for embeddings from data
+Description: A native float32 UMAP implementation and a configurable
+    interpolation-based t-SNE implementation for embeddings from data
     matrices or precomputed nearest-neighbor indices and distances. One-call
     workflows use package-native CPU HNSW and Apple Metal exact or IVF-Flat
     search. Optional CUDA support links directly to FAISS GPU and the RAPIDS
@@ -60,17 +60,13 @@ Imports:
     Rcpp,
     withr
 Suggests:
-    BiocStyle,
     float,
     igraph,
     jsonlite,
     knitr,
     RhpcBLASctl,
     rmarkdown,
-    Rtsne,
-    testthat,
-    umap,
-    uwot
+    testthat
 LinkingTo:
     Rcpp
 SystemRequirements: C++17; optional Apple Foundation, Accelerate, Metal,

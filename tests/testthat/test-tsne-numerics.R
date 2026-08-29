@@ -164,7 +164,7 @@ test_that("t-SNE diagnostics remain finite on pathological valid inputs", {
         expect_true(requireNamespace("float", quietly = TRUE))
         case_knn$distances <- float::fl(case_knn$distances)
       }
-      observed <- opentsne_knn(
+      observed <- tsne_knn(
         case_knn,
         n_neighbors = ncol(case$knn$indices),
         perplexity = 2,
@@ -206,7 +206,7 @@ test_that("t-SNE diagnostics remain finite on pathological valid inputs", {
     invalid_knn <- knn
     if (backend == "cuda") invalid_knn$distances <- float::fl(knn$distances)
     expect_error(
-      opentsne_knn(
+      tsne_knn(
         invalid_knn,
         n_neighbors = ncol(knn$indices),
         perplexity = 2,
@@ -247,7 +247,7 @@ test_that("native Metal and CUDA match the CPU first optimizer step", {
       expect_true(requireNamespace("float", quietly = TRUE))
       backend_knn$distances <- float::fl(backend_knn$distances)
     }
-    opentsne_knn(
+    tsne_knn(
       backend_knn,
       n_neighbors = 15L,
       perplexity = 5,
@@ -312,7 +312,7 @@ test_that("explicit small-data CPU FFT records the validated grid floor", {
     }
   }, add = TRUE)
 
-  fit <- opentsne_knn(
+  fit <- tsne_knn(
     knn,
     n_neighbors = 15L,
     perplexity = 5,
@@ -357,7 +357,7 @@ test_that("explicit small-data Metal FFT records the validated grid floor", {
     }
   }, add = TRUE)
 
-  fit <- opentsne_knn(
+  fit <- tsne_knn(
     knn,
     n_neighbors = 15L,
     perplexity = 5,

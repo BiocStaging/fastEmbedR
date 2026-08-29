@@ -3,15 +3,15 @@
 \title{Precompute a Reusable UMAP Initialization}
 \usage{
 umap_init(
-  x,
-  distances = NULL,
-  n_neighbors = NULL,
-  n_components = 2L,
-  metric = c("euclidean", "cosine", "correlation", "inner_product"),
-  backend = NULL,
-  seed = 4L,
-  n.cores = NULL,
-  graph_mode = c("fuzzy", "binary")
+    x,
+    distances = NULL,
+    n_neighbors = NULL,
+    n_components = 2L,
+    metric = c("euclidean", "cosine", "correlation", "inner_product"),
+    backend = NULL,
+    seed = 4L,
+    n.cores = NULL,
+    graph_mode = c("fuzzy", "binary")
 )
 }
 \arguments{
@@ -59,11 +59,11 @@ The ordinary one-call CUDA UMAP workflow retains its device-resident path.
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
 initialization <- umap_init(
-  x,
-  n_neighbors = 15,
-  backend = "cpu",
-  graph_mode = "fuzzy",
-  seed = 1
+    x,
+    n_neighbors = 15,
+    backend = "cpu",
+    graph_mode = "fuzzy",
+    seed = 1
 )
 layout <- umap_knn(initialization, backend = "cpu", seed = 1)
 plot(layout, pch = 21, bg = iris$Species)
