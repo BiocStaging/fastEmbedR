@@ -295,6 +295,10 @@ umap <- function(data,
 #'   weights; `"binary"` uses a symmetric unit-weight sensitivity graph. The
 #'   fixed-reference projection algorithm is shared, but the fitted reference
 #'   layout and its recorded metadata retain the selected graph mode.
+#' @examples
+#' x <- scale(as.matrix(iris[1:60, 1:4]))
+#' fit <- landmark_umap(x, landmarks = 0.5, n_neighbors = 10, seed = 1)
+#' plot(fit)
 #' @export
 landmark_umap <- function(data,
                         landmarks = 0.5,

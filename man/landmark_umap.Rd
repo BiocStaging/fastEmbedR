@@ -53,7 +53,7 @@ A \code{fastEmbedR_embedding} object with the full layout, landmark metadata,
 timings, and parameters.
 }
 \examples{
-x <- scale(as.matrix(iris[, 1:4]))
-fit <- landmark_umap(x, landmarks = 0.5, n_neighbors = 15, seed = 1)
+x <- scale(as.matrix(iris[1:60, 1:4]))
+fit <- landmark_umap(x, landmarks = 0.5, n_neighbors = 10, seed = 1)
 plot(fit)
 }

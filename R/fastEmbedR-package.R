@@ -23,6 +23,7 @@
 #' The package intentionally does not export the earlier legacy t-SNE,
 #' InfoTSNE, PaCMAP, TriMap, or LocalMAP reducers.
 #'
+#' @importFrom Biobase exprs pData
 #' @keywords internal
 "_PACKAGE"
 

@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Native UMAP and Interpolation-Based t-SNE Embeddings
-Version: 0.99.15
+Version: 0.99.16
 Authors@R: person(
     given = "Stefano",
     family = "Cacciatore",
@@ -43,6 +43,7 @@ biocViews:
     GPU
 Encoding: UTF-8
 Imports:
+    Biobase,
     methods,
     Rcpp,
     withr

@@ -1,3 +1,10 @@
+# fastEmbedR 0.99.16
+
+- Add `Biobase` as a genuine Bioconductor dependency and exercise
+  PCA, t-SNE, and fuzzy UMAP in the executable vignette using the bundled
+  `sample.ExpressionSet` expression dataset. The example uses namespaced
+  access and does not add a `SingleCellExperiment` dependency.
+
 # fastEmbedR 0.99.15
 
 - List Stefano Cacciatore as the sole package author and maintainer.
