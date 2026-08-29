@@ -17,9 +17,9 @@
 #' selection$indices
 #' @export
 select_landmarks <- function(data,
-                            landmarks = TRUE,
-                            seed = 4L,
-                            n.cores = NULL) {
+                                landmarks = TRUE,
+                                seed = 4L,
+                                n.cores = NULL) {
     n_threads <- n.cores
     prepared <- prepare_embedding_data(
         data,
@@ -142,171 +142,194 @@ normalize_landmark_selection <- function(selection, data) {
 #'     graph_mode = "fuzzy", seed = 1
 #' )
 #' @export
-fit_landmark_model <- function(data,
-                                selection,
+fit_landmark_model <- function(data, selection,
                                 method = c("umap", "tsne"),
-                                n_neighbors = NULL,
-                                perplexity = NULL,
+                                n_neighbors = NULL, perplexity = NULL,
                                 affinity_support = c("standard", "compact"),
                                 n_components = 2L,
                                 metric = c(
-                                    "euclidean", "cosine", "correlation",
-                                    "inner_product"
+                                    "euclidean", "cosine",
+                                    "correlation", "inner_product"
                                 ),
-                                seed = 4L,
-                                backend = NULL,
-                                n.cores = NULL,
+                                seed = 4L, backend = NULL, n.cores = NULL,
                                 graph_mode = c("fuzzy", "binary"),
-                                keep_knn = FALSE,
-                                verbose = FALSE,
-                                ...) {
-    n_threads <- n.cores
-    method <- match.arg(method)
+                                keep_knn = FALSE, verbose = FALSE, ...) {
+    state <- prepare_landmark_model(
+        data, selection, method, n_components, metric, seed,
+        backend, n.cores, graph_mode, affinity_support
+    )
+    timed <- system.time({
+        fitted <- if (identical(state$method, "umap")) {
+            fit_landmark_umap_model(
+                state, n_neighbors, keep_knn, verbose
+            )
+        } else {
+            fit_landmark_tsne_model(
+                state, n_neighbors, perplexity, keep_knn,
+                verbose, list(...)
+            )
+        }
+    })
+    assemble_landmark_model(state, fitted, timed)
+}
+
+landmark_model_reference_data <- function(x, selection, n.cores) {
+    if (length(selection$query_indices) == 0L) {
+        return(x)
+    }
+    if (is_float32_matrix(x)) {
+        return(split_float32_rows_cpp(
+            x, selection$indices, selection$query_indices,
+            as.integer(normalize_nn_threads(n.cores))
+        )$landmarks)
+    }
+    x[selection$indices, , drop = FALSE]
+}
+
+prepare_landmark_model <- function(data, selection, method, n_components,
+                                    metric, seed, backend, n.cores,
+                                    graph_mode, affinity_support) {
+    method <- match.arg(method, c("umap", "tsne"))
     backend <- resolve_embedding_backend(backend)
-    affinity_support <- normalize_opentsne_affinity_support(affinity_support)
-    graph_mode <- match.arg(graph_mode)
+    graph_mode <- match.arg(graph_mode, c("fuzzy", "binary"))
+    affinity_support <- normalize_opentsne_affinity_support(
+        affinity_support
+    )
     metric <- resolve_embedding_metric(metric, data)
     n_components <- validate_n_components(n_components)
     prepared <- prepare_embedding_data(
         data,
-        standardize = FALSE,
-        pca_dims = NULL,
-        seed = seed,
-        backend = backend
+        standardize = FALSE, pca_dims = NULL,
+        seed = seed, backend = backend
     )
-    x <- prepared$data
-    selection <- normalize_landmark_selection(selection, x)
-    reference_data <- if (length(selection$query_indices) == 0L) {
-        x
-    } else if (is_float32_matrix(x)) {
-        split_float32_rows_cpp(
-            x,
-            selection$indices,
-            selection$query_indices,
-            as.integer(normalize_nn_threads(n_threads))
-        )$landmarks
-    } else {
-        x[selection$indices, , drop = FALSE]
-    }
-    n_reference <- nrow(reference_data)
-    if (n_reference < 2L) {
+    selection <- normalize_landmark_selection(selection, prepared$data)
+    reference <- landmark_model_reference_data(
+        prepared$data, selection, n.cores
+    )
+    if (nrow(reference) < 2L) {
         stop("At least two landmark rows are required.", call. = FALSE)
     }
+    list(
+        x = prepared$data, selection = selection,
+        reference_data = reference, method = method,
+        n_components = n_components, metric = metric, seed = seed,
+        backend = backend, n.cores = n.cores, graph_mode = graph_mode,
+        affinity_support = affinity_support
+    )
+}
 
-    elapsed <- system.time({
-        if (identical(method, "umap")) {
-            if (is.null(n_neighbors)) {
-                n_neighbors <- auto_embedding_k(nrow(x), method = "umap")
-            }
-            n_neighbors <- as.integer(min(n_neighbors, n_reference - 1L))
-            reference_knn <- precompute_knn(
-                reference_data,
-                k = n_neighbors,
-                metric = metric,
-                backend = backend,
-                n.cores = n_threads
-            )
-            fit <- umap(
-                reference_data,
-                n_neighbors = n_neighbors,
-                n_components = n_components,
-                standardize = FALSE,
-                metric = metric,
-                nn = reference_knn,
-                seed = seed,
-                backend = backend,
-                n.cores = n_threads,
-                keep_knn = keep_knn,
-                graph_mode = graph_mode,
-                verbose = verbose
-            )
-        } else {
-            reference_policy <- opentsne_neighbor_policy(
-                n_reference,
-                perplexity = perplexity,
-                affinity_support = affinity_support
-            )
-            if (is.null(perplexity)) perplexity <- reference_policy$perplexity
-            if (is.null(n_neighbors)) {
-                n_neighbors <- reference_policy$n_neighbors
-            } else {
-                n_neighbors <- as.integer(n_neighbors)
-                if (length(n_neighbors) != 1L || is.na(n_neighbors) ||
-                    n_neighbors < 1L || n_neighbors >= n_reference) {
-                    stop(
-                        sprintf(
-                            "%s%s%s",
-                            "`n_neighbors` must be a positive integer ",
-                            "smaller than the number of landmarks",
-                            "."
-                        ),
-                        call. = FALSE
-                    )
-                }
-                required_neighbors <- opentsne_support_width(
-                    perplexity,
-                    affinity_support
-                )
-                if (n_neighbors < required_neighbors) {
-                    stop(
-                        "`n_neighbors` is too small for `affinity_support = \"",
-                        affinity_support, "\"`; need at least ",
-                            required_neighbors, ".",
-                        call. = FALSE
-                    )
-                }
-            }
-            reference_knn <- precompute_knn(
-                reference_data,
-                k = n_neighbors,
-                metric = metric,
-                backend = backend,
-                n.cores = n_threads
-            )
-            fit <- tsne(
-                reference_data,
-                perplexity = perplexity,
-                affinity_support = affinity_support,
-                n_components = n_components,
-                init_data = reference_data,
-                standardize = FALSE,
-                metric = metric,
-                nn = reference_knn,
-                seed = seed,
-                backend = backend,
-                keep_knn = keep_knn,
-                verbose = verbose,
-                n.cores = n_threads,
-                ...
-            )
-            perplexity <- fit$parameters$perplexity %||% perplexity
-        }
-    })
+fit_landmark_umap_model <- function(state, n_neighbors,
+                                    keep_knn, verbose) {
+    if (is.null(n_neighbors)) {
+        n_neighbors <- auto_embedding_k(nrow(state$x), method = "umap")
+    }
+    n_neighbors <- as.integer(min(
+        n_neighbors, nrow(state$reference_data) - 1L
+    ))
+    knn <- precompute_knn(
+        state$reference_data,
+        k = n_neighbors, metric = state$metric,
+        backend = state$backend, n.cores = state$n.cores
+    )
+    fit <- umap(
+        state$reference_data,
+        n_neighbors = n_neighbors,
+        n_components = state$n_components, standardize = FALSE,
+        metric = state$metric, nn = knn, seed = state$seed,
+        backend = state$backend, n.cores = state$n.cores,
+        keep_knn = keep_knn, graph_mode = state$graph_mode,
+        verbose = verbose
+    )
+    list(
+        fit = fit, knn = knn, n_neighbors = n_neighbors,
+        perplexity = NULL
+    )
+}
 
-    out <- list(
-        method = method,
-        fit = fit,
-        reference_data = reference_data,
-        selection = selection,
-        n_total = as.integer(nrow(x)),
-        p = as.integer(ncol(x)),
-        n_components = as.integer(n_components),
-        n_neighbors = as.integer(n_neighbors),
+resolve_landmark_model_tsne_neighbors <- function(n_neighbors, n_reference,
+                                                    perplexity,
+                                                    affinity_support) {
+    policy <- opentsne_neighbor_policy(
+        n_reference,
         perplexity = perplexity,
-        affinity_support = if (identical(
-            method,
-            "tsne"
-        )) {
-            affinity_support
+        affinity_support = affinity_support
+    )
+    if (is.null(perplexity)) perplexity <- policy$perplexity
+    if (is.null(n_neighbors)) {
+        return(list(
+            n_neighbors = policy$n_neighbors, perplexity = perplexity
+        ))
+    }
+    n_neighbors <- as.integer(n_neighbors)
+    invalid <- length(n_neighbors) != 1L || is.na(n_neighbors) ||
+        n_neighbors < 1L || n_neighbors >= n_reference
+    if (invalid) {
+        stop(
+            "`n_neighbors` must be positive and smaller than the landmarks.",
+            call. = FALSE
+        )
+    }
+    required <- opentsne_support_width(perplexity, affinity_support)
+    if (n_neighbors < required) {
+        stop(
+            "`n_neighbors` is too small for the affinity support; need ",
+            required, ".",
+            call. = FALSE
+        )
+    }
+    list(n_neighbors = n_neighbors, perplexity = perplexity)
+}
+
+fit_landmark_tsne_model <- function(state, n_neighbors, perplexity,
+                                    keep_knn, verbose, dots) {
+    policy <- resolve_landmark_model_tsne_neighbors(
+        n_neighbors, nrow(state$reference_data), perplexity,
+        state$affinity_support
+    )
+    knn <- precompute_knn(
+        state$reference_data,
+        k = policy$n_neighbors,
+        metric = state$metric, backend = state$backend,
+        n.cores = state$n.cores
+    )
+    args <- c(list(
+        data = state$reference_data, perplexity = policy$perplexity,
+        affinity_support = state$affinity_support,
+        n_components = state$n_components,
+        init_data = state$reference_data, standardize = FALSE,
+        metric = state$metric, nn = knn, seed = state$seed,
+        backend = state$backend, keep_knn = keep_knn,
+        verbose = verbose, n.cores = state$n.cores
+    ), dots)
+    fit <- do.call(tsne, args)
+    list(
+        fit = fit, knn = knn, n_neighbors = policy$n_neighbors,
+        perplexity = fit$parameters$perplexity %||% policy$perplexity
+    )
+}
+
+assemble_landmark_model <- function(state, fitted, elapsed) {
+    out <- list(
+        method = state$method, fit = fitted$fit,
+        reference_data = state$reference_data,
+        selection = state$selection, n_total = as.integer(nrow(state$x)),
+        p = as.integer(ncol(state$x)),
+        n_components = as.integer(state$n_components),
+        n_neighbors = as.integer(fitted$n_neighbors),
+        perplexity = fitted$perplexity,
+        affinity_support = if (state$method == "tsne") {
+            state$affinity_support
         } else {
             NA_character_
         },
-        metric = metric,
-        graph_mode = if (identical(method,
-            "umap")) graph_mode else NA_character_,
-        backend = backend,
-        seed = as.integer(seed),
-        n.cores = normalize_nn_threads(n_threads),
+        metric = state$metric,
+        graph_mode = if (state$method == "umap") {
+            state$graph_mode
+        } else {
+            NA_character_
+        },
+        backend = state$backend, seed = as.integer(state$seed),
+        n.cores = normalize_nn_threads(state$n.cores),
         elapsed_sec = unname(elapsed[["elapsed"]])
     )
     class(out) <- c("fastEmbedR_landmark_model", "list")
@@ -331,28 +354,9 @@ landmark_query_data <- function(model, data, query_indices = NULL) {
         length(model$selection$query_indices) > 0L &&
         nrow(x) == model$n_total
     if (full_input) query_indices <- model$selection$query_indices
-    if (is.null(query_indices)) {
-        query <- x
-        query_indices <- seq_len(nrow(x))
-    } else {
-        query_indices <- as.integer(query_indices)
-        if (anyNA(query_indices) || any(query_indices < 1L) ||
-            any(query_indices > nrow(x))) {
-            stop("`query_indices` contains invalid rows.", call. = FALSE)
-        }
-        query <- if (length(query_indices) == nrow(x)) {
-            x
-        } else if (is_float32_matrix(x)) {
-            split_float32_rows_cpp(
-                x,
-                query_indices,
-                setdiff(seq_len(nrow(x)), query_indices),
-                as.integer(model$n.cores)
-            )$landmarks
-        } else {
-            x[query_indices, , drop = FALSE]
-        }
-    }
+    selected <- select_landmark_query_rows(x, query_indices, model$n.cores)
+    query <- selected$data
+    query_indices <- selected$indices
     if (ncol(query) != ncol(model$reference_data)) {
         stop("Query data are not in the model's reference feature space.",
             call. = FALSE
@@ -364,6 +368,29 @@ landmark_query_data <- function(model, data, query_indices = NULL) {
         full_input = full_input,
         input = x
     )
+}
+
+select_landmark_query_rows <- function(x, query_indices, n.cores) {
+    if (is.null(query_indices)) {
+        return(list(data = x, indices = seq_len(nrow(x))))
+    }
+    query_indices <- as.integer(query_indices)
+    invalid <- anyNA(query_indices) || any(query_indices < 1L) ||
+        any(query_indices > nrow(x))
+    if (invalid) {
+        stop("`query_indices` contains invalid rows.", call. = FALSE)
+    }
+    query <- if (length(query_indices) == nrow(x)) {
+        x
+    } else if (is_float32_matrix(x)) {
+        split_float32_rows_cpp(
+            x, query_indices, setdiff(seq_len(nrow(x)), query_indices),
+            as.integer(n.cores)
+        )$landmarks
+    } else {
+        x[query_indices, , drop = FALSE]
+    }
+    list(data = query, indices = query_indices)
 }
 
 landmark_model_projection_k <- function(model,
@@ -382,207 +409,225 @@ landmark_model_projection_k <- function(model,
     )
 }
 
-project_landmark_umap <- function(model,
-                                query,
-                                projection_knn,
-                                refinement_epochs,
-                                n_threads,
-                                verbose) {
-    n_reference <- nrow(model$reference_data)
-    n_query <- nrow(query)
-    reference_layout <- model$fit$layout
-    params <- model$fit$parameters
-    min_dist <- as.numeric(params$min_dist %||% 0.01)
-    negative_sample_rate <- as.integer(params$negative_sample_rate %||% 5L)
-    learning_rate <- as.numeric(params$learning_rate %||% 1)
-    repulsion_strength <- as.numeric(params$repulsion_strength %||% 1)
-
+project_landmark_umap <- function(model, query, projection_knn,
+                                    refinement_epochs, n_threads, verbose) {
+    params <- landmark_umap_optimizer_parameters(model$fit)
     if (identical(model$backend, "cuda") &&
         fastembedr_is_gpu_knn(projection_knn)) {
-        result <- landmark_umap_project_refine_cuda_gpu_cpp(
-            projection_knn,
-            model$reference_data,
-            query,
-            reference_layout,
-            seq_len(n_reference),
-            n_reference + seq_len(n_query),
-            n_reference + n_query,
-            as.integer(refinement_epochs),
-            min_dist,
-            negative_sample_rate,
-            learning_rate,
-            repulsion_strength,
-            as.integer(model$seed + 2003L),
-            12L,
-            1e-3,
-            2.5
-        )
-        return(list(
-            layout = result$layout[n_reference + seq_len(n_query), ,
-                drop = FALSE],
-            backend = "cuda"
+        return(project_landmark_umap_cuda(
+            model, query, projection_knn, refinement_epochs, params
         ))
     }
-
-    affine <- landmark_affine_projection(
-        model$reference_data,
-        query,
-        reference_layout,
-        projection_knn,
-        n_threads = n_threads,
-        backend = model$backend
+    initialized <- initialize_landmark_umap_query(
+        model, query, projection_knn, n_threads
     )
-    if (!embedding_layout_dims_match(
-        affine, n_query, ncol(reference_layout)
-    )) {
-        affine <- project_embedding_knn_cpp(
-            reference_layout,
-            projection_knn$indices,
-            projection_knn$distances
-        )
-    }
     if (refinement_epochs <= 0L) {
-        return(list(layout = affine, backend = attr(
-            affine,
-            "projection_backend"
-        ) %||% "cpu"))
+        return(initialized)
     }
-    combined <- rbind(
-        embedding_dense_double_matrix(reference_layout),
-        embedding_dense_double_matrix(affine)
-    )
-    query_rows <- n_reference + seq_len(n_query)
-    if (identical(model$backend, "metal")) {
-        combined <- knn_umap_refine_rows_metal_cpp(
-            projection_knn$indices,
-            projection_knn$distances,
-            as.integer(query_rows),
-            combined,
-            as.integer(refinement_epochs),
-            min_dist,
-            negative_sample_rate,
-            learning_rate,
-            repulsion_strength,
-            as.integer(model$seed + 2003L)
-        )
-        used_backend <- "metal"
-    } else {
-        combined <- knn_umap_refine_rows_cpp(
-            projection_knn$indices,
-            projection_knn$distances,
-            as.integer(query_rows),
-            combined,
-            as.integer(refinement_epochs),
-            min_dist,
-            negative_sample_rate,
-            learning_rate,
-            repulsion_strength,
-            as.integer(normalize_nn_threads(n_threads)),
-            as.integer(model$seed + 2003L),
-            isTRUE(verbose)
-        )
-        used_backend <- "cpu"
-    }
-    combined[seq_len(n_reference), ] <-
-        embedding_dense_double_matrix(reference_layout)
-    list(
-        layout = combined[query_rows, , drop = FALSE],
-        backend = used_backend
+    refine_landmark_umap_query(
+        model, query, projection_knn, initialized$layout,
+        refinement_epochs, params, n_threads, verbose
     )
 }
 
-project_landmark_tsne <- function(model,
-                                query,
-                                projection_knn,
-                                transform_perplexity,
-                                transform_iter,
-                                transform_early_exaggeration_iter,
-                                transform_n_negatives,
-                                initialization,
-                                n_threads,
-                                verbose,
-                                dots) {
+project_landmark_umap_cuda <- function(model, query, knn,
+                                        epochs, params) {
     n_reference <- nrow(model$reference_data)
+    query_rows <- n_reference + seq_len(nrow(query))
+    result <- landmark_umap_project_refine_cuda_gpu_cpp(
+        knn, model$reference_data, query, model$fit$layout,
+        seq_len(n_reference), query_rows, n_reference + nrow(query),
+        as.integer(epochs), params$min_dist, params$negative_rate,
+        params$learning_rate, params$repulsion,
+        as.integer(model$seed + 2003L), 12L, 1e-3, 2.5
+    )
+    list(
+        layout = result$layout[query_rows, , drop = FALSE],
+        backend = "cuda"
+    )
+}
+
+initialize_landmark_umap_query <- function(model, query, knn, n_threads) {
     reference_layout <- model$fit$layout
-    exact_threshold <- as.integer(dots$exact_repulsion_threshold %||% 4096L)
-    n_negatives <- transform_n_negatives %||% if (
-        n_reference <= exact_threshold
-    ) {
-        n_reference
-    } else {
-        min(256L, n_reference)
-    }
-    learning_rate <- as.numeric(dots$transform_learning_rate %||% 0.1)
-    early_exaggeration <- as.numeric(dots$transform_early_exaggeration %||% 4)
-    exaggeration <- as.numeric(dots$transform_exaggeration %||% 1.5)
-    initial_momentum <- as.numeric(dots$transform_initial_momentum %||% 0.8)
-    final_momentum <- as.numeric(dots$transform_final_momentum %||% 0.8)
-    max_grad_norm <- as.numeric(dots$transform_max_grad_norm %||% 0.25)
-    max_step_norm <- as.numeric(dots$transform_max_step_norm %||% Inf)
-
-    if (identical(model$backend, "cuda") &&
-        fastembedr_is_gpu_knn(projection_knn)) {
-        result <- landmark_tsne_transform_cuda_gpu_cpp(
-            projection_knn,
-            model$reference_data,
-            query,
-            reference_layout,
-            as.numeric(transform_perplexity),
-            as.integer(transform_iter),
-            as.integer(transform_early_exaggeration_iter),
-            learning_rate,
-            early_exaggeration,
-            exaggeration,
-            initial_momentum,
-            final_momentum,
-            max_grad_norm,
-            max_step_norm,
-            as.integer(n_negatives),
-            exact_threshold,
-            as.integer(model$seed + 1009L),
-            12L,
-            1e-3,
-            2.5
-        )
-        return(list(layout = result$Y, backend = "cuda"))
-    }
-
-    initial <- landmark_affine_projection(
-        model$reference_data,
-        query,
-        reference_layout,
-        projection_knn,
-        n_threads = n_threads,
-        backend = model$backend
+    affine <- landmark_affine_projection(
+        model$reference_data, query, reference_layout, knn,
+        n_threads = n_threads, backend = model$backend
     )
     if (!embedding_layout_dims_match(
-        initial, nrow(query), ncol(reference_layout)
+        affine, nrow(query), ncol(reference_layout)
     )) {
-        initial <- NULL
+        affine <- project_embedding_knn_cpp(
+            reference_layout, knn$indices, knn$distances
+        )
     }
-    layout <- transform_tsne(
-        reference_layout,
-        knn = projection_knn,
-        perplexity = transform_perplexity,
-        initialization = initialization,
-        Y_init = initial,
-        n_iter = transform_iter,
-        early_exaggeration_iter = transform_early_exaggeration_iter,
-        learning_rate = learning_rate,
-        early_exaggeration = early_exaggeration,
-        exaggeration = exaggeration,
-        initial_momentum = initial_momentum,
-        final_momentum = final_momentum,
-        max_grad_norm = max_grad_norm,
-        max_step_norm = max_step_norm,
-        n_negatives = n_negatives,
-        exact_repulsion_threshold = exact_threshold,
-        n.cores = n_threads,
-        seed = model$seed + 1009L,
-        backend = model$backend,
-        verbose = verbose
+    list(
+        layout = affine,
+        backend = attr(affine, "projection_backend") %||% "cpu"
     )
-    list(layout = layout, backend = attr(layout, "backend") %||% model$backend)
+}
+
+refine_landmark_umap_query_metal <- function(model, knn, rows,
+                                                combined, epochs, params) {
+    knn_umap_refine_rows_metal_cpp(
+        knn$indices, knn$distances, as.integer(rows), combined,
+        as.integer(epochs), params$min_dist, params$negative_rate,
+        params$learning_rate, params$repulsion,
+        as.integer(model$seed + 2003L)
+    )
+}
+
+refine_landmark_umap_query_cpu <- function(model, knn, rows, combined,
+                                            epochs, params, n_threads,
+                                            verbose) {
+    knn_umap_refine_rows_cpp(
+        knn$indices, knn$distances, as.integer(rows), combined,
+        as.integer(epochs), params$min_dist, params$negative_rate,
+        params$learning_rate, params$repulsion,
+        as.integer(normalize_nn_threads(n_threads)),
+        as.integer(model$seed + 2003L), isTRUE(verbose)
+    )
+}
+
+refine_landmark_umap_query <- function(model, query, knn, initial,
+                                        epochs, params, n_threads, verbose) {
+    n_reference <- nrow(model$reference_data)
+    rows <- n_reference + seq_len(nrow(query))
+    combined <- rbind(
+        embedding_dense_double_matrix(model$fit$layout),
+        embedding_dense_double_matrix(initial)
+    )
+    use_metal <- identical(model$backend, "metal")
+    combined <- if (use_metal) {
+        refine_landmark_umap_query_metal(
+            model, knn, rows, combined, epochs, params
+        )
+    } else {
+        refine_landmark_umap_query_cpu(
+            model, knn, rows, combined, epochs, params,
+            n_threads, verbose
+        )
+    }
+    combined[seq_len(n_reference), ] <-
+        embedding_dense_double_matrix(model$fit$layout)
+    list(
+        layout = combined[rows, , drop = FALSE],
+        backend = if (use_metal) "metal" else "cpu"
+    )
+}
+
+project_landmark_model_tsne <- function(model, query, projection_knn,
+                                        transform_perplexity, transform_iter,
+                                        transform_early_exaggeration_iter,
+                                        transform_n_negatives, initialization,
+                                        n_threads, verbose, dots) {
+    controls <- landmark_model_tsne_controls(
+        model, transform_n_negatives, dots
+    )
+    if (identical(model$backend, "cuda") &&
+        fastembedr_is_gpu_knn(projection_knn)) {
+        return(project_landmark_model_tsne_cuda(
+            model, query, projection_knn, transform_perplexity,
+            transform_iter, transform_early_exaggeration_iter, controls
+        ))
+    }
+    project_landmark_model_tsne_host(
+        model, query, projection_knn, transform_perplexity,
+        transform_iter, transform_early_exaggeration_iter,
+        initialization, n_threads, verbose, controls
+    )
+}
+
+landmark_model_tsne_controls <- function(model, n_negatives, dots) {
+    n_reference <- nrow(model$reference_data)
+    threshold <- as.integer(dots$exact_repulsion_threshold %||% 4096L)
+    if (is.null(n_negatives)) {
+        n_negatives <- if (n_reference <= threshold) {
+            n_reference
+        } else {
+            min(256L, n_reference)
+        }
+    }
+    list(
+        exact_threshold = threshold,
+        n_negatives = as.integer(n_negatives),
+        learning_rate = as.numeric(
+            dots$transform_learning_rate %||% 0.1
+        ),
+        early_exaggeration = as.numeric(
+            dots$transform_early_exaggeration %||% 4
+        ),
+        exaggeration = as.numeric(dots$transform_exaggeration %||% 1.5),
+        initial_momentum = as.numeric(
+            dots$transform_initial_momentum %||% 0.8
+        ),
+        final_momentum = as.numeric(
+            dots$transform_final_momentum %||% 0.8
+        ),
+        max_grad_norm = as.numeric(
+            dots$transform_max_grad_norm %||% 0.25
+        ),
+        max_step_norm = as.numeric(dots$transform_max_step_norm %||% Inf)
+    )
+}
+
+project_landmark_model_tsne_cuda <- function(model, query, knn, perplexity,
+                                                n_iter, exaggeration_iter,
+                                                controls) {
+    result <- landmark_tsne_transform_cuda_gpu_cpp(
+        knn, model$reference_data, query, model$fit$layout,
+        as.numeric(perplexity), as.integer(n_iter),
+        as.integer(exaggeration_iter), controls$learning_rate,
+        controls$early_exaggeration, controls$exaggeration,
+        controls$initial_momentum, controls$final_momentum,
+        controls$max_grad_norm, controls$max_step_norm,
+        controls$n_negatives, controls$exact_threshold,
+        as.integer(model$seed + 1009L), 12L, 1e-3, 2.5
+    )
+    list(layout = result$Y, backend = "cuda")
+}
+
+landmark_tsne_initial_layout <- function(model, query, knn, n_threads) {
+    initial <- landmark_affine_projection(
+        model$reference_data, query, model$fit$layout, knn,
+        n_threads = n_threads, backend = model$backend
+    )
+    if (!embedding_layout_dims_match(
+        initial, nrow(query), ncol(model$fit$layout)
+    )) {
+        return(NULL)
+    }
+    initial
+}
+
+project_landmark_model_tsne_host <- function(model, query, knn, perplexity,
+                                                n_iter, exaggeration_iter,
+                                                initialization, n_threads,
+                                                verbose,
+                                                controls) {
+    initial <- landmark_tsne_initial_layout(
+        model, query, knn, n_threads
+    )
+    layout <- transform_tsne(
+        model$fit$layout,
+        knn = knn, perplexity = perplexity,
+        initialization = initialization, Y_init = initial,
+        n_iter = n_iter, early_exaggeration_iter = exaggeration_iter,
+        learning_rate = controls$learning_rate,
+        early_exaggeration = controls$early_exaggeration,
+        exaggeration = controls$exaggeration,
+        initial_momentum = controls$initial_momentum,
+        final_momentum = controls$final_momentum,
+        max_grad_norm = controls$max_grad_norm,
+        max_step_norm = controls$max_step_norm,
+        n_negatives = controls$n_negatives,
+        exact_repulsion_threshold = controls$exact_threshold,
+        n.cores = n_threads, seed = model$seed + 1009L,
+        backend = model$backend, verbose = verbose
+    )
+    list(
+        layout = layout,
+        backend = attr(layout, "backend") %||% model$backend
+    )
 }
 
 #' Project observations into a fitted landmark embedding
@@ -623,9 +668,7 @@ project_landmark_tsne <- function(model,
 #' )
 #' fit <- project_landmark_model(model, x, refinement_epochs = 2)
 #' @export
-project_landmark_model <- function(model,
-                                    data,
-                                    query_indices = NULL,
+project_landmark_model <- function(model, data, query_indices = NULL,
                                     transform_k = NULL,
                                     refinement_epochs = 50L,
                                     transform_perplexity = 5,
@@ -635,157 +678,214 @@ project_landmark_model <- function(model,
                                     initialization = c(
                                         "median", "weighted", "random"
                                     ),
-                                    keep_knn = FALSE,
-                                    n.cores = NULL,
-                                    verbose = FALSE,
-                                    ...) {
-    if (!inherits(model, "fastEmbedR_landmark_model")) {
-        stop("`model` must be returned by fit_landmark_model().", call. = FALSE)
-    }
-    initialization <- match.arg(initialization)
-    n_threads <- normalize_nn_threads(n.cores %||% model$n.cores)
-    query_info <- landmark_query_data(model, data, query_indices)
-    query <- query_info$data
-    if (nrow(query) < 1L) {
-        layout <- model$fit$layout
+                                    keep_knn = FALSE, n.cores = NULL,
+                                    verbose = FALSE, ...) {
+    request <- prepare_landmark_projection(
+        model, data, query_indices, transform_k,
+        transform_perplexity, initialization, n.cores
+    )
+    if (nrow(request$query) < 1L) {
         return(model$fit)
     }
+    projected <- compute_landmark_projection(
+        request, refinement_epochs, transform_perplexity,
+        transform_iter, transform_early_exaggeration_iter,
+        transform_n_negatives, verbose, list(...)
+    )
+    assemble_landmark_projection_fit(
+        request, projected, keep_knn, transform_perplexity,
+        transform_iter
+    )
+}
+
+prepare_landmark_projection <- function(model, data, query_indices,
+                                        transform_k,
+                                        transform_perplexity,
+                                        initialization, n.cores) {
+    if (!inherits(model, "fastEmbedR_landmark_model")) {
+        stop("`model` must be returned by fit_landmark_model().",
+            call. = FALSE
+        )
+    }
+    initialization <- match.arg(
+        initialization, c("median", "weighted", "random")
+    )
+    n_threads <- normalize_nn_threads(n.cores %||% model$n.cores)
+    query_info <- landmark_query_data(model, data, query_indices)
     transform_k <- landmark_model_projection_k(
-        model,
-        transform_k,
+        model, transform_k,
         transform_perplexity = transform_perplexity
     )
-    knn_time <- system.time({
-        projection_knn <- precompute_query_knn(
-            model$reference_data,
-            query,
-            k = transform_k,
-            metric = model$metric,
-            backend = model$backend,
-            n.cores = n_threads
-        )
-    })
-    projection_time <- system.time({
-        projected <- if (identical(model$method, "umap")) {
-            refinement_epochs <- as.integer(refinement_epochs)
-            if (length(refinement_epochs) != 1L || is.na(refinement_epochs) ||
-                refinement_epochs < 0L) {
-                stop("`refinement_epochs` must be non-negative.", call. = FALSE)
-            }
-            project_landmark_umap(
-                model,
-                query,
-                projection_knn,
-                refinement_epochs,
-                n_threads,
-                verbose
-            )
-        } else {
-            project_landmark_tsne(
-                model,
-                query,
-                projection_knn,
-                transform_perplexity,
-                as.integer(transform_iter),
-                as.integer(transform_early_exaggeration_iter),
-                transform_n_negatives,
-                initialization,
-                n_threads,
-                verbose,
-                list(...)
-            )
-        }
-    })
-    query_layout <- finalize_embedding_layout(
-        projected$layout,
-        if (identical(model$method, "umap")) "UMAP" else "TSNE",
-        return_float32 = is_float32_matrix(query)
+    list(
+        model = model, query_info = query_info,
+        query = query_info$data, transform_k = transform_k,
+        initialization = initialization, n_threads = n_threads
     )
-    if (query_info$full_input) {
-        layout <- assemble_landmark_layout(
-            model$fit$layout,
-            query_layout,
-            model$selection$indices,
-            model$selection$query_indices,
-            model$n_total,
-            prefix = if (identical(model$method, "umap")) "UMAP" else "TSNE",
-            return_float32 = is_float32_matrix(query_info$input)
+}
+
+validate_landmark_refinement_epochs <- function(value) {
+    value <- as.integer(value)
+    if (length(value) != 1L || is.na(value) || value < 0L) {
+        stop("`refinement_epochs` must be non-negative.", call. = FALSE)
+    }
+    value
+}
+
+run_landmark_projection_method <- function(request, knn,
+                                            refinement_epochs,
+                                            transform_perplexity,
+                                            transform_iter,
+                                            exaggeration_iter,
+                                            transform_n_negatives,
+                                            verbose, dots) {
+    model <- request$model
+    if (identical(model$method, "umap")) {
+        epochs <- validate_landmark_refinement_epochs(refinement_epochs)
+        result <- project_landmark_umap(
+            model, request$query, knn, epochs,
+            request$n_threads, verbose
+        )
+        return(list(result = result, refinement_epochs = epochs))
+    }
+    result <- project_landmark_model_tsne(
+        model, request$query, knn, transform_perplexity,
+        as.integer(transform_iter), as.integer(exaggeration_iter),
+        transform_n_negatives, request$initialization,
+        request$n_threads, verbose, dots
+    )
+    list(result = result, refinement_epochs = NA_integer_)
+}
+
+compute_landmark_projection <- function(request, refinement_epochs,
+                                        transform_perplexity,
+                                        transform_iter,
+                                        exaggeration_iter,
+                                        transform_n_negatives,
+                                        verbose, dots) {
+    model <- request$model
+    knn_timed <- timed_do_call(precompute_query_knn, list(
+        reference = model$reference_data, query = request$query,
+        k = request$transform_k, metric = model$metric,
+        backend = model$backend, n.cores = request$n_threads
+    ))
+    projection_timed <- timed_do_call(
+        run_landmark_projection_method,
+        list(
+            request = request, knn = knn_timed$value,
+            refinement_epochs = refinement_epochs,
+            transform_perplexity = transform_perplexity,
+            transform_iter = transform_iter,
+            exaggeration_iter = exaggeration_iter,
+            transform_n_negatives = transform_n_negatives,
+            verbose = verbose, dots = dots
+        )
+    )
+    list(
+        knn = knn_timed$value, knn_time = knn_timed$time,
+        projection = projection_timed$value$result,
+        projection_time = projection_timed$time,
+        refinement_epochs =
+            projection_timed$value$refinement_epochs
+    )
+}
+
+assemble_projected_landmark_layout <- function(request, projected) {
+    model <- request$model
+    prefix <- if (identical(model$method, "umap")) "UMAP" else "TSNE"
+    query_layout <- finalize_embedding_layout(
+        projected$projection$layout, prefix,
+        return_float32 = is_float32_matrix(request$query)
+    )
+    layout <- if (request$query_info$full_input) {
+        assemble_landmark_layout(
+            model$fit$layout, query_layout, model$selection$indices,
+            model$selection$query_indices, model$n_total,
+            prefix = prefix,
+            return_float32 = is_float32_matrix(
+                request$query_info$input
+            )
         )
     } else {
-        layout <- query_layout
+        query_layout
     }
-    timings <- rbind(
-        reference_embedding = model$fit$timings["embedding", , drop = FALSE],
-        projection_knn = knn_time,
-        projection_transform = projection_time
-    )
-    metrics <- data.frame(
+    list(layout = layout, query_layout = query_layout)
+}
+
+landmark_projection_parameters <- function(request, projected,
+                                            transform_iter) {
+    model <- request$model
+    approximation <- attr(projected$knn, "approximation", exact = TRUE)
+    list(
         method = paste0("landmark_", model$method),
-        n = nrow(layout),
-        p = model$p,
-        elapsed = model$elapsed_sec + knn_time[["elapsed"]] +
-            projection_time[["elapsed"]],
-        reference_embedding_elapsed = model$elapsed_sec,
-        projection_knn_elapsed = knn_time[["elapsed"]],
-        projection_transform_elapsed = projection_time[["elapsed"]],
-        stringsAsFactors = FALSE
-    )
-    approximation <- attr(projection_knn, "approximation", exact = TRUE)
-    parameters <- list(
-        method = paste0("landmark_", model$method),
-        backend = model$backend,
-        metric = model$metric,
-        n_neighbors = model$n_neighbors,
-        perplexity = model$perplexity,
-        graph_mode = model$graph_mode,
-        seed = model$seed,
-        landmark = TRUE,
+        backend = model$backend, metric = model$metric,
+        n_neighbors = model$n_neighbors, perplexity = model$perplexity,
+        graph_mode = model$graph_mode, seed = model$seed, landmark = TRUE,
         n_landmarks = nrow(model$reference_data),
         landmark_fraction = model$selection$landmark_fraction,
         landmark_selection = model$selection$method,
-        transform_k = transform_k,
-        projection_nn_backend =
-            projection_knn$execution_backend %||%
-                attr(projection_knn, "backend") %||% model$backend,
-        projection_strategy =
-            approximation$strategy %||%
-                projection_knn$engine %||%
-                projection_knn$method %||%
-                attr(projection_knn, "method"),
-        projection_backend = projected$backend,
-        projection_scope = if (isTRUE(query_info$full_input)) {
+        transform_k = request$transform_k,
+        projection_nn_backend = projected$knn$execution_backend %||%
+            attr(projected$knn, "backend") %||% model$backend,
+        projection_strategy = approximation$strategy %||%
+            projected$knn$engine %||% projected$knn$method %||%
+            attr(projected$knn, "method"),
+        projection_backend = projected$projection$backend,
+        projection_scope = if (request$query_info$full_input) {
             "original_reconstruction"
         } else {
             "held_out_query"
         },
-        refinement_epochs = if (identical(model$method, "umap")) {
-            as.integer(refinement_epochs)
-        } else {
-            NA_integer_
-        },
-        transform_iter = if (identical(model$method, "tsne")) {
+        refinement_epochs = projected$refinement_epochs,
+        transform_iter = if (model$method == "tsne") {
             as.integer(transform_iter)
         } else {
             NA_integer_
         }
     )
-    out <- list(
-        layout = layout,
-        query_layout = query_layout,
-        labels = NULL,
+}
+
+landmark_projection_metrics <- function(request, projected, layout) {
+    model <- request$model
+    data.frame(
         method = paste0("landmark_", model$method),
-        model = model,
-        metrics = metrics,
-        parameters = parameters,
-        timings = timings,
-        knn = if (isTRUE(keep_knn)) projection_knn else NULL,
+        n = nrow(layout), p = model$p,
+        elapsed = model$elapsed_sec +
+            projected$knn_time[["elapsed"]] +
+            projected$projection_time[["elapsed"]],
+        reference_embedding_elapsed = model$elapsed_sec,
+        projection_knn_elapsed = projected$knn_time[["elapsed"]],
+        projection_transform_elapsed =
+            projected$projection_time[["elapsed"]]
+    )
+}
+
+assemble_landmark_projection_fit <- function(request, projected,
+                                                keep_knn,
+                                                transform_perplexity,
+                                                transform_iter) {
+    model <- request$model
+    layouts <- assemble_projected_landmark_layout(request, projected)
+    timings <- rbind(
+        reference_embedding =
+            model$fit$timings["embedding", , drop = FALSE],
+        projection_knn = projected$knn_time,
+        projection_transform = projected$projection_time
+    )
+    retained_knn <- if (isTRUE(keep_knn)) projected$knn else NULL
+    extras <- list(
+        query_layout = layouts$query_layout, model = model,
         landmarks = list(
             indices = model$selection$indices,
-            layout = model$fit$layout,
-            reference_fit = model$fit,
-            projection_knn = if (isTRUE(keep_knn)) projection_knn else NULL
+            layout = model$fit$layout, reference_fit = model$fit,
+            projection_knn = retained_knn
         )
     )
-    class(out) <- "fastEmbedR_embedding"
-    out
+    new_embedding_result(
+        layouts$layout, paste0("landmark_", model$method),
+        landmark_projection_metrics(request, projected, layouts$layout),
+        landmark_projection_parameters(
+            request, projected, transform_iter
+        ),
+        timings, retained_knn, extras
+    )
 }

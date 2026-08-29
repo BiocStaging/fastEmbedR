@@ -19,46 +19,107 @@
 #' fastEmbedR_capabilities()
 #' @export
 fastEmbedR_capabilities <- function() {
-    cuda_knn <- backend_flag(native_cuda_knn_available_cpp)
-    cuda_embedding <- backend_flag(embedding_cuda_available_cpp)
-    cuda_clustering <- backend_flag(graph_clustering_cuda_available_cpp)
-    metal_knn <- backend_flag(native_metal_knn_available_cpp)
-    metal_embedding <- backend_flag(embedding_metal_available_cpp)
-    metal_clustering <- backend_flag(graph_clustering_metal_available_cpp)
-    knn_available <- c(TRUE, cuda_knn, cuda_knn, metal_knn)
-    embedding_available <- c(TRUE, FALSE, cuda_embedding, metal_embedding)
-    clustering_available <- c(TRUE, FALSE, cuda_clustering, metal_clustering)
-    cuda_available <- cuda_knn || cuda_embedding || cuda_clustering
-    metal_available <- metal_knn || metal_embedding || metal_clustering
-    cuda_device <- cuda_device_summary(cuda_available)
-    metal_device <- metal_device_summary(metal_available)
-    unavailable_reason <- c(
+    state <- fastembedr_backend_state()
+    fastembedr_capability_table(state)
+}
+
+fastembedr_backend_state <- function() {
+    state <- list(
+        cuda_knn = backend_flag(native_cuda_knn_available_cpp),
+        cuda_embedding = backend_flag(embedding_cuda_available_cpp),
+        cuda_clustering = backend_flag(graph_clustering_cuda_available_cpp),
+        metal_knn = backend_flag(native_metal_knn_available_cpp),
+        metal_embedding = backend_flag(embedding_metal_available_cpp),
+        metal_clustering = backend_flag(graph_clustering_metal_available_cpp)
+    )
+    state$cuda <- with(
+        state,
+        cuda_knn || cuda_embedding || cuda_clustering
+    )
+    state$metal <- with(
+        state,
+        metal_knn || metal_embedding || metal_clustering
+    )
+    state$cuda_device <- cuda_device_summary(state$cuda)
+    state$metal_device <- metal_device_summary(state$metal)
+    state
+}
+
+fastembedr_unavailable_reasons <- function(state) {
+    c(
         NA_character_,
-        if (cuda_knn) {
+        if (state$cuda_knn) {
             NA_character_
         } else {
-        "The installed build did not expose a usable RAPIDS cuVS KNN component."
+            paste(
+                "The installed build did not expose a usable RAPIDS cuVS",
+                "KNN component."
+            )
         },
-        if (cuda_available) {
+        if (state$cuda) {
             NA_character_
         } else {
             "The installed build did not expose a usable native CUDA component."
         },
-        if (metal_available) {
+        if (state$metal) {
             NA_character_
         } else {
-        "The installed build did not expose a usable native Metal component."
+            paste(
+                "The installed build did not expose a usable native Metal",
+                "component."
+            )
         }
     )
+}
 
+fastembedr_capability_notes <- function(state) {
+    cuda_note <- if (state$cuda_embedding && state$cuda_clustering) {
+        paste(
+            "Package-native CUDA embedding and graph-clustering kernels",
+            "are available."
+        )
+    } else {
+        "One or more CUDA embedding/clustering components are unavailable."
+    }
+    metal_note <- if (
+        state$metal_knn && state$metal_embedding && state$metal_clustering
+    ) {
+        paste(
+            "Package-native Metal KNN, embedding, and graph-clustering",
+            "kernels are available."
+        )
+    } else {
+        "One or more Metal components are unavailable in this build."
+    }
+    c(
+        "Package-native CPU HNSW and CPU embedding are available.",
+        if (state$cuda_knn) {
+            "Package-native CUDA KNN uses the linked RAPIDS cuVS C API."
+        } else {
+            "RAPIDS cuVS KNN is unavailable in this build."
+        },
+        cuda_note,
+        metal_note
+    )
+}
+
+fastembedr_capability_table <- function(state) {
+    knn <- c(TRUE, state$cuda_knn, state$cuda_knn, state$metal_knn)
+    embedding <- c(TRUE, FALSE, state$cuda_embedding, state$metal_embedding)
+    clustering <- c(
+        TRUE, FALSE, state$cuda_clustering, state$metal_clustering
+    )
     data.frame(
         backend = c("cpu", "cuvs", "cuda", "metal"),
-        available = knn_available | embedding_available | clustering_available,
-        knn_available = knn_available,
-        embedding_available = embedding_available,
-        clustering_available = clustering_available,
+        available = knn | embedding | clustering,
+        knn_available = knn,
+        embedding_available = embedding,
+        clustering_available = clustering,
         explicit_backend = c("cpu", "cuda", "cuda", "metal"),
-        device = c(cpu_summary(), cuda_device, cuda_device, metal_device),
+        device = c(
+            cpu_summary(), state$cuda_device, state$cuda_device,
+            state$metal_device
+        ),
         knn_engine = c(
             "package-native HNSW",
             "RAPIDS cuVS IVF-Flat",
@@ -77,32 +138,9 @@ fastEmbedR_capabilities <- function() {
             "CUDA runtime, FAISS GPU/cuVS, cuFFT; optional RAFT/RMM TSVD",
             "Foundation, Accelerate, Metal, MPS, MPSGraph"
         ),
-        unavailable_reason = unavailable_reason,
+        unavailable_reason = fastembedr_unavailable_reasons(state),
         runtime = rep(R.version$platform, 4L),
-        note = c(
-            "Package-native CPU HNSW and CPU embedding are available.",
-            if (cuda_knn) {
-                "Package-native CUDA KNN uses the linked RAPIDS cuVS C API."
-            } else {
-                "RAPIDS cuVS KNN is unavailable in this build."
-            },
-            if (cuda_embedding && cuda_clustering) {
-                paste0(
-                "Package-native CUDA embedding and graph-clustering kernels ",
-                    "are available."
-                )
-            } else {
-            "One or more CUDA embedding/clustering components are unavailable."
-            },
-            if (metal_knn && metal_embedding && metal_clustering) {
-                paste0(
-                "Package-native Metal KNN, embedding, and graph-clustering ",
-                    "kernels are available."
-                )
-            } else {
-                "One or more Metal components are unavailable in this build."
-            }
-        ),
+        note = fastembedr_capability_notes(state),
         stringsAsFactors = FALSE
     )
 }
@@ -175,7 +213,7 @@ resolve_native_gpu_backend <- function(need_knn = FALSE,
 }
 
 available_native_gpu_backend <- function(need_knn = FALSE,
-                                        need_embedding = FALSE) {
+                                            need_embedding = FALSE) {
     cuda_knn_available <- backend_flag(native_cuda_knn_available_cpp)
     cuda_ok <- (!isTRUE(need_knn) || cuda_knn_available) &&
         (!isTRUE(need_embedding) || backend_flag(embedding_cuda_available_cpp))

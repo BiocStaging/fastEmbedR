@@ -31,15 +31,15 @@ embedding_colors <- c("#2678C8", "#E4576B", "#26A269")
 plot_embedding <- function(layout, labels, main) {
     labels <- factor(labels)
     plot(
-    as.matrix(layout),
-    col = embedding_colors[as.integer(labels)],
-    pch = 19,
-    cex = 0.75,
-    asp = 1,
-    axes = FALSE,
-    xlab = "",
-    ylab = "",
-    main = main
+        as.matrix(layout),
+        col = embedding_colors[as.integer(labels)],
+        pch = 19,
+        cex = 0.75,
+        asp = 1,
+        axes = FALSE,
+        xlab = "",
+        ylab = "",
+        main = main
     )
     box(col = "#B8B8B8")
 }
@@ -549,16 +549,16 @@ in R, and the returned layout remains float32.
 if (requireNamespace("float", quietly = TRUE)) {
     x_float <- float::fl(x)
     fit_float <- umap(
-    x_float,
-    n_neighbors = 15,
-    graph_mode = "fuzzy",
-    standardize = FALSE,
-    n.cores = 2,
-    seed = 4
+        x_float,
+        n_neighbors = 15,
+        graph_mode = "fuzzy",
+        standardize = FALSE,
+        n.cores = 2,
+        seed = 4
     )
     c(
-    input_class = class(x_float)[1],
-    layout_class = class(fit_float$layout)[1]
+        input_class = class(x_float)[1],
+        layout_class = class(fit_float$layout)[1]
     )
 }
 ```
@@ -600,18 +600,19 @@ reference_fit <- tsne(
 
 exact_query_knn <- function(reference, query, k) {
     squared_distances <- outer(
-    rowSums(query^2), rowSums(reference^2), "+"
+        rowSums(query^2), rowSums(reference^2), "+"
     ) - 2 * tcrossprod(query, reference)
     squared_distances[squared_distances < 0] <- 0
     indices <- t(apply(squared_distances, 1L, order))[
-    , seq_len(k), drop = FALSE
+        , seq_len(k),
+        drop = FALSE
     ]
     distances <- matrix(
-    sqrt(squared_distances[
-    cbind(rep(seq_len(nrow(query)), each = k), as.vector(t(indices)))
-    ]),
-    nrow = nrow(query),
-    byrow = TRUE
+        sqrt(squared_distances[
+            cbind(rep(seq_len(nrow(query)), each = k), as.vector(t(indices)))
+        ]),
+        nrow = nrow(query),
+        byrow = TRUE
     )
     list(indices = indices, distances = distances)
 }
@@ -734,16 +735,22 @@ fit_landmark_tsne <- landmark_tsne(
 
 rbind(
     UMAP = fit_landmark_umap$metrics[
-    1, c("elapsed", "reference_embedding_elapsed",
-        "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
+        1, c(
+            "elapsed", "reference_embedding_elapsed",
+            "landmark_projection_knn_elapsed", "landmark_refinement_elapsed"
+        )
     ],
     TSNE = setNames(
-    fit_landmark_tsne$metrics[
-    1, c("elapsed", "reference_embedding_elapsed",
-            "landmark_projection_knn_elapsed", "transform_elapsed")
-    ],
-    c("elapsed", "reference_embedding_elapsed",
-    "landmark_projection_knn_elapsed", "landmark_refinement_elapsed")
+        fit_landmark_tsne$metrics[
+            1, c(
+                "elapsed", "reference_embedding_elapsed",
+                "landmark_projection_knn_elapsed", "transform_elapsed"
+            )
+        ],
+        c(
+            "elapsed", "reference_embedding_elapsed",
+            "landmark_projection_knn_elapsed", "landmark_refinement_elapsed"
+        )
     )
 )
 ```

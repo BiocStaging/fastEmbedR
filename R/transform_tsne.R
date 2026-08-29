@@ -55,304 +55,320 @@
 #'     n_iter = 2, exact_repulsion_threshold = 10, seed = 1
 #' )
 #' @export
-transform_tsne <- function(reference_layout,
-                            knn = NULL,
-                            reference_data = NULL,
-                            new_data = NULL,
-                            k = NULL,
-                            perplexity = 5,
-                            initialization = c("median", "weighted", "random"),
-                            Y_init = NULL,
-                            n_iter = 250L,
-                            early_exaggeration_iter = 0L,
-                            learning_rate = 0.1,
-                            early_exaggeration = 4,
-                            exaggeration = 1.5,
-                            initial_momentum = 0.8,
-                            final_momentum = 0.8,
-                            max_grad_norm = 0.25,
-                            max_step_norm = Inf,
-                            n_negatives = NULL,
-                            exact_repulsion_threshold = 4096L,
-                            n.cores = NULL,
-                            seed = 4L,
-                            backend = NULL,
-                            verbose = FALSE) {
-    n_threads <- n.cores
+transform_tsne <- function(
+    reference_layout, knn = NULL, reference_data = NULL, new_data = NULL,
+    k = NULL, perplexity = 5,
+    initialization = c("median", "weighted", "random"), Y_init = NULL,
+    n_iter = 250L, early_exaggeration_iter = 0L, learning_rate = 0.1,
+    early_exaggeration = 4, exaggeration = 1.5,
+    initial_momentum = 0.8, final_momentum = 0.8,
+    max_grad_norm = 0.25, max_step_norm = Inf, n_negatives = NULL,
+    exact_repulsion_threshold = 4096L, n.cores = NULL, seed = 4L,
+    backend = NULL, verbose = FALSE
+) {
+    request <- list(
+        knn = knn, reference_data = reference_data, new_data = new_data,
+        k = k, perplexity = perplexity,
+        initialization = match.arg(initialization), Y_init = Y_init,
+        n_iter = n_iter,
+        early_exaggeration_iter = early_exaggeration_iter,
+        learning_rate = learning_rate,
+        early_exaggeration = early_exaggeration,
+        exaggeration = exaggeration, initial_momentum = initial_momentum,
+        final_momentum = final_momentum, max_grad_norm = max_grad_norm,
+        max_step_norm = max_step_norm, n_negatives = n_negatives,
+        exact_repulsion_threshold = exact_repulsion_threshold,
+        n_threads = n.cores, seed = seed, backend = backend,
+        verbose = verbose
+    )
+    reference_layout <- prepare_tsne_transform_reference(reference_layout)
+    request$backend <- resolve_embedding_backend(request$backend)
+    request$optimizer_backend <- resolve_tsne_transform_backend(
+        request$backend
+    )
+    prepared <- prepare_tsne_transform_projection(
+        request, reference_layout
+    )
+    controls <- prepare_tsne_transform_controls(
+        request, reference_layout
+    )
+    init <- prepare_tsne_transform_init(
+        request$Y_init, prepared$projection, reference_layout
+    )
+    native <- run_tsne_transform_optimizer(
+        reference_layout, prepared$projection, request, controls, init
+    )
+    finalize_tsne_transform(
+        native, reference_layout, prepared, request, controls
+    )
+}
+
+prepare_tsne_transform_reference <- function(reference_layout) {
     if (inherits(reference_layout, "fastEmbedR_embedding")) {
         reference_layout <- reference_layout$layout
     }
-    initialization <- match.arg(initialization)
-    backend <- resolve_embedding_backend(backend)
-    optimizer_backend <- resolve_tsne_transform_backend(backend)
-    reference_layout <- transform_embedding_matrix(
-        reference_layout,
-        "reference_layout",
+    transform_embedding_matrix(
+        reference_layout, "reference_layout",
         min_rows = 1L
     )
-    perplexity <- as.numeric(perplexity)
-    if (length(perplexity) != 1L || is.na(perplexity) || !is.finite(
-        perplexity
-    ) || perplexity <= 0) {
-        stop("`perplexity` must be a positive number.", call. = FALSE)
-    }
+}
 
-    raw_backend <- "precomputed"
-    exact <- NA
-    if (is.null(knn)) {
-        if (is.null(reference_data) || is.null(new_data)) {
-            stop(
-                "Supply either `knn`, or both `reference_data` and `new_data`.",
-                call. = FALSE
-            )
-        }
-        reference_data <- transform_embedding_matrix(
-            reference_data,
-            "reference_data",
-            min_rows = 1L
-        )
-        new_data <- transform_embedding_matrix(new_data, "new_data",
-        min_rows = 1L)
-        if (nrow(reference_data) != nrow(reference_layout)) {
-            stop(
-                sprintf(
-                    "%s%s",
-                    "`reference_data` and `reference_layout` must have the ",
-                    "same number of rows."
-                ),
-                call. = FALSE
-            )
-        }
-        if (ncol(reference_data) != ncol(new_data)) {
-            stop(
-        "`reference_data` and `new_data` must have the same number of columns.",
-                call. = FALSE
-            )
-        }
-        if (is.null(k)) {
-            k <- min(nrow(reference_data), max(25L, ceiling(3 * perplexity)))
-        }
-        k <- transform_embedding_k(k, nrow(reference_data))
-        query_policy <- fastembedr_query_nn_policy(
-            optimizer_backend,
-            n_reference = nrow(reference_data),
-            n_query = nrow(new_data),
-            p = ncol(reference_data)
-        )
-        raw_knn <- fastembedr_native_query_knn(
-            reference_data,
-            new_data,
-            k = k,
-            metric = "euclidean",
-            n_threads = n_threads,
-            target_recall = query_policy$target_recall,
-            backend = query_policy$backend,
-            method = query_policy$method,
-            keep_gpu = FALSE
-        )
-        projection <- transform_projection_knn(
-            raw_knn,
-            n_reference = nrow(reference_layout),
-            k = k
-        )
-        raw_backend <- attr(raw_knn, "backend")
-        exact <- attr(raw_knn, "exact")
-    } else {
-        projection <- transform_projection_knn(
-            knn,
-            n_reference = nrow(reference_layout),
-            k = k
-        )
-        raw_backend <- attr(knn, "backend")
-        exact <- attr(knn, "exact")
-    }
-    if (is.null(raw_backend) || length(raw_backend) == 0L || is.na(
-        raw_backend
-    )) {
-        raw_backend <- "precomputed"
-    }
-
-    if (is.null(n_threads)) {
-        n_threads <- default_tsne_threads()
-    }
-    n_threads <- as.integer(n_threads)
-    if (length(n_threads) != 1L || is.na(n_threads) || !is.finite(n_threads) ||
-        n_threads < 0L) {
-        stop("`n.cores` must be NULL or a non-negative integer.", call. = FALSE)
-    }
-    n_iter <- as.integer(n_iter)
-    early_exaggeration_iter <- as.integer(early_exaggeration_iter)
-    exact_repulsion_threshold <- as.integer(exact_repulsion_threshold)
-    if (length(n_iter) != 1L || is.na(n_iter) || n_iter < 0L ||
-        length(early_exaggeration_iter) != 1L || is.na(
-            early_exaggeration_iter) ||
-        early_exaggeration_iter < 0L ||
-        n_iter + early_exaggeration_iter < 1L) {
+validate_tsne_transform_data <- function(
+    reference_data, new_data, reference_layout
+) {
+    reference_data <- transform_embedding_matrix(
+        reference_data, "reference_data",
+        min_rows = 1L
+    )
+    new_data <- transform_embedding_matrix(
+        new_data, "new_data",
+        min_rows = 1L
+    )
+    if (nrow(reference_data) != nrow(reference_layout)) {
         stop(
-            sprintf(
-                "%s%s",
-                "Transform iteration counts must be non-negative and sum ",
-                "to at least one."
-            ),
+            "`reference_data` and `reference_layout` must have the same ",
+            "number of rows.",
             call. = FALSE
         )
     }
-    if (length(exact_repulsion_threshold) != 1L || is.na(
-        exact_repulsion_threshold
-    )) {
-        exact_repulsion_threshold <- 4096L
+    if (ncol(reference_data) != ncol(new_data)) {
+        stop(
+            "`reference_data` and `new_data` must have the same number ",
+            "of columns.",
+            call. = FALSE
+        )
     }
+    list(reference = reference_data, query = new_data)
+}
+
+prepare_tsne_transform_projection <- function(request, reference_layout) {
+    if (!is.null(request$knn)) {
+        projection <- transform_projection_knn(
+            request$knn, nrow(reference_layout), request$k
+        )
+        return(list(
+            projection = projection,
+            backend = attr(request$knn, "backend") %||% "precomputed",
+            exact = attr(request$knn, "exact")
+        ))
+    }
+    if (is.null(request$reference_data) || is.null(request$new_data)) {
+        stop(
+            "Supply either `knn`, or both `reference_data` and `new_data`.",
+            call. = FALSE
+        )
+    }
+    data <- validate_tsne_transform_data(
+        request$reference_data, request$new_data, reference_layout
+    )
+    k <- request$k %||% min(
+        nrow(data$reference), max(25L, ceiling(3 * request$perplexity))
+    )
+    k <- transform_embedding_k(k, nrow(data$reference))
+    policy <- fastembedr_query_nn_policy(
+        request$optimizer_backend, nrow(data$reference),
+        nrow(data$query), ncol(data$reference)
+    )
+    raw <- fastembedr_native_query_knn(
+        data$reference, data$query, k, "euclidean", request$n_threads,
+        policy$target_recall, policy$backend, policy$method, FALSE
+    )
+    list(
+        projection = transform_projection_knn(
+            raw, nrow(reference_layout), k
+        ),
+        backend = attr(raw, "backend") %||% "precomputed",
+        exact = attr(raw, "exact")
+    )
+}
+
+validate_tsne_transform_iterations <- function(request) {
+    n_iter <- as.integer(request$n_iter)
+    early <- as.integer(request$early_exaggeration_iter)
+    invalid <- length(n_iter) != 1L || is.na(n_iter) || n_iter < 0L ||
+        length(early) != 1L || is.na(early) || early < 0L ||
+        n_iter + early < 1L
+    if (invalid) {
+        stop(
+            "Transform iteration counts must be non-negative and sum ",
+            "to at least one.",
+            call. = FALSE
+        )
+    }
+    list(n_iter = n_iter, early = early)
+}
+
+prepare_tsne_transform_controls <- function(request, reference_layout) {
+    perplexity <- as.numeric(request$perplexity)
+    if (length(perplexity) != 1L || is.na(perplexity) ||
+        !is.finite(perplexity) || perplexity <= 0) {
+        stop("`perplexity` must be a positive number.", call. = FALSE)
+    }
+    n_threads <- request$n_threads %||% default_tsne_threads()
+    n_threads <- as.integer(n_threads)
+    if (length(n_threads) != 1L || is.na(n_threads) ||
+        !is.finite(n_threads) || n_threads < 0L) {
+        stop("`n.cores` must be NULL or a non-negative integer.",
+            call. = FALSE
+        )
+    }
+    iterations <- validate_tsne_transform_iterations(request)
+    threshold <- as.integer(request$exact_repulsion_threshold)
+    if (length(threshold) != 1L || is.na(threshold)) threshold <- 4096L
+    n_negatives <- request$n_negatives
     if (is.null(n_negatives)) {
-        n_negatives <- if (nrow(reference_layout) <=
-            exact_repulsion_threshold) {
+        n_negatives <- if (nrow(reference_layout) <= threshold) {
             nrow(reference_layout)
         } else {
             min(256L, nrow(reference_layout))
         }
     }
     n_negatives <- as.integer(n_negatives)
-    if (length(n_negatives) != 1L || is.na(n_negatives) || n_negatives < 1L) {
-        stop("`n_negatives` must be NULL or a positive integer.", call. = FALSE)
+    if (length(n_negatives) != 1L || is.na(n_negatives) ||
+        n_negatives < 1L) {
+        stop("`n_negatives` must be NULL or a positive integer.",
+            call. = FALSE
+        )
     }
-    init <- !is.null(Y_init)
-    y_init <- if (init) {
-        y_init <- transform_embedding_matrix(Y_init, "Y_init", min_rows = nrow(
-            projection$indices
-        ))
-        if (nrow(y_init) != nrow(projection$indices) || ncol(y_init) != ncol(
-            reference_layout
-        )) {
-            stop(
-                "`Y_init` must have one row per query and the same columns as ",
-                "`reference_layout`.",
-                call. = FALSE
-            )
-        }
-        y_init
-    } else {
-        matrix(0, 0L, 0L)
-    }
+    list(
+        perplexity = perplexity, n_threads = n_threads,
+        n_iter = iterations$n_iter, early_iter = iterations$early,
+        threshold = threshold, n_negatives = n_negatives
+    )
+}
 
-    out <- if (identical(optimizer_backend, "metal")) {
-        if (ncol(reference_layout) != 2L) {
-            stop(
-            "Metal t-SNE transform currently supports only two-dimensional ",
-                "reference layouts.",
-                call. = FALSE
-            )
-        }
-        transform_tsne_metal_cpp(
-            reference_layout,
-            projection$indices,
-            projection$distances,
-            y_init,
-            init,
-            initialization,
-            perplexity,
-            n_iter,
-            early_exaggeration_iter,
-            as.numeric(learning_rate),
-            as.numeric(early_exaggeration),
-            as.numeric(exaggeration),
-            as.numeric(initial_momentum),
-            as.numeric(final_momentum),
-            as.numeric(max_grad_norm),
-            as.numeric(max_step_norm),
-            n_negatives,
-            exact_repulsion_threshold,
-            as.integer(seed)
-        )
-    } else if (identical(optimizer_backend, "cuda")) {
-        if (ncol(reference_layout) != 2L) {
-            stop(
-                "CUDA t-SNE transform currently supports only two-dimensional ",
-                "reference layouts.",
-                call. = FALSE
-            )
-        }
-        transform_tsne_cuda_cpp(
-            reference_layout,
-            projection$indices,
-            projection$distances,
-            y_init,
-            init,
-            initialization,
-            perplexity,
-            n_iter,
-            early_exaggeration_iter,
-            as.numeric(learning_rate),
-            as.numeric(early_exaggeration),
-            as.numeric(exaggeration),
-            as.numeric(initial_momentum),
-            as.numeric(final_momentum),
-            as.numeric(max_grad_norm),
-            as.numeric(max_step_norm),
-            n_negatives,
-            exact_repulsion_threshold,
-            as.integer(seed)
-        )
-    } else {
-        transform_tsne_cpp(
-            reference_layout,
-            projection$indices,
-            projection$distances,
-            y_init,
-            init,
-            initialization,
-            perplexity,
-            n_iter,
-            early_exaggeration_iter,
-            as.numeric(learning_rate),
-            as.numeric(early_exaggeration),
-            as.numeric(exaggeration),
-            as.numeric(initial_momentum),
-            as.numeric(final_momentum),
-            as.numeric(max_grad_norm),
-            as.numeric(max_step_norm),
-            n_negatives,
-            exact_repulsion_threshold,
-            n_threads,
-            as.integer(seed),
-            isTRUE(verbose)
+prepare_tsne_transform_init <- function(
+    Y_init, projection, reference_layout
+) {
+    if (is.null(Y_init)) {
+        return(list(value = matrix(0, 0L, 0L), supplied = FALSE))
+    }
+    value <- transform_embedding_matrix(
+        Y_init, "Y_init",
+        min_rows = nrow(projection$indices)
+    )
+    valid <- nrow(value) == nrow(projection$indices) &&
+        ncol(value) == ncol(reference_layout)
+    if (!valid) {
+        stop(
+            "`Y_init` must have one row per query and the same columns as ",
+            "`reference_layout`.",
+            call. = FALSE
         )
     }
-    layout <- out$Y
-    colnames(layout) <- colnames(reference_layout)
-    attr(layout, "backend") <- optimizer_backend
-    attr(layout, "nn_backend") <- raw_backend
-    attr(layout, "exact") <- if (is.null(exact)) NA else isTRUE(exact)
-    attr(layout, "k") <- as.integer(ncol(projection$indices))
-    attr(layout, "transform") <- "tsne_fixed_reference"
-    attr(layout, "fastEmbedR_config") <- list(
-        method = "transform_tsne",
-        backend = optimizer_backend,
-        backend_requested = backend,
-        nn_backend = raw_backend,
-        n_reference = nrow(reference_layout),
-        n_query = nrow(layout),
-        k = as.integer(ncol(projection$indices)),
-        perplexity = perplexity,
-        n_iter = n_iter,
-        early_exaggeration_iter = early_exaggeration_iter,
-        learning_rate = as.numeric(learning_rate),
-        early_exaggeration = as.numeric(early_exaggeration),
-        exaggeration = as.numeric(exaggeration),
-        initial_momentum = as.numeric(initial_momentum),
-        final_momentum = as.numeric(final_momentum),
-        max_grad_norm = as.numeric(max_grad_norm),
-        max_step_norm = as.numeric(max_step_norm),
+    list(value = value, supplied = TRUE)
+}
+
+run_tsne_transform_gpu <- function(
+    backend, reference_layout, projection, request, controls, init
+) {
+    if (ncol(reference_layout) != 2L) {
+        stop(
+            backend, " t-SNE transform currently supports only ",
+            "two-dimensional reference layouts.",
+            call. = FALSE
+        )
+    }
+    call <- if (backend == "metal") {
+        transform_tsne_metal_cpp
+    } else {
+        transform_tsne_cuda_cpp
+    }
+    call(
+        reference_layout, projection$indices, projection$distances,
+        init$value, init$supplied, request$initialization,
+        controls$perplexity, controls$n_iter, controls$early_iter,
+        as.numeric(request$learning_rate),
+        as.numeric(request$early_exaggeration),
+        as.numeric(request$exaggeration),
+        as.numeric(request$initial_momentum),
+        as.numeric(request$final_momentum),
+        as.numeric(request$max_grad_norm),
+        as.numeric(request$max_step_norm), controls$n_negatives,
+        controls$threshold, as.integer(request$seed)
+    )
+}
+
+run_tsne_transform_cpu <- function(
+    reference_layout, projection, request, controls, init
+) {
+    transform_tsne_cpp(
+        reference_layout, projection$indices, projection$distances,
+        init$value, init$supplied, request$initialization,
+        controls$perplexity, controls$n_iter, controls$early_iter,
+        as.numeric(request$learning_rate),
+        as.numeric(request$early_exaggeration),
+        as.numeric(request$exaggeration),
+        as.numeric(request$initial_momentum),
+        as.numeric(request$final_momentum),
+        as.numeric(request$max_grad_norm),
+        as.numeric(request$max_step_norm), controls$n_negatives,
+        controls$threshold, controls$n_threads, as.integer(request$seed),
+        isTRUE(request$verbose)
+    )
+}
+
+run_tsne_transform_optimizer <- function(
+    reference_layout, projection, request, controls, init
+) {
+    if (request$optimizer_backend %in% c("metal", "cuda")) {
+        return(run_tsne_transform_gpu(
+            request$optimizer_backend, reference_layout, projection,
+            request, controls, init
+        ))
+    }
+    run_tsne_transform_cpu(
+        reference_layout, projection, request, controls, init
+    )
+}
+
+tsne_transform_config <- function(
+    out, layout, reference_layout, prepared, request, controls
+) {
+    list(
+        method = "transform_tsne", backend = request$optimizer_backend,
+        backend_requested = request$backend,
+        nn_backend = prepared$backend,
+        n_reference = nrow(reference_layout), n_query = nrow(layout),
+        k = as.integer(ncol(prepared$projection$indices)),
+        perplexity = controls$perplexity, n_iter = controls$n_iter,
+        early_exaggeration_iter = controls$early_iter,
+        learning_rate = as.numeric(request$learning_rate),
+        early_exaggeration = as.numeric(request$early_exaggeration),
+        exaggeration = as.numeric(request$exaggeration),
+        initial_momentum = as.numeric(request$initial_momentum),
+        final_momentum = as.numeric(request$final_momentum),
+        max_grad_norm = as.numeric(request$max_grad_norm),
+        max_step_norm = as.numeric(request$max_step_norm),
         n_negatives = out$n_negatives,
-        exact_repulsion_threshold = exact_repulsion_threshold,
-        initialization = out$initialization,
-        optimizer = out$optimizer,
-        repulsion = out$repulsion,
-        affinities = out$affinities,
+        exact_repulsion_threshold = controls$threshold,
+        initialization = out$initialization, optimizer = out$optimizer,
+        repulsion = out$repulsion, affinities = out$affinities,
         affinity_storage = out$affinity_storage,
         transform_batch_size = out$transform_batch_size,
         transform_batches = out$transform_batches,
-        n.cores = if (is.null(out$n_threads)) NA_integer_ else out$n_threads,
-        seed = as.integer(seed),
+        n.cores = out$n_threads %||% NA_integer_,
+        seed = as.integer(request$seed),
         provenance = "fixed_reference_tsne_native_cpp"
+    )
+}
+
+finalize_tsne_transform <- function(
+    out, reference_layout, prepared, request, controls
+) {
+    layout <- out$Y
+    colnames(layout) <- colnames(reference_layout)
+    attr(layout, "backend") <- request$optimizer_backend
+    attr(layout, "nn_backend") <- prepared$backend
+    attr(layout, "exact") <- if (is.null(prepared$exact)) {
+        NA
+    } else {
+        isTRUE(prepared$exact)
+    }
+    attr(layout, "k") <- as.integer(ncol(prepared$projection$indices))
+    attr(layout, "transform") <- "tsne_fixed_reference"
+    attr(layout, "fastEmbedR_config") <- tsne_transform_config(
+        out, layout, reference_layout, prepared, request, controls
     )
     layout
 }
@@ -365,7 +381,8 @@ resolve_tsne_transform_backend <- function(backend) {
     if (identical(backend, "metal")) {
         if (!metal_metric_available()) {
             stop(
-            "Metal t-SNE transform backend is not available on this system.",
+                "Metal t-SNE transform backend is not available on ",
+                "this system.",
                 call. = FALSE
             )
         }
@@ -423,15 +440,19 @@ landmark_projection_approx_params <- function(n_landmarks, k) {
         NULL
     )
     if (is.null(n_projections)) {
-        n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(2L,
-            n_landmarks)))))
+        n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(
+            2L,
+            n_landmarks
+        )))))
     } else {
         n_projections <- integer_scalar(n_projections)
         if (length(n_projections) != 1L || is.na(n_projections) || !is.finite(
             n_projections
         )) {
-            n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(2L,
-                n_landmarks)))))
+            n_projections <- max(8L, min(24L, 2L * ceiling(log2(max(
+                2L,
+                n_landmarks
+            )))))
         }
     }
     n_projections <- as.integer(max(1L, min(64L, n_projections)))
@@ -524,15 +545,89 @@ landmark_projection_knn <- function(x_landmarks,
     result
 }
 
-landmark_affine_projection <- function(x_landmarks,
-                                        x_query,
-                                        landmark_layout,
-                                        projection_knn,
-                                        max_neighbors = NULL,
-                                        ridge = 1e-3,
-                                        max_extrapolation = 2.5,
-                                        n_threads = NULL,
-                                        backend = "auto") {
+annotate_affine_projection <- function(out, backend, threads, method) {
+    layout <- out$layout
+    attr(layout, "projection_method") <- out$method %||% method
+    attr(layout, "projection_backend") <- out$backend %||% backend
+    attr(layout, "projection_confidence") <- out$confidence
+    attr(layout, "projection_fallback") <- out$fallback
+    attr(layout, "projection_max_neighbors") <- out$max_neighbors
+    attr(layout, "projection_ridge") <- out$ridge
+    attr(layout, "projection_max_extrapolation") <- out$max_extrapolation
+    attr(layout, "projection_threads") <- threads
+    layout
+}
+
+try_metal_affine_projection <- function(
+    x_landmarks, x_query, landmark_layout, projection_knn,
+    max_neighbors, ridge, max_extrapolation, required
+) {
+    out <- tryCatch(
+        project_embedding_affine_metal_cpp(
+            x_landmarks, x_query, landmark_layout,
+            projection_knn$indices, projection_knn$distances,
+            as.integer(max_neighbors), as.numeric(ridge),
+            as.numeric(max_extrapolation)
+        ),
+        error = function(e) {
+            if (required) {
+                stop(
+                    "Metal affine landmark projection failed: ",
+                    conditionMessage(e),
+                    call. = FALSE
+                )
+            }
+            NULL
+        }
+    )
+    if (is.null(out) || is.null(out$layout)) {
+        return(NULL)
+    }
+    annotate_affine_projection(
+        out, "metal", NA_integer_, "local_affine_knn_projection_metal"
+    )
+}
+
+run_cpu_affine_projection <- function(
+    x_landmarks, x_query, landmark_layout, projection_knn,
+    max_neighbors, ridge, max_extrapolation, n_threads
+) {
+    parallel <- exists(
+        "project_embedding_affine_parallel_cpp",
+        envir = asNamespace("fastEmbedR"), inherits = FALSE
+    )
+    call <- if (parallel) {
+        project_embedding_affine_parallel_cpp
+    } else {
+        project_embedding_affine_cpp
+    }
+    args <- list(
+        x_landmarks, x_query, landmark_layout, projection_knn$indices,
+        projection_knn$distances, as.integer(max_neighbors),
+        as.numeric(ridge), as.numeric(max_extrapolation)
+    )
+    if (parallel) args <- c(args, list(as.integer(n_threads)))
+    out <- tryCatch(do.call(call, args), error = function(e) NULL)
+    if (is.null(out) || is.null(out$layout)) {
+        layout <- project_embedding_knn_cpp(
+            landmark_layout, projection_knn$indices,
+            projection_knn$distances
+        )
+        attr(layout, "projection_method") <- "weighted_knn_fallback"
+        attr(layout, "projection_backend") <- "cpu"
+        return(layout)
+    }
+    annotate_affine_projection(
+        out, "cpu", out$n_threads %||% 1L,
+        "local_affine_knn_projection"
+    )
+}
+
+landmark_affine_projection <- function(
+    x_landmarks, x_query, landmark_layout, projection_knn,
+    max_neighbors = NULL, ridge = 1e-3, max_extrapolation = 2.5,
+    n_threads = NULL, backend = "auto"
+) {
     if (is.null(max_neighbors)) {
         max_neighbors <- min(12L, ncol(projection_knn$indices))
     }
@@ -548,101 +643,19 @@ landmark_affine_projection <- function(x_landmarks,
         isTRUE(embedding_metal_available_cpp()) &&
         metal_work >= 5e6
     if (use_metal) {
-        out <- tryCatch(
-            project_embedding_affine_metal_cpp(
-                x_landmarks,
-                x_query,
-                landmark_layout,
-                projection_knn$indices,
-                projection_knn$distances,
-                as.integer(max_neighbors),
-                as.numeric(ridge),
-                as.numeric(max_extrapolation)
-            ),
-            error = function(e) {
-                if (identical(backend, "metal")) {
-                    stop("Metal affine landmark projection failed: ",
-                        conditionMessage(e),
-                        call. = FALSE
-                    )
-                }
-                NULL
-            }
+        layout <- try_metal_affine_projection(
+            x_landmarks, x_query, landmark_layout, projection_knn,
+            max_neighbors, ridge, max_extrapolation, backend == "metal"
         )
-        if (!is.null(out) && !is.null(out$layout)) {
-            layout <- out$layout
-            attr(layout, "projection_method") <-
-                out$method %||% "local_affine_knn_projection_metal"
-            attr(layout, "projection_backend") <- out$backend %||% "metal"
-            attr(layout, "projection_confidence") <- out$confidence
-            attr(layout, "projection_fallback") <- out$fallback
-            attr(layout, "projection_max_neighbors") <- out$max_neighbors
-            attr(layout, "projection_ridge") <- out$ridge
-            attr(layout, "projection_max_extrapolation") <-
-                out$max_extrapolation
-            attr(layout, "projection_threads") <- NA_integer_
+        if (!is.null(layout)) {
             return(layout)
         }
     }
-    n_threads <- normalize_nn_threads(n_threads)
-    use_parallel <- exists(
-        "project_embedding_affine_parallel_cpp",
-        envir = asNamespace("fastEmbedR"),
-        inherits = FALSE
+    run_cpu_affine_projection(
+        x_landmarks, x_query, landmark_layout, projection_knn,
+        max_neighbors, ridge, max_extrapolation,
+        normalize_nn_threads(n_threads)
     )
-    affine_fun <- if (use_parallel) {
-        project_embedding_affine_parallel_cpp
-    } else {
-        project_embedding_affine_cpp
-    }
-    out <- tryCatch(
-        if (use_parallel) {
-            affine_fun(
-                x_landmarks,
-                x_query,
-                landmark_layout,
-                projection_knn$indices,
-                projection_knn$distances,
-                as.integer(max_neighbors),
-                as.numeric(ridge),
-                as.numeric(max_extrapolation),
-                as.integer(n_threads)
-            )
-        } else {
-            affine_fun(
-                x_landmarks,
-                x_query,
-                landmark_layout,
-                projection_knn$indices,
-                projection_knn$distances,
-                as.integer(max_neighbors),
-                as.numeric(ridge),
-                as.numeric(max_extrapolation)
-            )
-        },
-        error = function(e) NULL
-    )
-    if (is.null(out) || is.null(out$layout)) {
-        layout <- project_embedding_knn_cpp(
-            landmark_layout,
-            projection_knn$indices,
-            projection_knn$distances
-        )
-        attr(layout, "projection_method") <- "weighted_knn_fallback"
-        attr(layout, "projection_backend") <- "cpu"
-        return(layout)
-    }
-    layout <- out$layout
-    attr(layout, "projection_method") <-
-        out$method %||% "local_affine_knn_projection"
-    attr(layout, "projection_backend") <- "cpu"
-    attr(layout, "projection_confidence") <- out$confidence
-    attr(layout, "projection_fallback") <- out$fallback
-    attr(layout, "projection_max_neighbors") <- out$max_neighbors
-    attr(layout, "projection_ridge") <- out$ridge
-    attr(layout, "projection_max_extrapolation") <- out$max_extrapolation
-    attr(layout, "projection_threads") <- out$n_threads %||% 1L
-    layout
 }
 
 zero_proc_time <- function() {
@@ -699,24 +712,12 @@ resident_transform_backend <- function(backend, k, keep_knn) {
     NA_character_
 }
 
-resident_projected_layout <- function(resident,
-                                    backend,
-                                    backend_requested,
-                                    n_reference,
-                                    k,
-                                    perplexity,
-                                    n_iter,
-                                    early_exaggeration_iter,
-                                    learning_rate,
-                                    early_exaggeration,
-                                    exaggeration,
-                                    initial_momentum,
-                                    final_momentum,
-                                    max_grad_norm,
-                                    max_step_norm,
-                                    exact_repulsion_threshold,
-                                    seed,
-                                    reference_layout) {
+resident_projected_layout <- function(
+    resident, backend, backend_requested, n_reference, k, perplexity,
+    n_iter, early_exaggeration_iter, learning_rate, early_exaggeration,
+    exaggeration, initial_momentum, final_momentum, max_grad_norm,
+    max_step_norm, exact_repulsion_threshold, seed, reference_layout
+) {
     layout <- resident$Y
     colnames(layout) <- colnames(reference_layout)
     attr(layout, "backend") <- backend
@@ -777,6 +778,716 @@ resident_projection_result <- function(backend, k) {
     result
 }
 
+normalize_landmark_tsne_request <- function(request) {
+    request$reference_method <- match.arg(
+        request$reference_method,
+        "tsne"
+    )
+    request$initialization <- match.arg(
+        request$initialization,
+        c("median", "weighted", "random")
+    )
+    request$affinity_support <- normalize_opentsne_affinity_support(
+        request$affinity_support
+    )
+    request$backend <- resolve_embedding_backend(request$backend)
+    request$n_threads <- request$n.cores
+    request
+}
+
+prepare_landmark_tsne_data <- function(data, request) {
+    prepared <- timed_do_call(prepare_embedding_data, list(
+        data,
+        request$standardize,
+        request$pca_dims,
+        request$seed,
+        backend = resolve_preprocess_backend(request$backend)
+    ))
+    x <- prepared$value$data
+    validate_landmark_tsne_neighbors(request$n_neighbors, nrow(x))
+    selection <- select_landmarks(
+        x,
+        request$landmarks,
+        seed = request$seed,
+        n.cores = request$n_threads
+    )
+    list(
+        x = x,
+        n = nrow(x),
+        prepared = prepared$value,
+        preprocess_time = prepared$time,
+        selection = selection
+    )
+}
+
+validate_landmark_tsne_neighbors <- function(n_neighbors, n) {
+    if (is.null(n_neighbors)) {
+        return(invisible(NULL))
+    }
+    n_neighbors <- as.integer(n_neighbors)
+    invalid <- length(n_neighbors) != 1L ||
+        is.na(n_neighbors) ||
+        n_neighbors < 1L ||
+        n_neighbors >= n
+    if (invalid) {
+        stop(
+            "`n_neighbors` must be positive and smaller than `nrow(data)`.",
+            call. = FALSE
+        )
+    }
+    invisible(NULL)
+}
+
+run_full_landmark_tsne <- function(state, request) {
+    args <- list(
+        data = state$x,
+        perplexity = request$perplexity,
+        affinity_support = request$affinity_support,
+        n_components = request$n_components,
+        standardize = FALSE,
+        pca_dims = NULL,
+        seed = request$seed,
+        backend = request$backend,
+        keep_knn = request$keep_knn,
+        verbose = request$verbose,
+        n.cores = request$n_threads
+    )
+    do.call(tsne, c(args, request$extra))
+}
+
+partition_landmark_tsne <- function(state, request) {
+    indices <- state$selection$indices
+    query_indices <- state$selection$query_indices
+    partition <- split_landmark_data(
+        state$x,
+        indices,
+        query_indices,
+        n_threads = request$n_threads
+    )
+    state$landmark_indices <- indices
+    state$query_indices <- query_indices
+    state$x_landmarks <- partition$landmarks
+    state$x_query <- partition$query
+    state$n_landmarks <- nrow(partition$landmarks)
+    state
+}
+
+landmark_tsne_reference_policy <- function(state, request) {
+    policy <- opentsne_neighbor_policy(
+        state$n_landmarks,
+        perplexity = request$perplexity,
+        affinity_support = request$affinity_support
+    )
+    perplexity <- request$perplexity %||% policy$perplexity
+    n_neighbors <- request$n_neighbors %||% policy$n_neighbors
+    if (n_neighbors >= state$n_landmarks) {
+        stop(
+            "`n_neighbors` must be smaller than selected landmarks.",
+            call. = FALSE
+        )
+    }
+    required <- opentsne_support_width(
+        perplexity,
+        request$affinity_support
+    )
+    if (n_neighbors < required) {
+        stop(
+            "`n_neighbors` is too small for the affinity support.",
+            call. = FALSE
+        )
+    }
+    list(
+        perplexity = perplexity,
+        n_neighbors = as.integer(n_neighbors)
+    )
+}
+
+landmark_tsne_reference_args <- function(knn, state, request, policy) {
+    args <- list(
+        indices = knn,
+        n_neighbors = policy$n_neighbors,
+        perplexity = policy$perplexity,
+        affinity_support = request$affinity_support,
+        n_components = request$n_components,
+        init_data = state$x_landmarks,
+        seed = request$seed,
+        backend = request$backend,
+        verbose = request$verbose,
+        n.cores = request$n_threads
+    )
+    c(args, request$extra)
+}
+
+run_landmark_tsne_reference <- function(state, request, policy) {
+    reference_knn <- landmark_reference_knn(
+        state$x_landmarks,
+        k = policy$n_neighbors,
+        backend = request$backend,
+        n_threads = request$n_threads
+    )
+    layout <- do.call(
+        tsne_knn,
+        landmark_tsne_reference_args(
+            reference_knn,
+            state,
+            request,
+            policy
+        )
+    )
+    list(knn = reference_knn, layout = layout)
+}
+
+landmark_tsne_reference_fit <- function(result, state, request, policy) {
+    config <- attr(result$value$layout, "fastEmbedR_config")
+    nn_backend <- attr(result$value$knn, "backend") %||% "supplied"
+    parameters <- c(list(
+        method = "tsne",
+        input = "knn",
+        n = state$n_landmarks,
+        p = ncol(state$x_landmarks),
+        n_neighbors = policy$n_neighbors,
+        k = policy$n_neighbors + 1L,
+        n_components = as.integer(request$n_components),
+        seed = as.integer(request$seed),
+        nn_backend = nn_backend,
+        keep_knn = request$keep_knn
+    ), config, list(preprocess = "none_precomputed_knn"))
+    list(
+        layout = result$value$layout,
+        metrics = landmark_tsne_reference_metrics(
+            state,
+            policy,
+            config,
+            result$time
+        ),
+        parameters = parameters,
+        knn = if (request$keep_knn) result$value$knn else NULL
+    )
+}
+
+landmark_tsne_reference_metrics <- function(
+    state,
+    policy,
+    config,
+    elapsed
+) {
+    data.frame(
+        method = "tsne",
+        n = state$n_landmarks,
+        p = ncol(state$x_landmarks),
+        n_neighbors = policy$n_neighbors,
+        perplexity = config$perplexity,
+        elapsed = elapsed[["elapsed"]],
+        preprocess_elapsed = 0,
+        knn_elapsed = NA_real_,
+        embedding_elapsed = NA_real_,
+        stringsAsFactors = FALSE
+    )
+}
+
+fit_landmark_tsne_reference <- function(state, request) {
+    policy <- landmark_tsne_reference_policy(state, request)
+    result <- timed_do_call(
+        run_landmark_tsne_reference,
+        list(state, request, policy)
+    )
+    state$policy <- policy
+    state$reference_time <- result$time
+    state$reference_fit <- landmark_tsne_reference_fit(
+        result,
+        state,
+        request,
+        policy
+    )
+    state
+}
+
+landmark_tsne_transform_controls <- function(state, request) {
+    transform_k <- request$transform_k
+    if (is.null(transform_k)) {
+        transform_k <- max(
+            25L,
+            ceiling(3 * request$transform_perplexity)
+        )
+        transform_k <- min(state$n_landmarks, transform_k)
+    }
+    transform_iter <- as.integer(request$transform_iter)
+    if (length(transform_iter) != 1L ||
+        is.na(transform_iter) ||
+        transform_iter < 0L) {
+        stop(
+            "`transform_iter` must be a non-negative integer.",
+            call. = FALSE
+        )
+    }
+    threshold <- scalar_integer_or_default(
+        request$extra,
+        "exact_repulsion_threshold",
+        4096L
+    )
+    if (length(threshold) != 1L || is.na(threshold)) {
+        threshold <- 4096L
+    }
+    landmark_tsne_transform_scalars(
+        state,
+        request,
+        transform_embedding_k(transform_k, state$n_landmarks),
+        transform_iter,
+        threshold
+    )
+}
+
+landmark_tsne_transform_scalars <- function(
+    state,
+    request,
+    transform_k,
+    transform_iter,
+    threshold
+) {
+    negatives <- request$transform_n_negatives
+    if (is.null(negatives)) {
+        negatives <- if (state$n_landmarks <= threshold) {
+            state$n_landmarks
+        } else {
+            min(256L, state$n_landmarks)
+        }
+    }
+    list(
+        k = transform_k,
+        n_iter = transform_iter,
+        threshold = threshold,
+        n_negatives = as.integer(negatives),
+        learning_rate = scalar_numeric_or_default(
+            request$extra, "transform_learning_rate", 0.1
+        ),
+        early_exaggeration = scalar_numeric_or_default(
+            request$extra, "transform_early_exaggeration", 4
+        ),
+        exaggeration = scalar_numeric_or_default(
+            request$extra, "transform_exaggeration", 1.5
+        ),
+        initial_momentum = scalar_numeric_or_default(
+            request$extra, "transform_initial_momentum", 0.8
+        ),
+        final_momentum = scalar_numeric_or_default(
+            request$extra, "transform_final_momentum", 0.8
+        ),
+        max_grad_norm = scalar_numeric_or_default(
+            request$extra, "transform_max_grad_norm", 0.25
+        ),
+        max_step_norm = scalar_numeric_or_default(
+            request$extra, "transform_max_step_norm", Inf
+        )
+    )
+}
+
+compute_landmark_tsne_projection_knn <- function(
+    state,
+    request,
+    controls
+) {
+    landmark_projection_knn(
+        state$x_landmarks,
+        state$x_query,
+        k = controls$k,
+        backend = request$backend,
+        seed = request$seed + 503L,
+        n_threads = request$n_threads,
+        landmark_layout = state$reference_fit$layout,
+        all_data = state$x,
+        landmark_indices = state$landmark_indices,
+        query_rows = state$query_indices
+    )
+}
+
+run_landmark_tsne_cuda_projection <- function(
+    state,
+    request,
+    controls,
+    projection_knn
+) {
+    resident <- landmark_tsne_transform_cuda_gpu_cpp(
+        projection_knn,
+        state$x_landmarks,
+        state$x_query,
+        state$reference_fit$layout,
+        as.numeric(request$transform_perplexity),
+        controls$n_iter,
+        as.integer(request$transform_early_exaggeration_iter),
+        controls$learning_rate,
+        controls$early_exaggeration,
+        controls$exaggeration,
+        controls$initial_momentum,
+        controls$final_momentum,
+        controls$max_grad_norm,
+        controls$max_step_norm,
+        controls$n_negatives,
+        controls$threshold,
+        as.integer(request$seed + 1009L),
+        12L,
+        1e-3,
+        2.5
+    )
+    layout <- resident$Y
+    attr(layout, "backend") <- "cuda"
+    attr(layout, "fastEmbedR_config") <- resident$config
+    layout
+}
+
+landmark_tsne_projection_init <- function(
+    state,
+    request,
+    projection_knn
+) {
+    init <- attr(projection_knn, "projected_layout", exact = TRUE)
+    affine <- landmark_affine_projection(
+        state$x_landmarks,
+        state$x_query,
+        state$reference_fit$layout,
+        projection_knn,
+        n_threads = request$n_threads,
+        backend = request$backend
+    )
+    valid_affine <- embedding_layout_dims_match(
+        affine,
+        length(state$query_indices),
+        request$n_components
+    )
+    if (valid_affine) {
+        return(list(
+            layout = affine,
+            backend = attr(affine, "projection_backend") %||% NA_character_,
+            method = attr(affine, "projection_method") %||% NA_character_
+        ))
+    }
+    valid_init <- embedding_layout_dims_match(
+        init,
+        length(state$query_indices),
+        request$n_components
+    )
+    list(
+        layout = if (valid_init) init else NULL,
+        backend = NA_character_,
+        method = NA_character_
+    )
+}
+
+landmark_tsne_projection_only <- function(
+    state,
+    request,
+    projection_knn,
+    init
+) {
+    if (is.null(init$layout)) {
+        init$layout <- project_embedding_knn_cpp(
+            state$reference_fit$layout,
+            projection_knn$indices,
+            projection_knn$distances
+        )
+        init$backend <- "cpu"
+        init$method <- "weighted_knn_fallback"
+    }
+    layout <- init$layout
+    attr(layout, "backend") <- attr(projection_knn, "backend") %||%
+        request$backend
+    attr(layout, "fastEmbedR_config") <- list(
+        optimizer = "projection_only",
+        repulsion = "none",
+        n_negatives = 0L,
+        initialization = request$initialization,
+        backend = attr(layout, "backend")
+    )
+    list(layout = layout, init = init)
+}
+
+landmark_tsne_transform_args <- function(
+    state,
+    request,
+    controls,
+    projection_knn,
+    init
+) {
+    list(
+        reference_layout = state$reference_fit$layout,
+        knn = projection_knn,
+        perplexity = request$transform_perplexity,
+        initialization = request$initialization,
+        Y_init = init$layout,
+        n_iter = controls$n_iter,
+        early_exaggeration_iter =
+            request$transform_early_exaggeration_iter,
+        learning_rate = controls$learning_rate,
+        early_exaggeration = controls$early_exaggeration,
+        exaggeration = controls$exaggeration,
+        initial_momentum = controls$initial_momentum,
+        final_momentum = controls$final_momentum,
+        max_grad_norm = controls$max_grad_norm,
+        max_step_norm = controls$max_step_norm,
+        n_negatives = request$transform_n_negatives,
+        n.cores = request$n_threads,
+        seed = request$seed + 1009L,
+        backend = request$backend,
+        verbose = request$verbose
+    )
+}
+
+run_landmark_tsne_host_projection <- function(
+    state,
+    request,
+    controls,
+    projection_knn
+) {
+    init <- landmark_tsne_projection_init(
+        state,
+        request,
+        projection_knn
+    )
+    if (controls$n_iter == 0L) {
+        projected <- landmark_tsne_projection_only(
+            state,
+            request,
+            projection_knn,
+            init
+        )
+        return(list(
+            layout = projected$layout,
+            time = zero_proc_time(),
+            init = projected$init
+        ))
+    }
+    transformed <- timed_do_call(
+        transform_tsne,
+        landmark_tsne_transform_args(
+            state,
+            request,
+            controls,
+            projection_knn,
+            init
+        )
+    )
+    list(
+        layout = transformed$value,
+        time = transformed$time,
+        init = init
+    )
+}
+
+project_landmark_tsne <- function(state, request) {
+    controls <- landmark_tsne_transform_controls(state, request)
+    projection <- timed_do_call(
+        compute_landmark_tsne_projection_knn,
+        list(state, request, controls)
+    )
+    projection_knn <- projection$value
+    use_cuda <- identical(request$backend, "cuda") &&
+        fastembedr_is_gpu_knn(projection_knn)
+    if (use_cuda) {
+        transformed <- timed_do_call(
+            run_landmark_tsne_cuda_projection,
+            list(state, request, controls, projection_knn)
+        )
+        init <- list(
+            backend = "cuda",
+            method = "local_affine_knn_projection_cuda_resident"
+        )
+    } else {
+        transformed <- run_landmark_tsne_host_projection(
+            state,
+            request,
+            controls,
+            projection_knn
+        )
+        init <- transformed$init
+    }
+    state$projection <- list(
+        knn = projection_knn,
+        projected = transformed$layout,
+        projection_time = projection$time,
+        transform_time = transformed$time,
+        init = init,
+        controls = controls
+    )
+    state
+}
+
+landmark_tsne_projection_strategy <- function(knn) {
+    approximation <- attr(knn, "approximation", exact = TRUE)
+    if (!is.null(approximation$strategy)) {
+        return(as.character(approximation$strategy))
+    }
+    if (isTRUE(attr(knn, "exact"))) {
+        return("exact")
+    }
+    NA_character_
+}
+
+landmark_tsne_reference_times <- function(state) {
+    metrics <- state$reference_fit$metrics
+    list(
+        total = if ("elapsed" %in% names(metrics)) {
+            metrics$elapsed[[1L]]
+        } else {
+            state$reference_time[["elapsed"]]
+        },
+        knn = if ("knn_elapsed" %in% names(metrics)) {
+            metrics$knn_elapsed[[1L]]
+        } else {
+            NA_real_
+        },
+        optimizer = if ("embedding_elapsed" %in% names(metrics)) {
+            metrics$embedding_elapsed[[1L]]
+        } else {
+            NA_real_
+        }
+    )
+}
+
+landmark_tsne_timings <- function(state) {
+    rbind(
+        preprocess = state$preprocess_time,
+        reference_embedding = state$reference_time,
+        landmark_projection_knn =
+            state$projection$projection_time,
+        transform = state$projection$transform_time
+    )
+}
+
+landmark_tsne_metrics <- function(state, request, timings) {
+    reference <- landmark_tsne_reference_times(state)
+    data.frame(
+        method = "landmark_tsne",
+        reference_method = request$reference_method,
+        n = state$n,
+        p = ncol(state$x),
+        n_neighbors = state$policy$n_neighbors,
+        perplexity = state$policy$perplexity,
+        elapsed = sum(timings[, "elapsed"]),
+        preprocess_elapsed = state$preprocess_time[["elapsed"]],
+        reference_embedding_elapsed =
+            state$reference_time[["elapsed"]],
+        reference_total_elapsed = reference$total,
+        reference_knn_elapsed = reference$knn,
+        reference_optimizer_elapsed = reference$optimizer,
+        landmark_projection_knn_elapsed =
+            state$projection$projection_time[["elapsed"]],
+        transform_elapsed =
+            state$projection$transform_time[["elapsed"]],
+        landmark = TRUE,
+        n_landmarks = state$n_landmarks,
+        landmark_fraction = state$n_landmarks / state$n,
+        transform_k = state$projection$controls$k,
+        stringsAsFactors = FALSE
+    )
+}
+
+landmark_tsne_reference_parameters <- function(state) {
+    params <- state$reference_fit$parameters
+    list(
+        perplexity = params$perplexity,
+        affinity_support = params$affinity_support,
+        affinity_support_policy = params$affinity_support_policy,
+        affinity_support_k = params$affinity_support_k,
+        affinity_support_multiplier =
+            params$affinity_support_multiplier,
+        conventional_affinity_support =
+            params$conventional_affinity_support,
+        nn_backend = params$nn_backend
+    )
+}
+
+landmark_tsne_transform_parameters <- function(state, request) {
+    config <- attr(
+        state$projection$projected,
+        "fastEmbedR_config"
+    )
+    list(
+        transform_k = state$projection$controls$k,
+        transform_perplexity = request$transform_perplexity,
+        transform_iter = state$projection$controls$n_iter,
+        transform_early_exaggeration_iter = as.integer(
+            request$transform_early_exaggeration_iter
+        ),
+        transform_optimizer = config$optimizer,
+        transform_repulsion = config$repulsion,
+        transform_n_negatives = config$n_negatives,
+        transform_initialization = config$initialization
+    )
+}
+
+landmark_tsne_parameters <- function(state, request) {
+    projection <- state$projection
+    base <- list(
+        method = "landmark_tsne",
+        reference_method = request$reference_method,
+        n = state$n,
+        p = ncol(state$x),
+        n_neighbors = state$policy$n_neighbors,
+        k = state$policy$n_neighbors + 1L,
+        n_components = as.integer(request$n_components),
+        seed = as.integer(request$seed),
+        projection_nn_backend = attr(projection$knn, "backend"),
+        projection_strategy =
+            landmark_tsne_projection_strategy(projection$knn),
+        projection_init_backend = projection$init$backend,
+        projection_init_method = projection$init$method,
+        backend = attr(projection$projected, "backend"),
+        transform_backend = attr(projection$projected, "backend"),
+        n.cores = normalize_nn_threads(request$n_threads),
+        landmark = TRUE,
+        n_landmarks = state$n_landmarks,
+        landmark_fraction = state$n_landmarks / state$n,
+        landmark_selection = state$selection$method,
+        keep_knn = request$keep_knn,
+        provenance = "landmark_tsne_fixed_reference_native_cpp"
+    )
+    c(
+        base,
+        landmark_tsne_reference_parameters(state),
+        landmark_tsne_transform_parameters(state, request),
+        state$prepared$preprocess
+    )
+}
+
+assemble_landmark_tsne_output <- function(state, request) {
+    projection <- state$projection
+    layout <- assemble_landmark_layout(
+        state$reference_fit$layout,
+        projection$projected,
+        state$landmark_indices,
+        state$query_indices,
+        state$n,
+        prefix = "TSNE",
+        return_float32 = is_float32_matrix(state$x)
+    )
+    timings <- landmark_tsne_timings(state)
+    out <- list(
+        layout = layout,
+        labels = NULL,
+        method = "landmark_tsne",
+        metrics = landmark_tsne_metrics(state, request, timings),
+        parameters = landmark_tsne_parameters(state, request),
+        timings = timings,
+        knn = NULL,
+        landmarks = list(
+            indices = state$landmark_indices,
+            layout = state$reference_fit$layout,
+            reference_fit = state$reference_fit,
+            projection_knn = if (request$keep_knn) {
+                projection$knn
+            } else {
+                NULL
+            },
+            transform = attr(
+                projection$projected,
+                "fastEmbedR_config"
+            )
+        ),
+        preprocess = state$prepared$preprocess
+    )
+    class(out) <- "fastEmbedR_embedding"
+    out
+}
+
 #' Landmark t-SNE with fixed-reference transform
 #'
 #' `landmark_tsne()` embeds a subset of observations with [tsne()], then
@@ -821,582 +1532,38 @@ resident_projection_result <- function(backend, k) {
 #' )
 #' plot(fit, labels = iris$Species)
 #' @export
-landmark_tsne <- function(data,
-                        landmarks = TRUE,
-                        reference_method = c("tsne"),
-                        n_neighbors = NULL,
-                        perplexity = NULL,
-                        affinity_support = c("standard", "compact"),
-                        n_components = 2L,
-                        standardize = TRUE,
-                        pca_dims = NULL,
-                        seed = 4L,
-                        backend = NULL,
-                        transform_k = NULL,
-                        transform_perplexity = 5,
-                        transform_iter = 250L,
-                        transform_early_exaggeration_iter = 0L,
-                        transform_n_negatives = NULL,
-                        initialization = c("median", "weighted", "random"),
-                        keep_knn = FALSE,
-                        verbose = FALSE,
-                        n.cores = NULL,
-                        ...) {
-    n_threads <- n.cores
-    dots <- list(...)
-    reference_method <- match.arg(reference_method)
-    initialization <- match.arg(initialization)
-    affinity_support <- normalize_opentsne_affinity_support(affinity_support)
-    backend <- resolve_embedding_backend(backend)
-    preprocess_time <- system.time({
-        prepared <- prepare_embedding_data(
-            data,
-            standardize,
-            pca_dims,
-            seed,
-            backend = resolve_preprocess_backend(backend)
-        )
-    })
-    x <- prepared$data
-    n <- nrow(x)
-    if (!is.null(n_neighbors)) {
-        n_neighbors <- as.integer(n_neighbors)
-        if (length(n_neighbors) != 1L || is.na(n_neighbors) ||
-            n_neighbors < 1L ||
-            n_neighbors >= n) {
-            stop(
-        "`n_neighbors` must be a positive integer smaller than `nrow(data)`.",
-                call. = FALSE
-            )
-        }
+landmark_tsne <- function(
+    data, landmarks = TRUE, reference_method = c("tsne"),
+    n_neighbors = NULL, perplexity = NULL,
+    affinity_support = c("standard", "compact"), n_components = 2L,
+    standardize = TRUE, pca_dims = NULL, seed = 4L, backend = NULL,
+    transform_k = NULL, transform_perplexity = 5,
+    transform_iter = 250L, transform_early_exaggeration_iter = 0L,
+    transform_n_negatives = NULL,
+    initialization = c("median", "weighted", "random"),
+    keep_knn = FALSE, verbose = FALSE, n.cores = NULL, ...
+) {
+    request <- list(
+        landmarks = landmarks, reference_method = reference_method,
+        n_neighbors = n_neighbors, perplexity = perplexity,
+        affinity_support = affinity_support, n_components = n_components,
+        standardize = standardize, pca_dims = pca_dims, seed = seed,
+        backend = backend, transform_k = transform_k,
+        transform_perplexity = transform_perplexity,
+        transform_iter = transform_iter,
+        transform_early_exaggeration_iter =
+            transform_early_exaggeration_iter,
+        transform_n_negatives = transform_n_negatives,
+        initialization = initialization, keep_knn = keep_knn,
+        verbose = verbose, n.cores = n.cores, extra = list(...)
+    )
+    request <- normalize_landmark_tsne_request(request)
+    state <- prepare_landmark_tsne_data(data, request)
+    if (!length(state$selection$query_indices)) {
+        return(run_full_landmark_tsne(state, request))
     }
-
-    landmark_selection <- select_landmarks(
-        x,
-        landmarks,
-        seed = seed,
-        n.cores = n_threads
-    )
-    landmark_indices <- landmark_selection$indices
-    if (length(landmark_selection$query_indices) == 0L) {
-        return(tsne(
-            x,
-            perplexity = perplexity,
-            affinity_support = affinity_support,
-            n_components = n_components,
-            standardize = FALSE,
-            pca_dims = NULL,
-            seed = seed,
-            backend = backend,
-            keep_knn = keep_knn,
-            verbose = verbose,
-            n.cores = n_threads,
-            ...
-        ))
-    }
-
-    non_landmarks <- landmark_selection$query_indices
-    partition <- split_landmark_data(
-        x,
-        landmark_indices,
-        non_landmarks,
-        n_threads = n_threads
-    )
-    x_landmarks <- partition$landmarks
-    x_query <- partition$query
-    n_landmarks <- nrow(x_landmarks)
-    reference_policy <- opentsne_neighbor_policy(
-        n_landmarks,
-        perplexity = perplexity,
-        affinity_support = affinity_support
-    )
-    if (is.null(perplexity)) perplexity <- reference_policy$perplexity
-    if (is.null(n_neighbors)) {
-        landmark_neighbors <- reference_policy$n_neighbors
-    } else {
-        if (n_neighbors >= n_landmarks) {
-            stop(
-        "`n_neighbors` must be smaller than the number of selected landmarks.",
-                call. = FALSE
-            )
-        }
-        required_neighbors <- opentsne_support_width(perplexity,
-            affinity_support)
-        if (n_neighbors < required_neighbors) {
-            stop(
-                "`n_neighbors` is too small for `affinity_support = \"",
-                affinity_support, "\"`; need at least ", required_neighbors,
-                    ".",
-                call. = FALSE
-            )
-        }
-        landmark_neighbors <- n_neighbors
-    }
-    n_neighbors <- landmark_neighbors
-    reference_time <- system.time({
-        reference_knn <- landmark_reference_knn(
-            x_landmarks,
-            k = landmark_neighbors,
-            backend = backend,
-            n_threads = n_threads
-        )
-        reference_layout <- tsne_knn(
-            reference_knn,
-            n_neighbors = landmark_neighbors,
-            perplexity = perplexity,
-            affinity_support = affinity_support,
-            n_components = n_components,
-            init_data = x_landmarks,
-            seed = seed,
-            backend = backend,
-            verbose = verbose,
-            n.cores = n_threads,
-            ...
-        )
-    })
-    reference_cfg <- attr(reference_layout, "fastEmbedR_config")
-    reference_knn_backend <- attr(reference_knn, "backend")
-    if (is.null(reference_knn_backend)) reference_knn_backend <- "supplied"
-    reference_fit <- list(
-        layout = reference_layout,
-        metrics = data.frame(
-            method = "tsne",
-            n = n_landmarks,
-            p = ncol(x_landmarks),
-            n_neighbors = landmark_neighbors,
-            perplexity = reference_cfg$perplexity,
-            elapsed = reference_time[["elapsed"]],
-            preprocess_elapsed = 0,
-            knn_elapsed = NA_real_,
-            embedding_elapsed = NA_real_,
-            stringsAsFactors = FALSE
-        ),
-        parameters = c(
-            list(
-                method = "tsne",
-                input = "knn",
-                n = n_landmarks,
-                p = ncol(x_landmarks),
-                n_neighbors = landmark_neighbors,
-                k = landmark_neighbors + 1L,
-                n_components = as.integer(n_components),
-                seed = as.integer(seed),
-                nn_backend = reference_knn_backend,
-                keep_knn = keep_knn
-            ),
-            reference_cfg,
-            list(preprocess = "none_precomputed_knn")
-        ),
-        knn = if (isTRUE(keep_knn)) reference_knn else NULL
-    )
-
-    if (is.null(transform_k)) {
-        transform_k <- min(n_landmarks, max(25L, ceiling(3 *
-            transform_perplexity)))
-    }
-    transform_k <- transform_embedding_k(transform_k, n_landmarks)
-    projection_knn <- NULL
-    projection_time <- zero_proc_time()
-    transform_time <- zero_proc_time()
-    projected <- NULL
-    transform_iter <- as.integer(transform_iter)
-    if (length(transform_iter) != 1L || is.na(transform_iter) ||
-        transform_iter < 0L) {
-        stop("`transform_iter` must be a non-negative integer.", call. = FALSE)
-    }
-    resident_backend <- NA_character_
-    resident_exact_repulsion_threshold <- scalar_integer_or_default(
-        dots,
-        "exact_repulsion_threshold",
-        4096L
-    )
-    if (length(resident_exact_repulsion_threshold) != 1L ||
-        is.na(resident_exact_repulsion_threshold)) {
-        resident_exact_repulsion_threshold <- 4096L
-    }
-    resident_n_negatives <- transform_n_negatives
-    if (is.null(resident_n_negatives)) {
-        resident_n_negatives <- if (n_landmarks <=
-            resident_exact_repulsion_threshold) {
-            n_landmarks
-        } else {
-            min(256L, n_landmarks)
-        }
-    }
-    resident_n_negatives <- as.integer(resident_n_negatives)
-    resident_learning_rate <- scalar_numeric_or_default(
-        dots,
-        "transform_learning_rate", 0.1
-    )
-    resident_early_exaggeration <- scalar_numeric_or_default(
-        dots,
-        "transform_early_exaggeration", 4
-    )
-    resident_exaggeration <- scalar_numeric_or_default(
-        dots,
-        "transform_exaggeration", 1.5
-    )
-    resident_initial_momentum <- scalar_numeric_or_default(
-        dots,
-        "transform_initial_momentum", 0.8
-    )
-    resident_final_momentum <- scalar_numeric_or_default(
-        dots,
-        "transform_final_momentum", 0.8
-    )
-    resident_max_grad_norm <- scalar_numeric_or_default(
-        dots,
-        "transform_max_grad_norm", 0.25
-    )
-    resident_max_step_norm <- scalar_numeric_or_default(
-        dots,
-        "transform_max_step_norm", Inf
-    )
-
-    if (!is.na(resident_backend)) {
-        transform_time <- system.time({
-            resident <- tryCatch(
-                if (identical(resident_backend, "metal")) {
-                    landmark_tsne_transform_resident_metal_cpp(
-                        x_landmarks,
-                        x_query,
-                        reference_fit$layout,
-                        as.integer(transform_k),
-                        as.numeric(transform_perplexity),
-                        as.integer(transform_iter),
-                        as.integer(transform_early_exaggeration_iter),
-                        resident_learning_rate,
-                        resident_early_exaggeration,
-                        resident_exaggeration,
-                        resident_initial_momentum,
-                        resident_final_momentum,
-                        resident_max_grad_norm,
-                        resident_max_step_norm,
-                        as.integer(resident_n_negatives),
-                        as.integer(resident_exact_repulsion_threshold),
-                        as.integer(seed + 1009L)
-                    )
-                } else {
-                    landmark_tsne_transform_resident_cuda_cpp(
-                        x_landmarks,
-                        x_query,
-                        reference_fit$layout,
-                        as.integer(transform_k),
-                        as.numeric(transform_perplexity),
-                        as.integer(transform_iter),
-                        as.integer(transform_early_exaggeration_iter),
-                        resident_learning_rate,
-                        resident_early_exaggeration,
-                        resident_exaggeration,
-                        resident_initial_momentum,
-                        resident_final_momentum,
-                        resident_max_grad_norm,
-                        resident_max_step_norm,
-                        as.integer(resident_n_negatives),
-                        as.integer(resident_exact_repulsion_threshold),
-                        as.integer(seed + 1009L)
-                    )
-                },
-                error = function(e) {
-                    attr(e, "fastEmbedR_resident_backend") <- resident_backend
-                    if (isTRUE(verbose)) message(conditionMessage(e))
-                    NULL
-                }
-            )
-            if (!is.null(resident)) {
-                projected <- resident_projected_layout(
-                    resident,
-                    backend = resident_backend,
-                    backend_requested = backend,
-                    n_reference = n_landmarks,
-                    k = transform_k,
-                    perplexity = transform_perplexity,
-                    n_iter = transform_iter,
-                    early_exaggeration_iter = transform_early_exaggeration_iter,
-                    learning_rate = resident_learning_rate,
-                    early_exaggeration = resident_early_exaggeration,
-                    exaggeration = resident_exaggeration,
-                    initial_momentum = resident_initial_momentum,
-                    final_momentum = resident_final_momentum,
-                    max_grad_norm = resident_max_grad_norm,
-                    max_step_norm = resident_max_step_norm,
-                exact_repulsion_threshold = resident_exact_repulsion_threshold,
-                    seed = seed + 1009L,
-                    reference_layout = reference_fit$layout
-                )
-                projection_knn <- resident_projection_result(
-                    resident_backend,
-                    transform_k
-                )
-            }
-        })
-    }
-
-    if (is.null(projected)) {
-        projection_init_backend <- NA_character_
-        projection_init_method <- NA_character_
-        projection_time <- system.time({
-            projection_knn <- landmark_projection_knn(
-                x_landmarks,
-                x_query,
-                k = transform_k,
-                backend = backend,
-                seed = seed + 503L,
-                n_threads = n_threads,
-                landmark_layout = reference_fit$layout,
-                all_data = x,
-                landmark_indices = landmark_indices,
-                query_rows = non_landmarks
-            )
-        })
-        cuda_resident_projection <- identical(backend, "cuda") &&
-            fastembedr_is_gpu_knn(projection_knn)
-        if (cuda_resident_projection) {
-            transform_time <- system.time({
-                resident <- landmark_tsne_transform_cuda_gpu_cpp(
-                    projection_knn,
-                    x_landmarks,
-                    x_query,
-                    reference_fit$layout,
-                    as.numeric(transform_perplexity),
-                    as.integer(transform_iter),
-                    as.integer(transform_early_exaggeration_iter),
-                    resident_learning_rate,
-                    resident_early_exaggeration,
-                    resident_exaggeration,
-                    resident_initial_momentum,
-                    resident_final_momentum,
-                    resident_max_grad_norm,
-                    resident_max_step_norm,
-                    as.integer(resident_n_negatives),
-                    as.integer(resident_exact_repulsion_threshold),
-                    as.integer(seed + 1009L),
-                    12L,
-                    1e-3,
-                    2.5
-                )
-                projected <- resident$Y
-                attr(projected, "backend") <- "cuda"
-                attr(projected, "fastEmbedR_config") <- resident$config
-            })
-            projection_init_backend <- "cuda"
-            projection_init_method <-
-                "local_affine_knn_projection_cuda_resident"
-        } else {
-            projection_y_init <- attr(projection_knn, "projected_layout",
-                exact = TRUE)
-            affine_y_init <- landmark_affine_projection(
-                x_landmarks,
-                x_query,
-                reference_fit$layout,
-                projection_knn,
-                n_threads = n_threads,
-                backend = backend
-            )
-            if (embedding_layout_dims_match(
-                affine_y_init, length(non_landmarks), n_components
-            )) {
-                projection_y_init <- affine_y_init
-                projection_init_backend <-
-                    attr(affine_y_init, "projection_backend") %||% NA_character_
-                projection_init_method <-
-                    attr(affine_y_init, "projection_method") %||% NA_character_
-            } else if (!embedding_layout_dims_match(
-                projection_y_init, length(non_landmarks), n_components
-            )) {
-                projection_y_init <- NULL
-            }
-            if (transform_iter == 0L) {
-                if (is.null(projection_y_init)) {
-                    projection_y_init <- project_embedding_knn_cpp(
-                        reference_fit$layout,
-                        projection_knn$indices,
-                        projection_knn$distances
-                    )
-                    projection_init_backend <- "cpu"
-                    projection_init_method <- "weighted_knn_fallback"
-                }
-                projected <- projection_y_init
-                attr(projected, "backend") <-
-                    attr(projection_knn, "backend") %||% backend
-                attr(projected, "fastEmbedR_config") <- list(
-                    optimizer = "projection_only",
-                    repulsion = "none",
-                    n_negatives = 0L,
-                    initialization = initialization,
-                    backend = attr(projected, "backend")
-                )
-            } else {
-                transform_time <- system.time({
-                    projected <- transform_tsne(
-                        reference_fit$layout,
-                        knn = projection_knn,
-                        perplexity = transform_perplexity,
-                        initialization = initialization,
-                        Y_init = projection_y_init,
-                        n_iter = transform_iter,
-                    early_exaggeration_iter = transform_early_exaggeration_iter,
-                        learning_rate = resident_learning_rate,
-                        early_exaggeration = resident_early_exaggeration,
-                        exaggeration = resident_exaggeration,
-                        initial_momentum = resident_initial_momentum,
-                        final_momentum = resident_final_momentum,
-                        max_grad_norm = resident_max_grad_norm,
-                        max_step_norm = resident_max_step_norm,
-                        n_negatives = transform_n_negatives,
-                        n.cores = n_threads,
-                        seed = seed + 1009L,
-                        backend = backend,
-                        verbose = verbose
-                    )
-                })
-            }
-        }
-    }
-    if (!exists("projection_init_backend", inherits = FALSE)) {
-        projection_init_backend <- NA_character_
-    }
-    if (!exists("projection_init_method", inherits = FALSE)) {
-        projection_init_method <- NA_character_
-    }
-
-    layout <- assemble_landmark_layout(
-        reference_fit$layout,
-        projected,
-        landmark_indices,
-        non_landmarks,
-        n,
-        prefix = "TSNE",
-        return_float32 = is_float32_matrix(x)
-    )
-
-    timings <- rbind(
-        preprocess = preprocess_time,
-        reference_embedding = reference_time,
-        landmark_projection_knn = projection_time,
-        transform = transform_time
-    )
-    transform_cfg <- attr(projected, "fastEmbedR_config")
-    reference_params <- reference_fit$parameters
-    projection_approximation <- attr(projection_knn, "approximation",
-        exact = TRUE
-    )
-    projection_strategy <- if (is.null(projection_approximation$strategy)) {
-        if (isTRUE(attr(projection_knn, "exact"))) {
-            "exact"
-        } else {
-            NA_character_
-        }
-    } else {
-        as.character(projection_approximation$strategy)
-    }
-    selection_method <- landmark_selection$method
-    reference_metrics <- reference_fit$metrics
-    reference_total_elapsed <- if ("elapsed" %in% names(reference_metrics)) {
-        reference_metrics$elapsed[[1L]]
-    } else {
-        reference_time[["elapsed"]]
-    }
-    reference_knn_elapsed <- if ("knn_elapsed" %in% names(reference_metrics)) {
-        reference_metrics$knn_elapsed[[1L]]
-    } else {
-        NA_real_
-    }
-    reference_optimizer_elapsed <- if ("embedding_elapsed" %in% names(
-        reference_metrics
-    )) {
-        reference_metrics$embedding_elapsed[[1L]]
-    } else {
-        NA_real_
-    }
-    metrics <- data.frame(
-        method = "landmark_tsne",
-        reference_method = reference_method,
-        n = n,
-        p = ncol(x),
-        n_neighbors = n_neighbors,
-        perplexity = if (is.null(
-            perplexity
-        )) {
-            reference_params$perplexity
-        } else {
-            perplexity
-        },
-        elapsed = sum(timings[, "elapsed"]),
-        preprocess_elapsed = preprocess_time["elapsed"],
-        reference_embedding_elapsed = reference_time["elapsed"],
-        reference_total_elapsed = reference_total_elapsed,
-        reference_knn_elapsed = reference_knn_elapsed,
-        reference_optimizer_elapsed = reference_optimizer_elapsed,
-        landmark_projection_knn_elapsed = projection_time["elapsed"],
-        transform_elapsed = transform_time["elapsed"],
-        landmark = TRUE,
-        n_landmarks = n_landmarks,
-        landmark_fraction = n_landmarks / n,
-        transform_k = transform_k,
-        stringsAsFactors = FALSE
-    )
-    parameters <- c(
-        list(
-            method = "landmark_tsne",
-            reference_method = reference_method,
-            n = n,
-            p = ncol(x),
-            n_neighbors = n_neighbors,
-            k = n_neighbors + 1L,
-            perplexity = reference_params$perplexity,
-            affinity_support = reference_params$affinity_support,
-            affinity_support_policy = reference_params$affinity_support_policy,
-            affinity_support_k = reference_params$affinity_support_k,
-    affinity_support_multiplier = reference_params$affinity_support_multiplier,
-            conventional_affinity_support =
-                reference_params$conventional_affinity_support,
-            n_components = as.integer(n_components),
-            seed = as.integer(seed),
-            nn_backend = reference_params$nn_backend,
-            projection_nn_backend = attr(projection_knn, "backend"),
-            projection_strategy = projection_strategy,
-            projection_init_backend = projection_init_backend,
-            projection_init_method = projection_init_method,
-            backend = attr(projected, "backend"),
-            transform_backend = attr(projected, "backend"),
-            n.cores = normalize_nn_threads(n_threads),
-            landmark = TRUE,
-            n_landmarks = n_landmarks,
-            landmark_fraction = n_landmarks / n,
-            landmark_selection = selection_method,
-            transform_k = transform_k,
-            transform_perplexity = transform_perplexity,
-            transform_iter = as.integer(transform_iter),
-            transform_early_exaggeration_iter = as.integer(
-                transform_early_exaggeration_iter
-            ),
-            transform_optimizer = transform_cfg$optimizer,
-            transform_repulsion = transform_cfg$repulsion,
-            transform_n_negatives = transform_cfg$n_negatives,
-            transform_initialization = transform_cfg$initialization,
-            keep_knn = keep_knn,
-            provenance = "landmark_tsne_fixed_reference_native_cpp"
-        ),
-        prepared$preprocess
-    )
-    out <- list(
-        layout = layout,
-        labels = NULL,
-        method = "landmark_tsne",
-        metrics = metrics,
-        parameters = parameters,
-        timings = timings,
-        knn = NULL,
-        landmarks = list(
-            indices = landmark_indices,
-            layout = reference_fit$layout,
-            reference_fit = reference_fit,
-            projection_knn = if (isTRUE(keep_knn)) projection_knn else NULL,
-            transform = attr(projected, "fastEmbedR_config")
-        ),
-        preprocess = prepared$preprocess
-    )
-    class(out) <- "fastEmbedR_embedding"
-    out
+    state <- partition_landmark_tsne(state, request)
+    state <- fit_landmark_tsne_reference(state, request)
+    state <- project_landmark_tsne(state, request)
+    assemble_landmark_tsne_output(state, request)
 }

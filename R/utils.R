@@ -69,10 +69,20 @@ set_local_seed <- function(seed) {
     function() {
         if (had_seed) {
             assign(".Random.seed", old_seed, envir = .GlobalEnv)
-        } else if (exists(".Random.seed", envir = .GlobalEnv,
-            inherits = FALSE)) {
+        } else if (exists(".Random.seed",
+            envir = .GlobalEnv,
+            inherits = FALSE
+        )) {
             rm(".Random.seed", envir = .GlobalEnv)
         }
         invisible(NULL)
     }
+}
+# Evaluate a function call while retaining both its value and elapsed timing.
+timed_do_call <- function(fun, args) {
+    value <- NULL
+    elapsed <- system.time({
+        value <- do.call(fun, args)
+    })
+    list(value = value, time = elapsed)
 }

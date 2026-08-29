@@ -26,6 +26,8 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           needs: check
+      - name: Enforce source style
+        run: Rscript tools/check_source_style.R
       - name: Build source package
         run: R CMD build . --compact-vignettes=gs+qpdf
       - name: Archive source package

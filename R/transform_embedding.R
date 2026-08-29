@@ -19,12 +19,12 @@ embedding_layout_dims_match <- function(x, n, p) {
 }
 
 assemble_landmark_layout <- function(reference_layout,
-                                    projected_layout,
-                                    landmark_indices,
-                                    non_landmark_indices,
-                                    n,
-                                    prefix,
-                                    return_float32 = FALSE) {
+                                        projected_layout,
+                                        landmark_indices,
+                                        non_landmark_indices,
+                                        n,
+                                        prefix,
+                                        return_float32 = FALSE) {
     n_components <- ncol(reference_layout)
     if (!embedding_layout_dims_match(
         reference_layout, length(landmark_indices), n_components

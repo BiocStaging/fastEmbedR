@@ -1,5 +1,6 @@
 # R build and check artifacts
 *.Rcheck/
+*.BiocCheck/
 *.tar.gz
 src/*.o
 src/*.so
@@ -44,6 +45,7 @@ _site/
 tools/
 !tools/
 tools/*
+!tools/check_source_style.R
 !tools/validate_tsne_numerics.R
 !tools/report_test_coverage.R
 /examples/

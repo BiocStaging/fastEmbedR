@@ -46,184 +46,222 @@
 #' layout <- umap_knn(initialization, backend = "cpu", seed = 1)
 #' plot(layout, pch = 21, bg = iris$Species)
 #' @export
-umap_init <- function(x,
-                    distances = NULL,
-                    n_neighbors = NULL,
-                    n_components = 2L,
-                    metric = c(
-                        "euclidean", "cosine", "correlation", "inner_product"
-                    ),
-                    backend = NULL,
-                    seed = 4L,
-                    n.cores = NULL,
-                    graph_mode = c("fuzzy", "binary")) {
-    n_threads <- n.cores
+umap_init <- function(x, distances = NULL, n_neighbors = NULL,
+                        n_components = 2L,
+                        metric = c(
+                            "euclidean", "cosine", "correlation",
+                            "inner_product"
+                        ),
+                        backend = NULL, seed = 4L, n.cores = NULL,
+                        graph_mode = c("fuzzy", "binary")) {
+    graph_mode_missing <- missing(graph_mode)
+    request <- validate_umap_init_request(
+        x, backend, n_components, graph_mode, graph_mode_missing
+    )
+    graph <- prepare_umap_init_graph(
+        x, distances, n_neighbors, metric, request$backend,
+        n.cores, request$graph_mode
+    )
+    cfg <- configure_umap_init(
+        graph$prepared$config, request, n.cores
+    )
+    initialized <- compute_umap_initialization(
+        graph$prepared, cfg, seed
+    )
+    validate_umap_initialization(
+        initialized$layout, graph$prepared, request$n_components
+    )
+    assemble_umap_initialization(
+        graph, initialized, cfg, seed, request$n_components
+    )
+}
+
+validate_umap_init_request <- function(x, backend, n_components,
+                                        graph_mode, graph_mode_missing) {
     backend <- resolve_embedding_backend(backend)
     n_components <- validate_n_components(n_components)
-    supplied_prepared <- inherits(x, "fastEmbedR_umap_prepared")
-    graph_mode_missing <- missing(graph_mode)
-    graph_mode <- match.arg(graph_mode)
-
-    if (supplied_prepared && graph_mode_missing) {
+    supplied <- inherits(x, "fastEmbedR_umap_prepared")
+    graph_mode <- match.arg(graph_mode, c("fuzzy", "binary"))
+    if (supplied && graph_mode_missing) {
         graph_mode <- x$config$graph_mode %||% graph_mode
     }
-    if (supplied_prepared &&
+    if (supplied &&
         !identical(as.character(x$config$graph_mode), graph_mode)) {
         stop(
-            "`graph_mode` does not match the supplied prepared UMAP graph.",
+            "`graph_mode` does not match the prepared UMAP graph.",
             call. = FALSE
         )
     }
+    if (n_components != 2L && backend %in% c("cuda", "metal")) {
+        stop(
+            "Native Metal and CUDA UMAP initialization supports ",
+            "two dimensions.",
+            call. = FALSE
+        )
+    }
+    list(
+        backend = backend, n_components = n_components,
+        graph_mode = graph_mode, supplied = supplied
+    )
+}
 
-    knn_elapsed <- 0
-    graph_elapsed <- 0
-    prepared <- if (supplied_prepared) {
+prepare_umap_init_from_knn <- function(x, distances, backend,
+                                        n.cores, graph_mode) {
+    timed <- timed_do_call(prepare_umap_knn, list(
+        indices = x, distances = distances, backend = backend,
+        n.cores = n.cores, graph_mode = graph_mode
+    ))
+    list(
+        prepared = timed$value, knn_elapsed = 0,
+        graph_elapsed = unname(timed$time[["elapsed"]])
+    )
+}
+
+prepare_umap_init_from_data <- function(x, n_neighbors, metric,
+                                        backend, n.cores, graph_mode) {
+    metric <- resolve_embedding_metric(metric, x)
+    if (is.null(n_neighbors)) {
+        n_neighbors <- auto_embedding_k(
+            nrow(x),
+            method = "umap", include_self = FALSE
+        )
+    }
+    knn_timed <- timed_do_call(precompute_knn, list(
+        data = x, k = as.integer(n_neighbors), metric = metric,
+        backend = backend, n.cores = n.cores
+    ))
+    knn <- knn_timed$value
+    if (fastembedr_is_gpu_knn(knn)) {
+        knn <- fastembedr_gpu_knn_to_host(knn)
+    }
+    graph_timed <- timed_do_call(prepare_umap_knn, list(
+        indices = knn, backend = backend, n.cores = n.cores,
+        graph_mode = graph_mode
+    ))
+    list(
+        prepared = graph_timed$value,
+        knn_elapsed = unname(knn_timed$time[["elapsed"]]),
+        graph_elapsed = unname(graph_timed$time[["elapsed"]])
+    )
+}
+
+prepare_umap_init_graph <- function(x, distances, n_neighbors, metric,
+                                    backend, n.cores, graph_mode) {
+    if (inherits(x, "fastEmbedR_umap_prepared")) {
         if (!is.null(distances)) {
             stop(
                 "Do not pass `distances` with a prepared UMAP object.",
                 call. = FALSE
             )
         }
-        x
-    } else if (!is.null(distances) || is_knn_input(x)) {
-        graph_time <- system.time({
-            prepared_result <- prepare_umap_knn(
-                x,
-                distances = distances,
-                backend = backend,
-                n.cores = n_threads,
-                graph_mode = graph_mode
-            )
-        })
-        graph_elapsed <- unname(graph_time[["elapsed"]])
-        prepared_result
-    } else {
-        metric <- resolve_embedding_metric(metric, x)
-        n <- nrow(x)
-        if (is.null(n_neighbors)) {
-            n_neighbors <- auto_embedding_k(n, method = "umap",
-                include_self = FALSE)
-        }
-        n_neighbors <- as.integer(n_neighbors)
-        knn_time <- system.time({
-            knn <- precompute_knn(
-                x,
-                k = n_neighbors,
-                metric = metric,
-                backend = backend,
-                n.cores = n_threads
-            )
-        })
-        knn_elapsed <- unname(knn_time[["elapsed"]])
-        if (fastembedr_is_gpu_knn(knn)) {
-            knn <- fastembedr_gpu_knn_to_host(knn)
-        }
-        graph_time <- system.time({
-            prepared_result <- prepare_umap_knn(
-                knn,
-                backend = backend,
-                n.cores = n_threads,
-                graph_mode = graph_mode
-            )
-        })
-        graph_elapsed <- unname(graph_time[["elapsed"]])
-        prepared_result
+        return(list(
+            prepared = x, knn_elapsed = 0, graph_elapsed = 0
+        ))
     }
+    if (!is.null(distances) || is_knn_input(x)) {
+        return(prepare_umap_init_from_knn(
+            x, distances, backend, n.cores, graph_mode
+        ))
+    }
+    prepare_umap_init_from_data(
+        x, n_neighbors, metric, backend, n.cores, graph_mode
+    )
+}
 
-    cfg <- prepared$config
-    cfg$backend <- backend
-    cfg$graph_mode <- graph_mode
-    if (!is.null(n_threads)) {
-        requested_threads <- integer_scalar(n_threads)
-        if (length(requested_threads) != 1L || is.na(requested_threads) ||
-            requested_threads < 1L) {
-            stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
-        }
-        cfg$n.cores_requested <- as.integer(requested_threads)
-        cfg$n_threads <- max(1L, min(4L, requested_threads))
-        cfg$n.cores_effective <- cfg$n_threads
-    } else {
+configure_umap_init_threads <- function(cfg, n.cores) {
+    if (is.null(n.cores)) {
         cfg$n.cores_requested <- cfg$n_threads
         cfg$n.cores_effective <- cfg$n_threads
+        return(cfg)
     }
-    if (n_components != 2L && backend %in% c("cuda", "metal")) {
-        stop(
-            sprintf(
-                "%s%s",
-                "Native Metal and CUDA UMAP initialization currently supports ",
-                "two dimensions."
-            ),
-            call. = FALSE
-        )
+    requested <- integer_scalar(n.cores)
+    if (length(requested) != 1L || is.na(requested) || requested < 1L) {
+        stop("`n.cores` must be NULL or a positive integer.", call. = FALSE)
     }
+    cfg$n.cores_requested <- as.integer(requested)
+    cfg$n_threads <- max(1L, min(4L, requested))
+    cfg$n.cores_effective <- cfg$n_threads
+    cfg
+}
 
-    initialization_time <- system.time({
-        use_native_knn_spectral <- backend %in% c("cuda", "metal") &&
-            identical(graph_mode, "fuzzy")
-        layout <- if (use_native_knn_spectral) {
-            knn <- prepared$knn
-            materialized <- materialize_knn_range(
-                knn$indices,
-                knn$distances,
-                knn$col_start,
-                knn$n_neighbors
+configure_umap_init <- function(cfg, request, n.cores) {
+    cfg$backend <- request$backend
+    cfg$graph_mode <- request$graph_mode
+    cfg$initialization_n_components <- request$n_components
+    configure_umap_init_threads(cfg, n.cores)
+}
+
+native_umap_initialization <- function(prepared, cfg, seed, n_components) {
+    knn <- prepared$knn
+    materialized <- materialize_knn_range(
+        knn$indices, knn$distances, knn$col_start, knn$n_neighbors
+    )
+    distances <- if (is_float32_matrix(materialized$distances)) {
+        matrix(
+            as.numeric(materialized$distances),
+            nrow = nrow(materialized$indices),
+            ncol = ncol(materialized$indices)
+        )
+    } else {
+        materialized$distances
+    }
+    result <- spectral_knn_init(
+        materialized$indices, distances,
+        n_components = n_components,
+        min_dist = cfg$min_dist, spectral_n_iter = cfg$spectral_n_iter,
+        seed = seed, backend = cfg$backend, n_threads = cfg$n_threads
+    )
+    scale_embedding_sdev_r(result, cfg$init_scale)
+}
+
+compute_umap_initialization <- function(prepared, cfg, seed) {
+    timed <- system.time({
+        native <- cfg$backend %in% c("cuda", "metal") &&
+            identical(cfg$graph_mode, "fuzzy")
+        layout <- if (native) {
+            native_umap_initialization(
+                prepared, cfg, seed, cfg$initialization_n_components %||% 2L
             )
-            init_distances <- if (is_float32_matrix(materialized$distances)) {
-                matrix(
-                    as.numeric(materialized$distances),
-                    nrow = nrow(materialized$indices),
-                    ncol = ncol(materialized$indices)
-                )
-            } else {
-                materialized$distances
-            }
-            result <- spectral_knn_init(
-                materialized$indices,
-                init_distances,
-                n_components = n_components,
-                min_dist = cfg$min_dist,
-                spectral_n_iter = cfg$spectral_n_iter,
-                seed = seed,
-                backend = backend,
-                n_threads = cfg$n_threads
-            )
-            scale_embedding_sdev_r(result, cfg$init_scale)
         } else {
             umap_init_from_csr_graph(
                 prepared$graph,
-                n_components = n_components,
-                cfg = cfg,
-                seed = seed,
-                verbose = FALSE
+                n_components = cfg$initialization_n_components %||% 2L,
+                cfg = cfg, seed = seed, verbose = FALSE
             )
         }
     })
-    initialization_elapsed <- unname(initialization_time[["elapsed"]])
-    if (!is.matrix(layout) || !identical(dim(layout), c(
+    list(layout = layout, time = timed)
+}
+
+validate_umap_initialization <- function(layout, prepared, n_components) {
+    expected <- c(
         nrow(prepared$knn$indices), as.integer(n_components)
-    )) || any(!is.finite(layout))) {
+    )
+    if (!is.matrix(layout) || !identical(dim(layout), expected) ||
+        any(!is.finite(layout))) {
         stop("UMAP initialization produced an invalid layout.", call. = FALSE)
     }
+    invisible(TRUE)
+}
 
-    cfg$init_backend <- attr(layout, "backend") %||% "cpu"
+assemble_umap_initialization <- function(graph, initialized, cfg,
+                                            seed, n_components) {
+    cfg$initialization_n_components <- as.integer(n_components)
+    cfg$init_backend <- attr(initialized$layout, "backend") %||% "cpu"
     cfg$initialization_reusable <- TRUE
     cfg$initialization_seed <- as.integer(seed)
-    cfg$initialization_n_components <- as.integer(n_components)
-    attr(layout, "fastEmbedR_config") <- public_core_config(cfg)
-    prepared$initialization <- layout
-    prepared$initialization_parameters <- cfg
-
+    attr(initialized$layout, "fastEmbedR_config") <- public_core_config(cfg)
+    graph$prepared$initialization <- initialized$layout
+    graph$prepared$initialization_parameters <- cfg
+    elapsed <- unname(initialized$time[["elapsed"]])
     out <- list(
-        layout = layout,
-        prepared = prepared,
+        layout = initialized$layout, prepared = graph$prepared,
         parameters = public_core_config(cfg),
         timings = data.frame(
             stage = c("knn", "graph", "initialization", "total"),
             elapsed_sec = c(
-                knn_elapsed,
-                graph_elapsed,
-                initialization_elapsed,
-                knn_elapsed + graph_elapsed + initialization_elapsed
+                graph$knn_elapsed, graph$graph_elapsed, elapsed,
+                graph$knn_elapsed + graph$graph_elapsed + elapsed
             ),
             stringsAsFactors = FALSE
         )
@@ -231,7 +269,6 @@ umap_init <- function(x,
     class(out) <- c("fastEmbedR_umap_initialization", "list")
     out
 }
-
 #' @export
 print.fastEmbedR_umap_initialization <- function(x, ...) {
     cat("<fastEmbedR_umap_initialization>\n")

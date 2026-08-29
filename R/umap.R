@@ -64,25 +64,10 @@
 #' fit <- umap(x, n_neighbors = 15, seed = 1)
 #' plot(fit)
 #' @export
-umap <- function(data,
-                n_neighbors = NULL,
-                n_components = 2L,
-                standardize = FALSE,
-                pca_dims = NULL,
-                metric = c(
-                    "euclidean", "cosine", "correlation",
-                    "inner_product"
-                ),
-                nn = NULL,
-                seed = 4L,
-                backend = NULL,
-                n.cores = NULL,
-                keep_knn = FALSE,
-                graph_mode = c("fuzzy", "binary"),
-                verbose = FALSE) {
-    n_threads <- n.cores
+validate_umap_request <- function(backend, graph_mode, n_components,
+                                    n.cores, keep_knn) {
     backend <- resolve_embedding_backend(backend)
-    graph_mode <- match.arg(graph_mode)
+    graph_mode <- match.arg(graph_mode, c("fuzzy", "binary"))
     n_components <- validate_n_components(n_components)
     if (n_components != 2L && backend %in% c("metal", "cuda")) {
         stop(
@@ -91,190 +76,182 @@ umap <- function(data,
             call. = FALSE
         )
     }
-    keep_knn <- isTRUE(keep_knn)
-    input_is_float32 <- is_float32_matrix(data)
+    list(
+        backend = backend, graph_mode = graph_mode,
+        n_components = n_components, n_threads = n.cores,
+        keep_knn = isTRUE(keep_knn)
+    )
+}
 
-    if (is_knn_input(data)) {
-        if (fastembedr_is_gpu_knn(data)) {
-            data <- fastembedr_as_gpu_knn(data)
-        }
-        if (!is.null(nn)) {
-            stop("When `data` is a KNN object, do not also pass `nn`.",
-                call. = FALSE)
-        }
-        layout_time <- system.time({
-            layout <- fast_knn_umap(
-                data,
-                n_components = n_components,
-                seed = seed,
-                verbose = verbose,
-                backend = backend,
-                n_threads = n_threads,
-                graph_mode = graph_mode
-            )
-        })
-        cfg <- attr(layout, "fastEmbedR_config")
-        resolved_k <- cfg$knn_n_neighbors
-        if (is.null(resolved_k) || length(resolved_k) == 0L || is.na(
-            resolved_k)) {
-            resolved_k <- cfg$n_neighbors
-        }
-        if (is.null(resolved_k) || length(resolved_k) == 0L || is.na(
-            resolved_k)) {
-            resolved_k <- if (fastembedr_is_gpu_knn(data)) {
-                fastembedr_gpu_knn_info(data)$k
-            } else {
-                ncol(coerce_knn_input(data)$indices)
-            }
-        }
-        metrics <- data.frame(
-            method = "umap",
-            n = nrow(layout),
-            p = NA_integer_,
-            n_neighbors = as.integer(resolved_k),
-            elapsed = layout_time[["elapsed"]],
-            preprocess_elapsed = 0,
-            knn_elapsed = 0,
-            embedding_elapsed = layout_time[["elapsed"]],
-            stringsAsFactors = FALSE
-        )
-        out <- list(
-            layout = layout,
-            labels = NULL,
-            method = "umap",
-            metrics = metrics,
-            parameters = cfg,
-            timings = rbind(
-                preprocess = layout_time * 0,
-                knn = layout_time * 0,
-                embedding = layout_time
-            ),
-            knn = if (keep_knn) data else NULL
-        )
-        class(out) <- "fastEmbedR_embedding"
-        return(out)
+resolve_umap_layout_k <- function(data, cfg) {
+    resolved_k <- cfg$knn_n_neighbors %||% cfg$n_neighbors
+    if (!is.null(resolved_k) && length(resolved_k) > 0L && !is.na(resolved_k)) {
+        return(as.integer(resolved_k))
     }
-
-    preprocess_time <- system.time({
-        prepared <- prepare_embedding_data(
-            data,
-            standardize,
-            pca_dims,
-            seed,
-            backend = backend
-        )
-    })
-    x <- prepared$data
-    metric <- resolve_embedding_metric(metric, x)
-    n <- nrow(x)
-    if (is.null(n_neighbors)) {
-        n_neighbors <- auto_embedding_k(n, method = "umap",
-            include_self = FALSE)
+    if (fastembedr_is_gpu_knn(data)) {
+        return(as.integer(fastembedr_gpu_knn_info(data)$k))
     }
+    as.integer(ncol(coerce_knn_input(data)$indices))
+}
 
-    knn_engine <- "supplied"
-    knn_time <- system.time({
-        knn_result <- if (is.null(nn)) {
-            knn_policy <- fastembedr_embedding_nn_policy(backend, n = n)
-            keep_gpu_knn <- identical(backend, "cuda")
-            knn_engine <- fastembedr_nn_policy_engine(knn_policy,
-                keep_gpu = keep_gpu_knn
-            )
+umap_knn_input_fit <- function(data, nn, state, seed, verbose) {
+    if (fastembedr_is_gpu_knn(data)) data <- fastembedr_as_gpu_knn(data)
+    if (!is.null(nn)) {
+        stop("When `data` is a KNN object, do not also pass `nn`.",
+            call. = FALSE
+        )
+    }
+    timed <- timed_do_call(fast_knn_umap, list(
+        indices = data, n_components = state$n_components, seed = seed,
+        verbose = verbose, backend = state$backend,
+        n_threads = state$n_threads, graph_mode = state$graph_mode
+    ))
+    layout <- timed$value
+    cfg <- attr(layout, "fastEmbedR_config")
+    metrics <- data.frame(
+        method = "umap", n = nrow(layout), p = NA_integer_,
+        n_neighbors = resolve_umap_layout_k(data, cfg),
+        elapsed = timed$time[["elapsed"]], preprocess_elapsed = 0,
+        knn_elapsed = 0, embedding_elapsed = timed$time[["elapsed"]]
+    )
+    new_embedding_result(
+        layout, "umap", metrics, cfg,
+        rbind(
+            preprocess = timed$time * 0, knn = timed$time * 0,
+            embedding = timed$time
+        ),
+        if (state$keep_knn) data else NULL
+    )
+}
+
+prepare_umap_matrix <- function(data, standardize, pca_dims, seed, backend) {
+    timed <- timed_do_call(prepare_embedding_data, list(
+        data = data, standardize = standardize, pca_dims = pca_dims,
+        seed = seed, backend = backend
+    ))
+    list(prepared = timed$value, time = timed$time)
+}
+
+validate_umap_supplied_knn <- function(nn, backend, n) {
+    if (!fastembedr_is_gpu_knn(nn)) {
+        return(coerce_knn_input(nn))
+    }
+    nn <- fastembedr_as_gpu_knn(nn)
+    if (!identical(backend, "cuda")) {
+        stop("A GPU-resident KNN object requires `backend = \"cuda\"`.",
+            call. = FALSE
+        )
+    }
+    info <- fastembedr_gpu_knn_info(nn)
+    if (info$n != n || isTRUE(info$has_self)) {
+        stop("Supplied GPU-resident KNN output is incompatible with UMAP.",
+            call. = FALSE
+        )
+    }
+    nn
+}
+
+compute_umap_matrix_knn <- function(x, nn, n_neighbors, metric, state) {
+    engine <- "supplied"
+    timed <- system.time({
+        result <- if (is.null(nn)) {
+            policy <- fastembedr_embedding_nn_policy(state$backend, nrow(x))
+            keep_gpu <- identical(state$backend, "cuda")
+            engine <- fastembedr_nn_policy_engine(policy, keep_gpu = keep_gpu)
             fastembedr_nn_without_self(
                 x,
-                k = as.integer(n_neighbors),
-                backend = knn_policy$backend,
-                method = knn_policy$method,
-                metric = metric,
-                output = fastembedr_knn_output_type(x, knn_policy$backend),
-                n_threads = n_threads,
-                tuning = knn_policy$tuning,
-                target_recall = knn_policy$target_recall,
-                keep_gpu = keep_gpu_knn
+                k = as.integer(n_neighbors), backend = policy$backend,
+                method = policy$method, metric = metric,
+                output = fastembedr_knn_output_type(x, policy$backend),
+                n_threads = state$n_threads, tuning = policy$tuning,
+                target_recall = policy$target_recall, keep_gpu = keep_gpu
             )
         } else {
-            if (fastembedr_is_gpu_knn(nn)) {
-                nn <- fastembedr_as_gpu_knn(nn)
-                if (!identical(backend, "cuda")) {
-                    stop(
-                        "A GPU-resident KNN object can only be used with ",
-                        "`backend = \"cuda\"`.",
-                        call. = FALSE
-                    )
-                }
-                gpu_info <- fastembedr_gpu_knn_info(nn)
-                if (gpu_info$n != n || isTRUE(gpu_info$has_self)) {
-                    stop(
-            "Supplied GPU-resident KNN output is incompatible with UMAP input.",
-                        call. = FALSE
-                    )
-                }
-                nn
-            } else {
-                coerce_knn_input(nn)
-            }
+            validate_umap_supplied_knn(nn, state$backend, nrow(x))
         }
     })
+    list(knn = result, engine = engine, time = timed)
+}
 
-    embedding_time <- system.time({
-        layout <- fast_knn_umap(
-            knn_result,
-            n_components = n_components,
-            seed = seed,
-            verbose = verbose,
-            backend = backend,
-            n_threads = n_threads,
-            graph_mode = graph_mode
-        )
-    })
-    layout <- finalize_embedding_layout(
-        layout,
-        "UMAP",
-        return_float32 = input_is_float32 && is_float32_matrix(x)
-    )
-    cfg <- attr(layout, "fastEmbedR_config")
-    elapsed <- preprocess_time[["elapsed"]] + knn_time[["elapsed"]] +
-        embedding_time[["elapsed"]]
-    metrics <- data.frame(
-        method = "umap",
-        n = nrow(layout),
-        p = ncol(x),
-        n_neighbors = as.integer(n_neighbors),
-        elapsed = elapsed,
-        preprocess_elapsed = preprocess_time[["elapsed"]],
-        knn_elapsed = knn_time[["elapsed"]],
-        embedding_elapsed = embedding_time[["elapsed"]],
-        stringsAsFactors = FALSE
-    )
-    parameters <- c(
-        cfg,
-        list(
-            standardize = isTRUE(standardize),
-            pca_dims = prepared$preprocess$pca_dims,
-            preprocess = prepared$preprocess,
-            graph_mode = graph_mode,
-            metric = metric,
-            nn_engine = knn_engine,
-            nn_backend = knn_result$backend_used %||%
-                attr(knn_result, "backend") %||%
-                "supplied"
-        )
-    )
-    out <- list(
-        layout = layout,
-        labels = NULL,
-        method = "umap",
-        metrics = metrics,
-        parameters = parameters,
-        timings = rbind(
-            preprocess = preprocess_time,
-            knn = knn_time,
-            embedding = embedding_time
-        ),
-        knn = if (keep_knn) knn_result else NULL
-    )
+new_embedding_result <- function(layout, method, metrics, parameters,
+                                    timings, knn = NULL, extras = list()) {
+    out <- c(list(
+        layout = layout, labels = NULL, method = method, metrics = metrics,
+        parameters = parameters, timings = timings, knn = knn
+    ), extras)
     class(out) <- "fastEmbedR_embedding"
     out
+}
+
+assemble_umap_matrix_fit <- function(input, prepared, knn_state,
+                                        embedding, state, standardize,
+                                        metric) {
+    layout <- finalize_embedding_layout(
+        embedding$value, "UMAP",
+        return_float32 = is_float32_matrix(input) &&
+            is_float32_matrix(prepared$prepared$data)
+    )
+    cfg <- attr(layout, "fastEmbedR_config")
+    times <- list(prepared$time, knn_state$time, embedding$time)
+    elapsed <- sum(vapply(times, function(x) x[["elapsed"]], numeric(1)))
+    metrics <- data.frame(
+        method = "umap", n = nrow(layout), p = ncol(prepared$prepared$data),
+        n_neighbors = as.integer(state$n_neighbors), elapsed = elapsed,
+        preprocess_elapsed = times[[1L]][["elapsed"]],
+        knn_elapsed = times[[2L]][["elapsed"]],
+        embedding_elapsed = times[[3L]][["elapsed"]]
+    )
+    params <- c(cfg, list(
+        standardize = isTRUE(standardize),
+        pca_dims = prepared$prepared$preprocess$pca_dims,
+        preprocess = prepared$prepared$preprocess,
+        graph_mode = state$graph_mode, metric = metric,
+        nn_engine = knn_state$engine,
+        nn_backend = knn_state$knn$backend_used %||%
+            attr(knn_state$knn, "backend") %||% "supplied"
+    ))
+    new_embedding_result(
+        layout, "umap", metrics, params,
+        rbind(
+            preprocess = times[[1L]], knn = times[[2L]],
+            embedding = times[[3L]]
+        ),
+        if (state$keep_knn) knn_state$knn else NULL
+    )
+}
+
+umap <- function(data, n_neighbors = NULL, n_components = 2L,
+                    standardize = FALSE, pca_dims = NULL,
+                    metric = c(
+                        "euclidean", "cosine", "correlation",
+                        "inner_product"
+                    ), nn = NULL, seed = 4L,
+                    backend = NULL, n.cores = NULL, keep_knn = FALSE,
+                    graph_mode = c("fuzzy", "binary"), verbose = FALSE) {
+    state <- validate_umap_request(
+        backend, graph_mode, n_components, n.cores, keep_knn
+    )
+    if (is_knn_input(data)) {
+        return(umap_knn_input_fit(data, nn, state, seed, verbose))
+    }
+    prepared <- prepare_umap_matrix(
+        data, standardize, pca_dims, seed, state$backend
+    )
+    x <- prepared$prepared$data
+    metric <- resolve_embedding_metric(metric, x)
+    if (is.null(n_neighbors)) {
+        n_neighbors <- auto_embedding_k(nrow(x), "umap", include_self = FALSE)
+    }
+    state$n_neighbors <- as.integer(n_neighbors)
+    knn_state <- compute_umap_matrix_knn(x, nn, n_neighbors, metric, state)
+    embedding <- timed_do_call(fast_knn_umap, list(
+        indices = knn_state$knn, n_components = state$n_components,
+        seed = seed, verbose = verbose, backend = state$backend,
+        n_threads = state$n_threads, graph_mode = state$graph_mode
+    ))
+    assemble_umap_matrix_fit(
+        data, prepared, knn_state, embedding, state, standardize, metric
+    )
 }
 
 #' Run landmark UMAP from a data matrix
@@ -300,430 +277,436 @@ umap <- function(data,
 #' fit <- landmark_umap(x, landmarks = 0.5, n_neighbors = 10, seed = 1)
 #' plot(fit)
 #' @export
-landmark_umap <- function(data,
-                        landmarks = 0.5,
-                        n_neighbors = NULL,
-                        n_components = 2L,
-                        standardize = TRUE,
-                        pca_dims = NULL,
-                        seed = 4L,
-                        backend = NULL,
-                        transform_k = NULL,
-                        n.cores = NULL,
-                        keep_knn = FALSE,
-                        graph_mode = c("fuzzy", "binary"),
-                        verbose = FALSE) {
-    n_threads <- n.cores
-    backend <- resolve_embedding_backend(backend)
-    graph_mode <- match.arg(graph_mode)
-    n_components <- validate_n_components(n_components)
-    preprocess_time <- system.time({
-        prepared <- prepare_embedding_data(
-            data,
-            standardize,
-            pca_dims,
-            seed,
-            backend = backend
-        )
-    })
-    x <- prepared$data
-    n <- nrow(x)
-    if (is.null(n_neighbors)) {
-        n_neighbors <- auto_embedding_k(n, method = "umap",
-            include_self = FALSE)
+landmark_umap <- function(data, landmarks = 0.5, n_neighbors = NULL,
+                            n_components = 2L, standardize = TRUE,
+                            pca_dims = NULL, seed = 4L, backend = NULL,
+                            transform_k = NULL, n.cores = NULL,
+                            keep_knn = FALSE,
+                            graph_mode = c("fuzzy", "binary"),
+                            verbose = FALSE) {
+    state <- prepare_landmark_umap(
+        data, landmarks, n_neighbors, n_components, standardize,
+        pca_dims, seed, backend, n.cores, graph_mode
+    )
+    if (state$all_landmarks) {
+        return(run_full_landmark_umap(
+            state, seed, keep_knn, verbose
+        ))
     }
-    n_neighbors <- as.integer(n_neighbors)
-    if (length(n_neighbors) != 1L || is.na(n_neighbors) || n_neighbors < 1L ||
-        n_neighbors >= n) {
+    reference <- fit_landmark_umap_reference(
+        state, seed, keep_knn, verbose
+    )
+    projection <- project_landmark_umap_rows(
+        state, reference$fit, transform_k, seed
+    )
+    refinement <- refine_landmark_umap(
+        state, reference$fit, projection, seed, verbose
+    )
+    assemble_landmark_umap_fit(
+        state, reference, projection, refinement,
+        keep_knn
+    )
+}
+
+validate_landmark_umap_k <- function(n_neighbors, n) {
+    if (is.null(n_neighbors)) {
+        n_neighbors <- auto_embedding_k(
+            n,
+            method = "umap", include_self = FALSE
+        )
+    }
+    value <- as.integer(n_neighbors)
+    invalid <- length(value) != 1L || is.na(value) ||
+        value < 1L || value >= n
+    if (invalid) {
         stop(
-        "`n_neighbors` must be a positive integer smaller than `nrow(data)`.",
+            "`n_neighbors` must be positive and smaller than `nrow(data)`.",
             call. = FALSE
         )
     }
+    value
+}
 
-    landmark_selection <- select_landmarks(
-        x,
-        landmarks,
-        seed = seed,
-        n.cores = n_threads
+prepare_landmark_umap <- function(data, landmarks, n_neighbors,
+                                    n_components, standardize, pca_dims,
+                                    seed, backend, n.cores, graph_mode) {
+    backend <- resolve_embedding_backend(backend)
+    graph_mode <- match.arg(graph_mode, c("fuzzy", "binary"))
+    n_components <- validate_n_components(n_components)
+    prepared <- timed_do_call(prepare_embedding_data, list(
+        data = data, standardize = standardize, pca_dims = pca_dims,
+        seed = seed, backend = backend
+    ))
+    x <- prepared$value$data
+    n_neighbors <- validate_landmark_umap_k(n_neighbors, nrow(x))
+    selection <- select_landmarks(
+        x, landmarks,
+        seed = seed, n.cores = n.cores
     )
-    landmark_indices <- landmark_selection$indices
-    if (length(landmark_selection$query_indices) == 0L) {
-        return(umap(
-            x,
-            n_neighbors = n_neighbors,
-            n_components = n_components,
-            standardize = FALSE,
-            pca_dims = NULL,
-            seed = seed,
-            backend = backend,
-            n.cores = n_threads,
-            keep_knn = keep_knn,
-            graph_mode = graph_mode,
-            verbose = verbose
-        ))
-    }
-
-    non_landmarks <- landmark_selection$query_indices
-    partition <- split_landmark_data(
-        x,
-        landmark_indices,
-        non_landmarks,
-        n_threads = n_threads
-    )
-    x_landmarks <- partition$landmarks
-    x_query <- partition$query
-    n_landmarks <- nrow(x_landmarks)
-    landmark_neighbors <- min(n_neighbors, n_landmarks - 1L)
-    reference_time <- system.time({
-        reference_knn <- landmark_reference_knn(
-            x_landmarks,
-            k = landmark_neighbors,
-            backend = backend,
-            n_threads = n_threads
+    all_landmarks <- length(selection$query_indices) == 0L
+    partition <- if (all_landmarks) {
+        NULL
+    } else {
+        split_landmark_data(
+            x, selection$indices, selection$query_indices,
+            n_threads = n.cores
         )
-        reference_fit <- umap(
+    }
+    list(
+        x = x, prepared = prepared$value, preprocess_time = prepared$time,
+        selection = selection, partition = partition,
+        all_landmarks = all_landmarks, n = nrow(x),
+        n_neighbors = n_neighbors, n_components = n_components,
+        backend = backend, n_threads = n.cores,
+        graph_mode = graph_mode, seed = seed
+    )
+}
+
+run_full_landmark_umap <- function(state, seed, keep_knn, verbose) {
+    umap(
+        state$x,
+        n_neighbors = state$n_neighbors,
+        n_components = state$n_components, standardize = FALSE,
+        pca_dims = NULL, seed = seed, backend = state$backend,
+        n.cores = state$n_threads, keep_knn = keep_knn,
+        graph_mode = state$graph_mode, verbose = verbose
+    )
+}
+
+fit_landmark_umap_reference <- function(state, seed, keep_knn, verbose) {
+    x_landmarks <- state$partition$landmarks
+    k <- min(state$n_neighbors, nrow(x_landmarks) - 1L)
+    timed <- system.time({
+        knn <- landmark_reference_knn(
             x_landmarks,
-            n_neighbors = landmark_neighbors,
-            n_components = n_components,
-            standardize = FALSE,
-            pca_dims = NULL,
-            seed = seed,
-            backend = backend,
-            nn = reference_knn,
-            n.cores = n_threads,
-            keep_knn = keep_knn,
-            graph_mode = graph_mode,
-            verbose = verbose
+            k = k, backend = state$backend,
+            n_threads = state$n_threads
+        )
+        fit <- umap(
+            x_landmarks,
+            n_neighbors = k,
+            n_components = state$n_components, standardize = FALSE,
+            pca_dims = NULL, seed = seed, backend = state$backend,
+            nn = knn, n.cores = state$n_threads, keep_knn = keep_knn,
+            graph_mode = state$graph_mode, verbose = verbose
         )
     })
+    list(fit = fit, knn = knn, time = timed, n_neighbors = k)
+}
 
-    if (is.null(transform_k)) transform_k <- min(n_landmarks, n_neighbors)
+project_landmark_umap_host <- function(state, fit, knn) {
+    projected <- attr(knn, "projected_layout", exact = TRUE)
+    affine <- landmark_affine_projection(
+        state$partition$landmarks, state$partition$query,
+        fit$layout, knn,
+        n_threads = state$n_threads,
+        backend = state$backend
+    )
+    if (embedding_layout_dims_match(
+        affine, length(state$selection$query_indices), state$n_components
+    )) {
+        return(affine)
+    }
+    if (!is.null(projected)) {
+        return(projected)
+    }
+    use_metal <- identical(state$backend, "metal") &&
+        isTRUE(embedding_metal_available_cpp())
+    projection_fun <- if (use_metal) {
+        project_embedding_knn_metal_cpp
+    } else {
+        project_embedding_knn_cpp
+    }
+    projection_fun(fit$layout, knn$indices, knn$distances)
+}
+
+project_landmark_umap_rows <- function(state, fit, transform_k, seed) {
+    n_landmarks <- nrow(state$partition$landmarks)
+    if (is.null(transform_k)) {
+        transform_k <- min(n_landmarks, state$n_neighbors)
+    }
     transform_k <- transform_embedding_k(transform_k, n_landmarks)
-    projection_time <- system.time({
-        projection_knn <- landmark_projection_knn(
-            x_landmarks,
-            x_query,
-            k = transform_k,
-            backend = backend,
-            seed = seed + 503L,
-            n_threads = n_threads,
-            landmark_layout = reference_fit$layout,
-            all_data = x,
-            landmark_indices = landmark_indices,
-            query_rows = non_landmarks
+    timed <- system.time({
+        knn <- landmark_projection_knn(
+            state$partition$landmarks, state$partition$query,
+            k = transform_k, backend = state$backend,
+            seed = seed + 503L, n_threads = state$n_threads,
+            landmark_layout = fit$layout, all_data = state$x,
+            landmark_indices = state$selection$indices,
+            query_rows = state$selection$query_indices
         )
-        cuda_resident_projection <- identical(backend, "cuda") &&
-            fastembedr_is_gpu_knn(projection_knn)
-        if (!cuda_resident_projection) {
-            projected <- attr(projection_knn, "projected_layout", exact = TRUE)
-            affine_projected <- landmark_affine_projection(
-                x_landmarks,
-                x_query,
-                reference_fit$layout,
-                projection_knn,
-                n_threads = n_threads,
-                backend = backend
-            )
-            if (embedding_layout_dims_match(
-                affine_projected, length(non_landmarks), n_components
-            )) {
-                projected <- affine_projected
-            }
-            if (is.null(projected)) {
-                metal_available <- identical(backend, "metal") &&
-                    isTRUE(embedding_metal_available_cpp())
-                project_backend <- if (metal_available) {
-                    "metal"
-                } else {
-                    "cpu"
-                }
-                projected <- switch(project_backend,
-                    metal = project_embedding_knn_metal_cpp(
-                        reference_fit$layout,
-                        projection_knn$indices,
-                        projection_knn$distances
-                    ),
-                    project_embedding_knn_cpp(
-                        reference_fit$layout,
-                        projection_knn$indices,
-                        projection_knn$distances
-                    )
-                )
-            }
+        resident <- identical(state$backend, "cuda") &&
+            fastembedr_is_gpu_knn(knn)
+        projected <- if (resident) {
+            NULL
+        } else {
+            project_landmark_umap_host(state, fit, knn)
         }
     })
+    list(
+        knn = knn, projected = projected, resident = resident,
+        transform_k = transform_k, time = timed
+    )
+}
 
-    layout <- NULL
-    if (!cuda_resident_projection) {
-        layout <- assemble_landmark_layout(
-            reference_fit$layout,
-            projected,
-            landmark_indices,
-            non_landmarks,
-            n,
+landmark_umap_refinement_epochs <- function() {
+    value <- integer_scalar(getOption(
+        "fastEmbedR.landmark_umap_refine_epochs", 50L
+    ))
+    if (length(value) != 1L || is.na(value) || value < 0L) 50L else value
+}
+
+landmark_umap_optimizer_parameters <- function(fit) {
+    params <- fit$parameters
+    values <- list(
+        min_dist = as.numeric(params$min_dist %||% 0.01),
+        negative_rate = as.integer(params$negative_sample_rate %||% 5L),
+        learning_rate = as.numeric(params$learning_rate %||% 1),
+        repulsion = as.numeric(params$repulsion_strength %||% 1)
+    )
+    if (!is.finite(values$min_dist) || values$min_dist < 0) {
+        values$min_dist <- 0.01
+    }
+    if (is.na(values$negative_rate) || values$negative_rate < 0L) {
+        values$negative_rate <- 5L
+    }
+    if (!is.finite(values$learning_rate) || values$learning_rate <= 0) {
+        values$learning_rate <- 1
+    }
+    if (!is.finite(values$repulsion) || values$repulsion <= 0) {
+        values$repulsion <- 1
+    }
+    values
+}
+
+run_landmark_umap_cuda_refinement <- function(state, fit, projection,
+                                                epochs, params, seed) {
+    result <- landmark_umap_project_refine_cuda_gpu_cpp(
+        projection$knn, state$partition$landmarks,
+        state$partition$query, fit$layout,
+        as.integer(state$selection$indices),
+        as.integer(state$selection$query_indices), as.integer(state$n),
+        as.integer(epochs), params$min_dist, params$negative_rate,
+        params$learning_rate, params$repulsion,
+        as.integer(seed + 2003L), 12L, 1e-3, 2.5
+    )
+    list(layout = result$layout, backend = "cuda")
+}
+
+landmark_projection_global_indices <- function(state, projection) {
+    indices <- state$selection$indices[
+        as.integer(projection$knn$indices)
+    ]
+    matrix(
+        as.integer(indices),
+        nrow = nrow(projection$knn$indices),
+        ncol = ncol(projection$knn$indices)
+    )
+}
+
+run_landmark_umap_metal_refinement <- function(state, fit, projection,
+                                                layout, indices, epochs,
+                                                params, seed) {
+    tryCatch(
+        {
+            refined <- knn_umap_refine_rows_metal_cpp(
+                indices, projection$knn$distances,
+                as.integer(state$selection$query_indices), layout,
+                as.integer(epochs), params$min_dist,
+                params$negative_rate, params$learning_rate,
+                params$repulsion, as.integer(seed + 2003L)
+            )
+            list(layout = refined, backend = "metal")
+        },
+        error = function(e) {
+            stop(
+                "Metal UMAP landmark refinement failed: ",
+                conditionMessage(e),
+                call. = FALSE
+            )
+        }
+    )
+}
+
+run_landmark_umap_cpu_refinement <- function(state, projection, layout,
+                                                indices, epochs, params,
+                                                seed, verbose) {
+    refined <- knn_umap_refine_rows_cpp(
+        indices, projection$knn$distances,
+        as.integer(state$selection$query_indices), layout,
+        as.integer(epochs), params$min_dist, params$negative_rate,
+        params$learning_rate, params$repulsion,
+        as.integer(normalize_nn_threads(state$n_threads)),
+        as.integer(seed + 2003L), isTRUE(verbose)
+    )
+    list(layout = refined, backend = "cpu")
+}
+
+run_landmark_umap_host_refinement <- function(state, fit, projection,
+                                                layout, epochs, params,
+                                                seed, verbose) {
+    indices <- landmark_projection_global_indices(state, projection)
+    use_metal <- state$n_components == 2L &&
+        identical(state$backend, "metal") &&
+        isTRUE(embedding_metal_available_cpp())
+    result <- if (use_metal) {
+        run_landmark_umap_metal_refinement(
+            state, fit, projection, layout, indices, epochs, params, seed
+        )
+    } else {
+        run_landmark_umap_cpu_refinement(
+            state, projection, layout, indices, epochs, params, seed, verbose
+        )
+    }
+    result$layout[state$selection$indices, ] <-
+        embedding_dense_double_matrix(fit$layout)
+    colnames(result$layout) <- colnames(fit$layout)
+    result
+}
+
+refine_landmark_umap <- function(state, fit, projection, seed, verbose) {
+    epochs <- landmark_umap_refinement_epochs()
+    params <- landmark_umap_optimizer_parameters(fit)
+    layout <- if (projection$resident) {
+        NULL
+    } else {
+        assemble_landmark_layout(
+            fit$layout, projection$projected, state$selection$indices,
+            state$selection$query_indices, state$n,
             prefix = "UMAP",
             return_float32 = FALSE
         )
     }
-
-    refinement_time <- zero_proc_time()
-    refinement_backend <- NA_character_
-    refinement_epochs <- getOption(
-        "fastEmbedR.landmark_umap_refine_epochs",
-        50L
-    )
-    refinement_epochs <- integer_scalar(refinement_epochs)
-    if (length(refinement_epochs) != 1L || is.na(refinement_epochs) ||
-        refinement_epochs < 0L) {
-        refinement_epochs <- 50L
+    if (!projection$resident && epochs == 0L) {
+        return(list(
+            layout = layout, backend = NA_character_,
+            epochs = epochs, time = zero_proc_time()
+        ))
     }
-    if (cuda_resident_projection) {
-        ref_params <- reference_fit$parameters
-        ref_min_dist <- as.numeric(ref_params$min_dist %||% 0.01)
-        ref_negative_sample_rate <-
-            as.integer(ref_params$negative_sample_rate %||% 5L)
-        ref_learning_rate <- as.numeric(ref_params$learning_rate %||% 1)
-    ref_repulsion_strength <- as.numeric(ref_params$repulsion_strength %||% 1)
-        refinement_time <- system.time({
-            resident <- landmark_umap_project_refine_cuda_gpu_cpp(
-                projection_knn,
-                x_landmarks,
-                x_query,
-                reference_fit$layout,
-                as.integer(landmark_indices),
-                as.integer(non_landmarks),
-                as.integer(n),
-                as.integer(refinement_epochs),
-                ref_min_dist,
-                ref_negative_sample_rate,
-                ref_learning_rate,
-                ref_repulsion_strength,
-                as.integer(seed + 2003L),
-                12L,
-                1e-3,
-                2.5
+    timed <- system.time({
+        result <- if (projection$resident) {
+            run_landmark_umap_cuda_refinement(
+                state, fit, projection, epochs, params, seed
             )
-            layout <- resident$layout
-        })
-        refinement_backend <- "cuda"
-    } else if (refinement_epochs > 0L && length(non_landmarks) > 0L) {
-        refinement_time <- system.time({
-            projection_global_indices <- matrix(
-                as.integer(landmark_indices[as.integer(
-                    projection_knn$indices)]),
-                nrow = nrow(projection_knn$indices),
-                ncol = ncol(projection_knn$indices)
+        } else {
+            run_landmark_umap_host_refinement(
+                state, fit, projection, layout, epochs, params,
+                seed, verbose
             )
-            ref_params <- reference_fit$parameters
-            ref_min_dist <- as.numeric(ref_params$min_dist %||% 0.01)
-            ref_negative_sample_rate <-
-                as.integer(ref_params$negative_sample_rate %||% 5L)
-            ref_learning_rate <- as.numeric(ref_params$learning_rate %||% 1)
-            ref_repulsion_strength <- as.numeric(
-                ref_params$repulsion_strength %||% 1)
-            if (!is.finite(ref_min_dist) || ref_min_dist < 0) ref_min_dist <-
-                0.01
-            if (is.na(ref_negative_sample_rate) ||
-                ref_negative_sample_rate < 0L) {
-                ref_negative_sample_rate <- 5L
-            }
-            if (!is.finite(ref_learning_rate) || ref_learning_rate <=
-                0) {
-                ref_learning_rate <- 1
-            }
-            if (!is.finite(ref_repulsion_strength) || ref_repulsion_strength <=
-                0) {
-                ref_repulsion_strength <- 1
-            }
-            use_metal_refinement <- n_components == 2L &&
-                identical(backend, "metal") &&
-                isTRUE(embedding_metal_available_cpp())
-            if (use_metal_refinement) {
-                refined_result <- tryCatch(
-                    {
-                        refined <- knn_umap_refine_rows_metal_cpp(
-                            projection_global_indices,
-                            projection_knn$distances,
-                            as.integer(non_landmarks),
-                            layout,
-                            as.integer(refinement_epochs),
-                            ref_min_dist,
-                            ref_negative_sample_rate,
-                            ref_learning_rate,
-                            ref_repulsion_strength,
-                            as.integer(seed + 2003L)
-                        )
-                        list(layout = refined, backend = "metal")
-                    },
-                    error = function(e) {
-                        msg <- conditionMessage(e)
-                        if (identical(backend, "metal")) {
-                            stop("Metal UMAP landmark refinement failed: ", msg,
-                                call. = FALSE)
-                        }
-                        warning(
-                "Metal UMAP landmark refinement failed; using CPU refinement ",
-                            "and reporting backend='cpu': ",
-                            msg,
-                            call. = FALSE
-                        )
-                        refined <- knn_umap_refine_rows_cpp(
-                            projection_global_indices,
-                            projection_knn$distances,
-                            as.integer(non_landmarks),
-                            layout,
-                            as.integer(refinement_epochs),
-                            ref_min_dist,
-                            ref_negative_sample_rate,
-                            ref_learning_rate,
-                            ref_repulsion_strength,
-                            as.integer(normalize_nn_threads(n_threads)),
-                            as.integer(seed + 2003L),
-                            isTRUE(verbose)
-                        )
-                        list(layout = refined, backend = "cpu")
-                    }
-                )
-                layout <- refined_result$layout
-                refinement_backend <- refined_result$backend
-            } else {
-                refinement_backend <- "cpu"
-                layout <- knn_umap_refine_rows_cpp(
-                    projection_global_indices,
-                    projection_knn$distances,
-                    as.integer(non_landmarks),
-                    layout,
-                    as.integer(refinement_epochs),
-                    ref_min_dist,
-                    ref_negative_sample_rate,
-                    ref_learning_rate,
-                    ref_repulsion_strength,
-                    as.integer(normalize_nn_threads(n_threads)),
-                    as.integer(seed + 2003L),
-                    isTRUE(verbose)
-                )
-            }
-            layout[landmark_indices, ] <- embedding_dense_double_matrix(
-                reference_fit$layout
-            )
-            colnames(layout) <- colnames(reference_fit$layout)
-        })
-    }
-
-    layout <- finalize_embedding_layout(
-        layout,
-        "UMAP",
-        return_float32 = is_float32_matrix(x)
+        }
+    })
+    list(
+        layout = result$layout, backend = result$backend,
+        epochs = epochs, time = timed
     )
+}
 
-    zero <- zero_proc_time()
-    timings <- rbind(
-        preprocess = preprocess_time,
-        reference_embedding = reference_time,
-        landmark_projection_knn = projection_time,
-        landmark_refinement = refinement_time,
-        transform = zero
-    )
-    reference_metrics <- reference_fit$metrics
-    reference_knn_elapsed <- if ("knn_elapsed" %in% names(reference_metrics)) {
-        reference_metrics$knn_elapsed[[1L]]
+landmark_umap_metrics <- function(state, reference, projection, refinement) {
+    fit_metrics <- reference$fit$metrics
+    knn_elapsed <- if ("knn_elapsed" %in% names(fit_metrics)) {
+        fit_metrics$knn_elapsed[[1L]]
     } else {
         NA_real_
     }
-    reference_optimizer_elapsed <- if ("embedding_elapsed" %in% names(
-        reference_metrics
-    )) {
-        reference_metrics$embedding_elapsed[[1L]]
+    optimizer_elapsed <- if ("embedding_elapsed" %in% names(fit_metrics)) {
+        fit_metrics$embedding_elapsed[[1L]]
     } else {
         NA_real_
     }
-    metrics <- data.frame(
-        method = "landmark_umap",
-        n = n,
-        p = ncol(x),
-        n_neighbors = n_neighbors,
-        elapsed = sum(timings[, "elapsed"]),
-        preprocess_elapsed = preprocess_time[["elapsed"]],
-        reference_embedding_elapsed = reference_time[["elapsed"]],
-        reference_knn_elapsed = reference_knn_elapsed,
-        reference_optimizer_elapsed = reference_optimizer_elapsed,
-        landmark_projection_knn_elapsed = projection_time[["elapsed"]],
-        landmark_refinement_elapsed = refinement_time[["elapsed"]],
-        transform_elapsed = 0,
-        landmark = TRUE,
+    times <- list(
+        state$preprocess_time, reference$time,
+        projection$time, refinement$time
+    )
+    data.frame(
+        method = "landmark_umap", n = state$n, p = ncol(state$x),
+        n_neighbors = state$n_neighbors,
+        elapsed = sum(vapply(times, function(x) x[["elapsed"]], numeric(1))),
+        preprocess_elapsed = times[[1L]][["elapsed"]],
+        reference_embedding_elapsed = times[[2L]][["elapsed"]],
+        reference_knn_elapsed = knn_elapsed,
+        reference_optimizer_elapsed = optimizer_elapsed,
+        landmark_projection_knn_elapsed = times[[3L]][["elapsed"]],
+        landmark_refinement_elapsed = times[[4L]][["elapsed"]],
+        transform_elapsed = 0, landmark = TRUE,
+        n_landmarks = nrow(state$partition$landmarks),
+        landmark_fraction = nrow(state$partition$landmarks) / state$n,
+        transform_k = projection$transform_k,
+        silhouette = NA_real_, knn_preservation = NA_real_,
+        local_trustworthiness = NA_real_, local_continuity = NA_real_,
+        structure_score = NA_real_, embedding_knn_accuracy = NA_real_
+    )
+}
+
+landmark_umap_parameters <- function(state, reference, projection,
+                                        refinement, keep_knn) {
+    approximation <- attr(projection$knn, "approximation", exact = TRUE)
+    strategy <- approximation$strategy %||% if (
+        isTRUE(attr(projection$knn, "exact"))
+    ) {
+        "exact"
+    } else {
+        NA_character_
+    }
+    n_landmarks <- nrow(state$partition$landmarks)
+    c(list(
+        method = "landmark_umap", n = state$n, p = ncol(state$x),
+        n_neighbors = state$n_neighbors,
+        n_components = as.integer(state$n_components),
+        seed = as.integer(state$seed),
+        nn_backend = reference$fit$parameters$nn_backend,
+        projection_nn_backend = attr(projection$knn, "backend"),
+        projection_strategy = as.character(strategy),
+        backend = reference$fit$parameters$backend %||% state$backend,
+        n.cores = normalize_nn_threads(state$n_threads), landmark = TRUE,
         n_landmarks = n_landmarks,
-        landmark_fraction = n_landmarks / n,
-        transform_k = transform_k,
-        silhouette = NA_real_,
-        knn_preservation = NA_real_,
-        local_trustworthiness = NA_real_,
-        local_continuity = NA_real_,
-        structure_score = NA_real_,
-        embedding_knn_accuracy = NA_real_,
-        stringsAsFactors = FALSE
+        landmark_fraction = n_landmarks / state$n,
+        landmark_selection = state$selection$method,
+        graph_mode = state$graph_mode, transform_k = projection$transform_k,
+        landmark_refinement = if (refinement$epochs > 0L) {
+            "fixed_landmark_umap_rows"
+        } else {
+            "none"
+        },
+        landmark_refinement_epochs = as.integer(refinement$epochs),
+        landmark_refinement_backend = if (refinement$epochs > 0L) {
+            refinement$backend
+        } else {
+            NA_character_
+        },
+        keep_knn = keep_knn,
+        provenance = "UMAP_landmark_projection_native_cpp"
+    ), state$prepared$preprocess)
+}
+
+assemble_landmark_umap_fit <- function(state, reference, projection,
+                                        refinement, keep_knn) {
+    layout <- finalize_embedding_layout(
+        refinement$layout, "UMAP",
+        return_float32 = is_float32_matrix(state$x)
     )
-    selection_method <- landmark_selection$method
-    projection_approximation <- attr(projection_knn, "approximation",
-        exact = TRUE
+    timings <- rbind(
+        preprocess = state$preprocess_time,
+        reference_embedding = reference$time,
+        landmark_projection_knn = projection$time,
+        landmark_refinement = refinement$time,
+        transform = zero_proc_time()
     )
-    projection_strategy <- if (is.null(projection_approximation$strategy)) {
-        if (isTRUE(attr(projection_knn, "exact"))) "exact" else NA_character_
-    } else {
-        as.character(projection_approximation$strategy)
-    }
-    parameters <- c(
-        list(
-            method = "landmark_umap",
-            n = n,
-            p = ncol(x),
-            n_neighbors = n_neighbors,
-            n_components = as.integer(n_components),
-            seed = as.integer(seed),
-            nn_backend = reference_fit$parameters$nn_backend,
-            projection_nn_backend = attr(projection_knn, "backend"),
-            projection_strategy = projection_strategy,
-            backend = reference_fit$parameters$backend %||% backend,
-            n.cores = normalize_nn_threads(n_threads),
-            landmark = TRUE,
-            n_landmarks = n_landmarks,
-            landmark_fraction = n_landmarks / n,
-            landmark_selection = selection_method,
-            graph_mode = graph_mode,
-            transform_k = transform_k,
-            landmark_refinement = if (
-                refinement_epochs > 0L) {
-                "fixed_landmark_umap_rows"
-            } else {
-                "none"
-            },
-            landmark_refinement_epochs = as.integer(refinement_epochs),
-            landmark_refinement_backend = if (refinement_epochs > 0L) {
-                refinement_backend
-            } else {
-                NA_character_
-            },
-            keep_knn = keep_knn,
-            provenance = "UMAP_landmark_projection_native_cpp"
-        ),
-        prepared$preprocess
-    )
-    out <- list(
-        layout = layout,
-        labels = NULL,
-        method = "landmark_umap",
-        metrics = metrics,
-        parameters = parameters,
-        timings = timings,
-        knn = NULL,
+    extras <- list(
         landmarks = list(
-            indices = landmark_indices,
-            layout = reference_fit$layout,
-            reference_fit = reference_fit,
-            projection_knn = if (isTRUE(keep_knn)) projection_knn else NULL
+            indices = state$selection$indices,
+            layout = reference$fit$layout,
+            reference_fit = reference$fit,
+            projection_knn = if (keep_knn) projection$knn else NULL
         ),
-        preprocess = prepared$preprocess
+        preprocess = state$prepared$preprocess
     )
-    class(out) <- "fastEmbedR_embedding"
-    out
+    new_embedding_result(
+        layout, "landmark_umap",
+        landmark_umap_metrics(state, reference, projection, refinement),
+        landmark_umap_parameters(
+            state, reference, projection, refinement, keep_knn
+        ),
+        timings,
+        knn = NULL, extras = extras
+    )
 }

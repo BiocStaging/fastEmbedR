@@ -30,14 +30,14 @@
 #' layout <- embed_knn(indices, distances, method = "umap", seed = 1)
 #' @export
 embed_knn <- function(indices,
-                    distances = NULL,
-                    method = "umap",
-                    n_components = 2L,
-                    seed = 4L,
-                    verbose = FALSE,
-                    backend = NULL,
-                    n.cores = NULL,
-                    ...) {
+                        distances = NULL,
+                        method = "umap",
+                        n_components = 2L,
+                        seed = 4L,
+                        verbose = FALSE,
+                        backend = NULL,
+                        n.cores = NULL,
+                        ...) {
     n_threads <- n.cores
     method <- match.arg(method, c("umap", "tsne"))
     backend <- resolve_embedding_backend(backend)

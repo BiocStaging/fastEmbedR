@@ -1,85 +1,55 @@
 # Backend-aware randomized-PCA initialization for t-SNE workflows.
 
-make_opentsne_pca_init <- function(x,
-                                    n_components,
-                                    seed,
-                                    backend = "cpu",
-                                    n_threads = NULL,
-                                    .thread_controlled = FALSE) {
-    x <- opentsne_pca_input_matrix(x)
-    n_components <- as.integer(n_components)
-    if (length(n_components) != 1L || is.na(n_components) ||
-        n_components < 1L) {
-        stop("`n_components` must be a positive integer.", call. = FALSE)
+annotate_opentsne_pca_init <- function(pca, n_components) {
+    init <- normalize_opentsne_pca_scores(pca$scores, n_components)
+    attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
+    attr(init, "fastEmbedR_init_backend") <- pca$backend
+    attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
+    if (!is.null(pca$package)) {
+        attr(init, "fastEmbedR_init_package") <- pca$package
+        attr(init, "fastEmbedR_init_package_version") <- pca$package_version
     }
-    if (identical(backend, "cpu") && !isTRUE(.thread_controlled)) {
-        requested <- if (is.null(n_threads)) default_tsne_threads(
-            ) else n_threads
-        return(with_pca_cpu_threads(
-            requested,
-            make_opentsne_pca_init(
-                x,
-                n_components = n_components,
-                seed = seed,
-                backend = backend,
-                n_threads = requested,
-                .thread_controlled = TRUE
-            )
-        )$value)
-    }
-    if (identical(backend, "metal")) {
-        pca <- fastembedr_metal_tsvd_pca(
-            x,
-            ncomp = n_components,
-            center = TRUE,
-            scale = FALSE,
-            seed = seed
-        )
-        init <- normalize_opentsne_pca_scores(pca$scores, n_components)
-        attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
-        attr(init, "fastEmbedR_init_backend") <- pca$backend
-        attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
-        attr(init, "fastEmbedR_init_package") <- "fastEmbedR native Metal/MPS"
-        attr(init, "fastEmbedR_init_package_version") <-
-            as.character(utils::packageVersion("fastEmbedR"))
+    if (!is.null(pca$timing)) {
         attr(init, "fastEmbedR_init_timing") <- pca$timing
-        return(init)
     }
-    if (identical(backend, "cuda")) {
-        if (!exists("pca_tsvd_cuda_cpp", mode = "function")) {
-            stop(
-        "CUDA PCA initialization requires native RAPIDS RAFT TSVD support, ",
-                "but the package was not built with that backend.",
-                call. = FALSE
-            )
-        }
-        native_cuda <- capture_error(
-            fastembedr_cuda_tsvd_pca(
-                x,
-                ncomp = n_components,
-                center = TRUE,
-                scale = FALSE,
-                seed = seed
-            )
-        )
-        if (!is.null(native_cuda$value)) {
-            pca <- native_cuda$value
-            pca$package <- "RAPIDS RAFT TSVD"
-            pca$package_version <- NA_character_
-            init <- normalize_opentsne_pca_scores(pca$scores, n_components)
-            attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
-            attr(init, "fastEmbedR_init_backend") <- pca$backend
-            attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
-            attr(init, "fastEmbedR_init_package") <- pca$package
-            attr(init, "fastEmbedR_init_package_version") <- pca$package_version
-            return(init)
-        }
+    init
+}
+
+make_metal_opentsne_pca_init <- function(x, n_components, seed) {
+    pca <- fastembedr_metal_tsvd_pca(
+        x,
+        ncomp = n_components, center = TRUE, scale = FALSE, seed = seed
+    )
+    pca$package <- "fastEmbedR native Metal/MPS"
+    pca$package_version <- as.character(utils::packageVersion("fastEmbedR"))
+    annotate_opentsne_pca_init(pca, n_components)
+}
+
+make_cuda_opentsne_pca_init <- function(x, n_components, seed) {
+    if (!exists("pca_tsvd_cuda_cpp", mode = "function")) {
         stop(
-            "CUDA PCA initialization failed in native RAPIDS RAFT TSVD: ",
-            native_cuda$error,
+            "CUDA PCA initialization requires native RAPIDS RAFT TSVD ",
+            "support, but the package was not built with that backend.",
             call. = FALSE
         )
     }
+    result <- capture_error(fastembedr_cuda_tsvd_pca(
+        x,
+        ncomp = n_components, center = TRUE, scale = FALSE, seed = seed
+    ))
+    if (is.null(result$value)) {
+        stop(
+            "CUDA PCA initialization failed in native RAPIDS RAFT TSVD: ",
+            result$error,
+            call. = FALSE
+        )
+    }
+    result$value$package <- "RAPIDS RAFT TSVD"
+    result$value$package_version <- NA_character_
+    annotate_opentsne_pca_init(result$value, n_components)
+}
+
+make_cpu_opentsne_pca_init <- function(x, n_components, seed, n_threads) {
     requested_threads <- if (is.null(n_threads)) {
         default_tsne_threads()
     } else {
@@ -95,15 +65,35 @@ make_opentsne_pca_init <- function(x,
     )
     pca$package <- "fastEmbedR native CPU RSVD"
     pca$package_version <- as.character(utils::packageVersion("fastEmbedR"))
-    init <- normalize_opentsne_pca_scores(pca$scores, n_components)
-    attr(init, "fastEmbedR_init_method") <- paste0("pca_", pca$method)
-    attr(init, "fastEmbedR_init_backend") <- pca$backend
-    attr(init, "fastEmbedR_init_backend_reason") <- pca$backend_reason
-    if (!is.null(pca$package)) {
-        attr(init, "fastEmbedR_init_package") <- pca$package
-        attr(init, "fastEmbedR_init_package_version") <- pca$package_version
+    annotate_opentsne_pca_init(pca, n_components)
+}
+
+make_opentsne_pca_init <- function(
+    x, n_components, seed, backend = "cpu", n_threads = NULL,
+    .thread_controlled = FALSE
+) {
+    x <- opentsne_pca_input_matrix(x)
+    n_components <- as.integer(n_components)
+    if (length(n_components) != 1L || is.na(n_components) ||
+        n_components < 1L) {
+        stop("`n_components` must be a positive integer.", call. = FALSE)
     }
-    init
+    if (identical(backend, "cpu") && !isTRUE(.thread_controlled)) {
+        requested <- n_threads %||% default_tsne_threads()
+        return(with_pca_cpu_threads(
+            requested,
+            make_opentsne_pca_init(
+                x, n_components, seed, backend, requested, TRUE
+            )
+        )$value)
+    }
+    if (identical(backend, "metal")) {
+        return(make_metal_opentsne_pca_init(x, n_components, seed))
+    }
+    if (identical(backend, "cuda")) {
+        return(make_cuda_opentsne_pca_init(x, n_components, seed))
+    }
+    make_cpu_opentsne_pca_init(x, n_components, seed, n_threads)
 }
 
 #' Compute or reuse a PCA initialization for t-SNE
@@ -138,13 +128,10 @@ make_opentsne_pca_init <- function(x,
 #' init <- tsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)
 #' plot(init, pch = 21, bg = iris$Species)
 #' @export
-tsne_pca_init <- function(data,
-                        n_components = 2L,
-                        seed = 4L,
-                        backend = NULL,
-                        n.cores = 1L,
-                        cache_file = NULL,
-                        force_recompute = FALSE) {
+tsne_pca_init <- function(
+    data, n_components = 2L, seed = 4L, backend = NULL, n.cores = 1L,
+    cache_file = NULL, force_recompute = FALSE
+) {
     backend <- resolve_embedding_backend(backend)
     n_components <- as.integer(n_components)
     if (length(n_components) != 1L || is.na(n_components) ||
@@ -154,7 +141,8 @@ tsne_pca_init <- function(data,
     x <- opentsne_pca_input_matrix(data)
     if (nrow(x) < 2L || ncol(x) < 1L) {
         stop("`data` must have at least two rows and one column.",
-            call. = FALSE)
+            call. = FALSE
+        )
     }
     if (!(identical(backend, "metal") && is_float32_matrix(x)) &&
         opentsne_pca_has_nonfinite(x)) {
@@ -226,11 +214,11 @@ resolve_opentsne_y_init <- function(Y_init, n, n_components) {
 }
 
 make_opentsne_pca_init_from_data <- function(init_data,
-                                            n,
-                                            n_components,
-                                            seed,
-                                            backend = "cpu",
-                                            n_threads = NULL) {
+                                                n,
+                                                n_components,
+                                                seed,
+                                                backend = "cpu",
+                                                n_threads = NULL) {
     x <- opentsne_pca_input_matrix(init_data)
     if (nrow(x) != n) {
         stop("`init_data` must have one row per KNN row.", call. = FALSE)

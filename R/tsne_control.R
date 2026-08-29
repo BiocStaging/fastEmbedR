@@ -63,61 +63,82 @@ annotate_opentsne_affinity_support <- function(layout,
     layout
 }
 
-opentsne_neighbor_policy <- function(n,
-                                    perplexity = NULL,
-                                    available = NULL,
-                                    affinity_support = c(
-                                        "standard",
-                                        "compact"
-                                    )) {
-    affinity_support <- normalize_opentsne_affinity_support(affinity_support)
+validate_opentsne_neighbor_counts <- function(n, available) {
     n <- as.integer(n)
     if (length(n) != 1L || is.na(n) || n < 2L) {
         stop("`data` must contain at least two rows.", call. = FALSE)
     }
-    max_perplexity <- floor((n - 1L) / 3L)
     if (!is.null(available)) {
         available <- as.integer(available)
         if (length(available) != 1L || is.na(available) || available < 1L) {
             stop(
-            "The supplied KNN object has no usable non-self neighbor columns.",
+                "The supplied KNN object has no usable non-self ",
+                "neighbor columns.",
                 call. = FALSE
             )
         }
     }
-    if (is.null(perplexity)) {
-        max_from_support <- if (is.null(available)) {
-            max_perplexity
-        } else if (identical(affinity_support, "standard")) {
-            floor(available / 3L)
-        } else {
-            available
-        }
-        perplexity <- as.numeric(max(1L, min(
-            30L, max_perplexity,
-            max_from_support
-        )))
+    list(n = n, available = available)
+}
+
+default_opentsne_perplexity <- function(
+    max_perplexity, available, affinity_support
+) {
+    max_from_support <- if (is.null(available)) {
+        max_perplexity
+    } else if (identical(affinity_support, "standard")) {
+        floor(available / 3L)
     } else {
-        perplexity <- numeric_scalar(perplexity)
-        if (length(perplexity) != 1L || is.na(perplexity) ||
-            !is.finite(perplexity) || perplexity <= 0) {
-            stop("`perplexity` must be a positive finite number.",
-                call. = FALSE)
-        }
+        available
+    }
+    as.numeric(max(1L, min(30L, max_perplexity, max_from_support)))
+}
+
+validate_opentsne_perplexity <- function(perplexity, max_perplexity) {
+    perplexity <- numeric_scalar(perplexity)
+    if (length(perplexity) != 1L || is.na(perplexity) ||
+        !is.finite(perplexity) || perplexity <= 0) {
+        stop("`perplexity` must be a positive finite number.", call. = FALSE)
     }
     if (perplexity > max_perplexity) {
         stop(
-            "`perplexity` must be no larger than floor((nrow(data) - 1) / 3).",
+            "`perplexity` must be no larger than ",
+            "floor((nrow(data) - 1) / 3).",
             call. = FALSE
+        )
+    }
+    perplexity
+}
+
+opentsne_neighbor_policy <- function(
+    n, perplexity = NULL, available = NULL,
+    affinity_support = c("standard", "compact")
+) {
+    affinity_support <- normalize_opentsne_affinity_support(affinity_support)
+    counts <- validate_opentsne_neighbor_counts(n, available)
+    n <- counts$n
+    available <- counts$available
+    max_perplexity <- floor((n - 1L) / 3L)
+    if (is.null(perplexity)) {
+        perplexity <- default_opentsne_perplexity(
+            max_perplexity,
+            available,
+            affinity_support
+        )
+    } else {
+        perplexity <- validate_opentsne_perplexity(
+            perplexity,
+            max_perplexity
         )
     }
     n_neighbors <- opentsne_support_width(perplexity, affinity_support)
     n_neighbors <- max(1L, min(n - 1L, n_neighbors))
     if (!is.null(available) && n_neighbors > available) {
         stop(
-        "The supplied KNN object has fewer non-self columns than required by ",
+            "The supplied KNN object has fewer non-self columns than ",
+            "required by ",
             "`affinity_support = \"", affinity_support, "\"` (need ",
-                n_neighbors,
+            n_neighbors,
             ", have ", available, ").",
             call. = FALSE
         )
@@ -137,48 +158,49 @@ opentsne_neighbor_policy <- function(n,
     )
 }
 
-resolve_opentsne_auto_parameters <- function(n,
-                                            k,
-                                            perplexity,
-                                            early_exaggeration_iter,
-                                            n_iter,
-                                            learning_rate,
-                                            optimizer_backend,
-                                            negative_gradient_method,
-                                            auto_config) {
+opentsne_auto_parameter_values <- function(
+    n, k, perplexity, optimizer_backend, negative_gradient_method,
+    auto_config
+) {
     perplexity_missing <- is.null(perplexity)
-    early_iter_missing <- is.null(early_exaggeration_iter) ||
-        (length(early_exaggeration_iter) == 1L && is.na(
-            early_exaggeration_iter))
-    n_iter_missing <- is.null(n_iter) ||
-        (length(n_iter) == 1L && is.na(n_iter))
-    auto <- if (isTRUE(auto_config)) {
-        tsne_auto_parameters_cpp(
+    if (isTRUE(auto_config)) {
+        return(tsne_auto_parameters_cpp(
             as.integer(n),
             as.integer(k),
             if (perplexity_missing) NA_real_ else as.numeric(perplexity),
             isTRUE(perplexity_missing),
             as.character(optimizer_backend),
             as.character(negative_gradient_method)
-        )
-    } else {
-        list(
-            perplexity = if (perplexity_missing) {
-                auto_tsne_perplexity(
-                    n,
-                    k
-                )
-            } else {
-                as.numeric(perplexity)
-            },
-            early_exaggeration_iter = 250L,
-            n_iter = 500L,
-            learning_rate = NA_real_,
-            auto_kld_stop = FALSE,
-            auto_iter_end = 5000,
-            rule = "manual"
-        )
+        ))
     }
+    list(
+        perplexity = if (perplexity_missing) {
+            auto_tsne_perplexity(n, k)
+        } else {
+            as.numeric(perplexity)
+        },
+        early_exaggeration_iter = 250L,
+        n_iter = 500L,
+        learning_rate = NA_real_,
+        auto_kld_stop = FALSE,
+        auto_iter_end = 5000,
+        rule = "manual"
+    )
+}
+
+resolve_opentsne_auto_parameters <- function(
+    n, k, perplexity, early_exaggeration_iter, n_iter, learning_rate,
+    optimizer_backend, negative_gradient_method, auto_config
+) {
+    perplexity_missing <- is.null(perplexity)
+    early_iter_missing <- is.null(early_exaggeration_iter) ||
+        identical(as.logical(is.na(early_exaggeration_iter)), TRUE)
+    n_iter_missing <- is.null(n_iter) ||
+        identical(as.logical(is.na(n_iter)), TRUE)
+    auto <- opentsne_auto_parameter_values(
+        n, k, perplexity, optimizer_backend, negative_gradient_method,
+        auto_config
+    )
     if (perplexity_missing) {
         perplexity <- auto$perplexity
     }
@@ -244,7 +266,8 @@ normalize_tsne_negative_gradient_method <- function(method) {
     method <- tolower(gsub("-", "_", as.character(method)))
     if (length(method) != 1L || is.na(method)) {
         stop("`negative_gradient_method` must be a single string.",
-            call. = FALSE)
+            call. = FALSE
+        )
     }
     aliases <- c(
         auto = "auto",
@@ -288,15 +311,10 @@ normalize_tsne_negative_gradient_method <- function(method) {
     out
 }
 
-check_tsne_neighbor_params <- function(n,
-                                        n_components,
-                                        perplexity,
-                                        theta,
-                                        max_iter,
-                                        verbose,
-                                        Y_init,
-                                        momentum,
-                                        final_momentum) {
+check_tsne_neighbor_params <- function(
+    n, n_components, perplexity, theta, max_iter, verbose, Y_init,
+    momentum, final_momentum
+) {
     n_components <- validate_opentsne_n_components(n_components)
     if (!is_whole_number(max_iter) || max_iter <= 0L) {
         stop("Total optimization iterations must be positive.", call. = FALSE)
@@ -319,7 +337,8 @@ check_tsne_neighbor_params <- function(n,
     }
     if (n - 1L < 3 * perplexity) {
         stop("perplexity is too large for the number of samples.",
-            call. = FALSE)
+            call. = FALSE
+        )
     }
 
     list(
@@ -383,7 +402,8 @@ normalize_opentsne_exaggeration <- function(early_exaggeration, exaggeration) {
         if (length(value) != 1L || is.na(value) || !is.finite(value) || value <=
             0) {
             stop("`exaggeration` must be NULL or a positive number.",
-                call. = FALSE)
+                call. = FALSE
+            )
         }
         value
     }
@@ -442,7 +462,8 @@ make_opentsne_default_init <- function(indices,
         if (!is.null(spectral)) {
             spectral <- as.matrix(spectral)
             spectral <- sweep(spectral, 2L, colMeans(spectral),
-                check.margin = FALSE)
+                check.margin = FALSE
+            )
             scale <- max(stats::sd(spectral[, 1L]), stats::sd(spectral[, 2L]))
             if (is.finite(scale) && scale > 0) {
                 spectral <- spectral * (1e-4 / scale)
@@ -469,7 +490,8 @@ opentsne_pca_input_matrix <- function(x) {
     if (is_float32_matrix(x)) {
         if (!requireNamespace("float", quietly = TRUE)) {
             stop("The float package is required to use float32 input.",
-                call. = FALSE)
+                call. = FALSE
+            )
         }
         return(x)
     }
@@ -482,7 +504,8 @@ opentsne_pca_has_nonfinite <- function(x) {
     if (is_float32_matrix(x)) {
         if (!requireNamespace("float", quietly = TRUE)) {
             stop("The float package is required to use float32 input.",
-                call. = FALSE)
+                call. = FALSE
+            )
         }
         return(!isTRUE(float32_all_finite_cpp(x)))
     }
@@ -494,12 +517,14 @@ normalize_opentsne_pca_scores <- function(scores, n_components) {
     if (is_float32_matrix(init)) {
         if (!requireNamespace("float", quietly = TRUE)) {
             stop(
-            "The float package is required to normalize float32 PCA scores.",
+                "The float package is required to normalize float32 ",
+                "PCA scores.",
                 call. = FALSE
             )
         }
         init <- float::sweep(init, 2L, float::colMeans(init),
-            check.margin = FALSE)
+            check.margin = FALSE
+        )
         mean_squares <- float::dbl(float::colMeans(init * init))
         variance <- mean_squares
         if (nrow(init) > 1L) {
