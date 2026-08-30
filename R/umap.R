@@ -27,7 +27,11 @@
 #'   stays on the device through graph construction and optimization.
 #'   GPU requests must resolve to a real native backend; the package does not
 #'   relabel CPU work as GPU.
-#' @param n.cores Number of CPU cores for KNN and CPU UMAP.
+#' @param n.cores Requested CPU core count. For matrix input, the value is
+#'   passed to native CPU KNN and CPU UMAP; UMAP currently uses at most four
+#'   workers and records both requested and effective values. `NULL` uses one
+#'   KNN worker and a size-aware UMAP default from one to four workers. Native
+#'   GPU stages ignore this argument.
 #' @param keep_knn Keep KNN matrices in the returned object.
 #' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses the
 #'   standard UMAP fuzzy graph. `"binary"` uses a symmetric unit-weight graph
@@ -50,8 +54,8 @@
 #' distance is normally 0.01 and becomes 0.1 only under the documented
 #' wide-shell profile; learning rate is correspondingly 1 or 1.25. Use
 #' [umap_init()] to precompute and reuse package-native initial coordinates,
-#' or [umap_knn()] to supply an externally controlled KNN graph. Users needing
-#' These controls are scientifically consequential; fixing them is a scope
+#' or [umap_knn()] to supply an externally controlled KNN graph. These controls
+#' are scientifically consequential; fixing them is a scope
 #' decision made to keep one tested objective and update schedule aligned across
 #' CPU, Metal, and CUDA, not a claim that the values are universally optimal.
 #' Arbitrary `min_dist`, `spread`, epoch, learning-rate, negative-sampling, or
@@ -63,7 +67,9 @@
 #' x <- scale(as.matrix(iris[, 1:4]))
 #' fit <- umap(x, n_neighbors = 15, seed = 1)
 #' plot(fit)
-#' @export
+#' @name umap
+NULL
+
 validate_umap_request <- function(backend, graph_mode, n_components,
                                     n.cores, keep_knn) {
     backend <- resolve_embedding_backend(backend)
@@ -220,6 +226,8 @@ assemble_umap_matrix_fit <- function(input, prepared, knn_state,
     )
 }
 
+#' @rdname umap
+#' @export
 umap <- function(data, n_neighbors = NULL, n_components = 2L,
                     standardize = FALSE, pca_dims = NULL,
                     metric = c(
@@ -263,6 +271,8 @@ umap <- function(data, n_neighbors = NULL, n_components = 2L,
 #' and parameters for the landmark subset are unchanged.
 #'
 #' @inheritParams umap
+#' @param standardize Center and scale columns before landmark selection and
+#'   neighbor search. Unlike [umap()], landmark UMAP defaults to `TRUE`.
 #' @param landmarks `TRUE` for an automatic subset, a fraction such as `0.5`, a
 #'   landmark count, or explicit row indices.
 #' @param transform_k Number of landmark neighbors used to project
@@ -272,6 +282,8 @@ umap <- function(data, n_neighbors = NULL, n_components = 2L,
 #'   weights; `"binary"` uses a symmetric unit-weight sensitivity graph. The
 #'   fixed-reference projection algorithm is shared, but the fitted reference
 #'   layout and its recorded metadata retain the selected graph mode.
+#' @return A `fastEmbedR_embedding` object containing the full layout,
+#'   landmark and query indices, timings, and resolved parameters.
 #' @examples
 #' x <- scale(as.matrix(iris[1:60, 1:4]))
 #' fit <- landmark_umap(x, landmarks = 0.5, n_neighbors = 10, seed = 1)

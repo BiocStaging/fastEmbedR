@@ -13,28 +13,32 @@ precompute_knn(
 )
 }
 \arguments{
-\item{data}{Numeric matrix, numeric data frame, or a `float::float32` matrix
+\item{data}{Numeric matrix, numeric data frame, or a \code{float::float32}
+    matrix
 with observations in rows.}
 
 \item{k}{Number of non-self nearest neighbors to return.}
 
-\item{metric}{Distance metric: `"euclidean"`, `"cosine"`,
-`"correlation"`, or `"inner_product"`. Raw inner product is available only
+\item{metric}{Distance metric: \code{"euclidean"}, \code{"cosine"},
+\code{"correlation"}, or \code{"inner_product"}. Raw inner product is available
+only
 in CUDA builds that support it.}
 
-\item{backend}{Search backend: `"cpu"`, `"cuda"`, or `"metal"`.}
+\item{backend}{Search backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
 
 \item{n.cores}{Number of CPU cores. Native GPU backends ignore
 this argument.}
 }
 \value{
-A `fastEmbedR_knn` object. Host results contain `indices` and
-    `distances`; CUDA results additionally inherit from `fastEmbedR_gpu_knn`
-    and own device-resident index and distance buffers.
+A \code{fastEmbedR_knn} object. Host results contain \code{indices} and
+\code{distances}; CUDA results additionally inherit from
+\code{fastEmbedR_gpu_knn}
+and own device-resident index and distance buffers.
 }
 \description{
-`precompute_knn()` exposes the same package-native nearest-neighbor search
-used internally by [umap()] and [tsne()]. The search algorithm is chosen
+\code{precompute_knn()} exposes the same package-native nearest-neighbor search
+used internally by \code{\link[=umap]{umap()}} and \code{\link[=tsne]{tsne()}}.
+The search algorithm is chosen
 by fastEmbedR for the requested backend and is deliberately not a user
 parameter.
 }
@@ -46,8 +50,10 @@ larger inputs. CUDA uses package-native direct FAISS GPU exact search below
 The internal recall target is 0.99.
 
 The CUDA result remains on the GPU and can be passed directly to
-[umap_knn()] or [tsne_knn()] with `backend = "cuda"`. CPU and Metal
-results contain one-based `indices` and `distances` matrices. Every result
+\code{\link[=umap_knn]{umap_knn()}} or \code{\link[=tsne_knn]{tsne_knn()}} with
+\code{backend = "cuda"}. CPU and Metal
+results contain one-based \code{indices} and \code{distances} matrices. Every
+result
 excludes the observation itself. An unavailable requested backend raises an
 error; no CPU fallback is reported as GPU work.
 }

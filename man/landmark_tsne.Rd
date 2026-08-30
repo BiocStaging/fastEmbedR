@@ -31,71 +31,77 @@ landmark_tsne(
 \arguments{
 \item{data}{Numeric matrix/data frame with observations in rows.}
 
-\item{landmarks}{`TRUE` for an automatic subset, a fraction such as `0.5`, a
+\item{landmarks}{\code{TRUE} for an automatic subset, a fraction such as
+    \code{0.5}, a
 landmark count, or explicit row indices.}
 
-\item{reference_method}{Kept for compatibility. Only `"tsne"` is
+\item{reference_method}{Kept for compatibility. Only \code{"tsne"} is
 accepted in the cleaned package API.}
 
 \item{n_neighbors}{Number of non-self neighbors used to embed the landmark
-reference set. If `NULL`, it follows the same neighbor policy as
-[tsne()]: `ceiling(3 * perplexity)` under standard support.}
+reference set. If \code{NULL}, it follows the same neighbor policy as
+\code{\link[=tsne]{tsne()}}: \code{ceiling(3 * perplexity)} under standard
+support.}
 
 \item{perplexity}{t-SNE perplexity for the landmark reference embedding. If
-`NULL`, the optimizer chooses a safe value from the reference KNN width and
+\code{NULL}, the optimizer chooses a safe value from the reference KNN width and
 sample size.}
 
 \item{affinity_support}{Affinity candidate-neighborhood policy. The default
-`"standard"` uses `ceiling(3 * perplexity)` non-self neighbors so the
+\code{"standard"} uses \code{ceiling(3 * perplexity)} non-self neighbors so the
 Gaussian bandwidth search can produce non-uniform conditional
-probabilities. `"compact"` retains the older
-`ceiling(perplexity)`-neighbor approximation for explicit speed/memory
+probabilities. \code{"compact"} retains the older
+\code{ceiling(perplexity)}-neighbor approximation for explicit speed/memory
 experiments; it is not equivalent to conventional sparse t-SNE.}
 
 \item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
 than two use CPU exact repulsion; the current Metal and CUDA
-interpolation/FFT optimizers support only `2L`.}
+interpolation/FFT optimizers support only \code{2L}.}
 
-\item{standardize}{Center and scale columns before KNN. Defaults to `FALSE`
-so one-call results match a KNN object computed from the supplied matrix.}
+\item{standardize}{Center and scale columns before landmark selection and
+neighbor search. Unlike \code{\link[=tsne]{tsne()}}, landmark t-SNE defaults to
+\code{TRUE}.}
 
 \item{pca_dims}{Optional PCA dimension before KNN.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.}
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
+    \code{"metal"}.}
 
 \item{transform_k}{Number of landmark neighbors used to place non-landmarks.}
 
-\item{transform_perplexity}{Perplexity used by `transform_tsne()`.}
+\item{transform_perplexity}{Perplexity used by \code{transform_tsne()}.}
 
-\item{transform_iter}{Number of normal transform iterations. Use `0` for
+\item{transform_iter}{Number of normal transform iterations. Use \code{0} for
 projection-only landmarking with no transform refinement.}
 
 \item{transform_early_exaggeration_iter}{Number of transform early
 exaggeration iterations.}
 
 \item{transform_n_negatives}{Number of sampled reference negatives used by
-`transform_tsne()` on large landmark sets. GPU sampled transform repulsion
+\code{transform_tsne()} on large landmark sets. GPU sampled transform repulsion
 is native and experimental for large reference sets.}
 
 \item{initialization}{Initial placement for transformed observations.}
 
-\item{keep_knn}{If `TRUE`, retain KNN matrices in the returned object.}
+\item{keep_knn}{If \code{TRUE}, retain KNN matrices in the returned object.}
 
 \item{verbose}{Print optimizer progress.}
 
 \item{n.cores}{Number of CPU cores used by CPU KNN and CPU
 transform optimization. Native GPU stages ignore this argument.}
 
-\item{...}{Additional low-level parameters passed to [tsne_knn()].}
+\item{...}{Additional low-level parameters passed to
+    \code{\link[=tsne_knn]{tsne_knn()}}.}
 }
 \value{
-A `fastEmbedR_embedding` object.
+A \code{fastEmbedR_embedding} object.
 }
 \description{
-`landmark_tsne()` embeds a subset of observations with [tsne()], then
-places the remaining observations with `transform_tsne()`. Projection KNN
+\code{landmark_tsne()} embeds a subset of observations with
+\code{\link[=tsne]{tsne()}}, then
+places the remaining observations with \code{transform_tsne()}. Projection KNN
 searches only the
 fixed landmark reference: CPU uses native HNSW, Metal uses native exact or
 recall-tuned IVF-Flat, and CUDA keeps native exact or IVF-Flat results
@@ -103,7 +109,8 @@ resident on the device.
 }
 \examples{
 fit <- landmark_tsne(
-    as.matrix(iris[, 1:4]), landmarks = 0.5, perplexity = 5,
+    as.matrix(iris[, 1:4]),
+    landmarks = 0.5, perplexity = 5,
     early_exaggeration_iter = 5, n_iter = 10,
     transform_iter = 5, seed = 1
 )

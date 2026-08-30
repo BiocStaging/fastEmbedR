@@ -9,15 +9,21 @@
 fastEmbedR provides an opinionated fixed-policy float32 UMAP implementation
 and a configurable native interpolation-based t-SNE implementation from
 data or
-precomputed nearest-neighbor matrices. Use [umap()] or [tsne()]
-for one-call workflows, [precompute_knn()] to run the package-native CPU,
-Metal, or CUDA search separately, or pass reusable KNN `indices` and
-`distances` to [umap_knn()] or [tsne_knn()].
-Use [pca()] for reusable backend-native PCA and request
-`tsne_init = TRUE` when a t-SNE-ready initialization is needed.
-Score embeddings with [evaluate_embedding()]. Optional downstream graph
-utilities are available through [knn_graph()] and [graph_cluster()].
-Use [fastEmbedR_api()] for the complete canonical, advanced, diagnostic,
+precomputed nearest-neighbor matrices. Use \code{\link[=umap]{umap()}} or
+\code{\link[=tsne]{tsne()}}
+for one-call workflows, \code{\link[=precompute_knn]{precompute_knn()}} to run
+the package-native CPU,
+Metal, or CUDA search separately, or pass reusable KNN \code{indices} and
+\code{distances} to \code{\link[=umap_knn]{umap_knn()}} or
+\code{\link[=tsne_knn]{tsne_knn()}}.
+Use \code{\link[=pca]{pca()}} for reusable backend-native PCA and request
+\code{tsne_init = TRUE} when a t-SNE-ready initialization is needed.
+Score embeddings with \code{\link[=evaluate_embedding]{evaluate_embedding()}}.
+Optional downstream graph
+utilities are available through \code{\link[=knn_graph]{knn_graph()}} and
+\code{\link[=graph_cluster]{graph_cluster()}}.
+Use \code{\link[=fastEmbedR_api]{fastEmbedR_api()}} for the complete canonical,
+advanced, diagnostic,
 secondary, and compatibility API map.
 }
 \details{
@@ -47,7 +53,7 @@ Useful links:
 Authors:
 \itemize{
     \item Stefano Cacciatore \email{tkcaccia@gmail.com}
-    (\href{https://orcid.org/0000-0001-7052-7156}{ORCID})
+        (\href{https://orcid.org/0000-0001-7052-7156}{ORCID})
 }
 
 }

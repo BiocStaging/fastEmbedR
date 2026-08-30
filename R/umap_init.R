@@ -269,6 +269,11 @@ assemble_umap_initialization <- function(graph, initialized, cfg,
     class(out) <- c("fastEmbedR_umap_initialization", "list")
     out
 }
+#' Print a reusable UMAP initialization
+#'
+#' @param x A `fastEmbedR_umap_initialization` object.
+#' @param ... Unused.
+#' @return `x`, invisibly.
 #' @export
 print.fastEmbedR_umap_initialization <- function(x, ...) {
     cat("<fastEmbedR_umap_initialization>\n")

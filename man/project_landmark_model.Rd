@@ -22,14 +22,15 @@ project_landmark_model(
 )
 }
 \arguments{
-\item{model}{A model returned by [fit_landmark_model()].}
+\item{model}{A model returned by
+    \code{\link[=fit_landmark_model]{fit_landmark_model()}}.}
 
 \item{data}{The original full data matrix for a model fitted on a strict
 landmark subset, or a matrix containing only new query observations in the
 same feature space. A model fitted with all training rows as references
-always treats `data` as new query observations.}
+always treats \code{data} as new query observations.}
 
-\item{query_indices}{Optional rows of `data` to project.}
+\item{query_indices}{Optional rows of \code{data} to project.}
 
 \item{transform_k}{Number of reference neighbors.}
 
@@ -54,14 +55,14 @@ always treats `data` as new query observations.}
 \item{...}{Low-level t-SNE transform controls.}
 }
 \value{
-A `fastEmbedR_embedding`. For a strict landmark-subset model, passing
-    the original full matrix reassembles `layout` in original row order.
-    Otherwise `layout` contains only the supplied query rows. The returned
-    parameters record `projection_scope` as `"original_reconstruction"` or
-    `"held_out_query"`.
+A \code{fastEmbedR_embedding}. For a strict landmark-subset model, passing
+the original full matrix reassembles \code{layout} in original row order.
+Otherwise \code{layout} contains only the supplied query rows. The returned
+parameters record \code{projection_scope} as \code{"original_reconstruction"} or
+\code{"held_out_query"}.
 }
 \description{
-`project_landmark_model()` computes query-to-reference KNN with the same
+\code{project_landmark_model()} computes query-to-reference KNN with the same
 native backend policy used by the full embedding functions, then applies the
 method-specific fixed-reference transform. Landmark coordinates remain
 fixed.
@@ -70,7 +71,8 @@ fixed.
 x <- scale(as.matrix(iris[, 1:4]))
 selection <- select_landmarks(x, 0.5, seed = 1)
 model <- fit_landmark_model(
-    x, selection, method = "umap", n_neighbors = 10, seed = 1
+    x, selection,
+    method = "umap", n_neighbors = 10, seed = 1
 )
 fit <- project_landmark_model(model, x, refinement_epochs = 2)
 }

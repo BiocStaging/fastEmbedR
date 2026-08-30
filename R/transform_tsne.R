@@ -1513,6 +1513,8 @@ assemble_landmark_tsne_output <- function(state, request) {
 #' @param perplexity t-SNE perplexity for the landmark reference embedding. If
 #'   `NULL`, the optimizer chooses a safe value from the reference KNN width and
 #'   sample size.
+#' @param standardize Center and scale columns before landmark selection and
+#'   neighbor search. Unlike [tsne()], landmark t-SNE defaults to `TRUE`.
 #' @param transform_early_exaggeration_iter Number of transform early
 #'   exaggeration iterations.
 #' @param transform_n_negatives Number of sampled reference negatives used by

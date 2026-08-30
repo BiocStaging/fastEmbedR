@@ -3,8 +3,8 @@ title: "fastEmbedR: native UMAP and t-SNE workflows"
 author: "Stefano Cacciatore"
 output:
     rmarkdown::html_vignette:
-    toc: true
-    number_sections: true
+        toc: true
+        number_sections: true
 vignette: >
     %\VignetteIndexEntry{fastEmbedR: native UMAP and t-SNE workflows}
     %\VignetteEngine{knitr::rmarkdown}
@@ -89,9 +89,12 @@ fit_cuda <- fastEmbedR::umap(x, backend = "cuda", seed = 4)
 
 `n.cores` is a positive integer controlling CPU parallel work, including the
 native nearest-neighbor search and the CPU graph, affinity, and optimization
-stages that support parallel execution. Omitting it selects one CPU core.
-Metal and CUDA execute on their respective accelerators and ignore `n.cores`;
-the argument does not control GPU concurrency.
+stages that support parallel execution. For UMAP, the optimizer currently uses
+at most four workers and records the requested and effective values. When
+`n.cores` is omitted, KNN uses one worker, UMAP selects a size-aware default
+from one to four workers, and t-SNE uses its thread option, which defaults to
+four workers. Metal and CUDA execute on their respective accelerators and
+ignore `n.cores`; the argument does not control GPU concurrency.
 
 For an interactive session, set a default once and omit `backend` from later
 calls:

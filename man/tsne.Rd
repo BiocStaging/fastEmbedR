@@ -36,99 +36,106 @@ tsne(
 }
 \arguments{
 \item{data}{Numeric matrix/data frame with observations in rows, or a list
-containing KNN `indices` and `distances`.}
+containing KNN \code{indices} and \code{distances}.}
 
-\item{perplexity}{t-SNE perplexity. If `NULL`, uses the largest safe value
+\item{perplexity}{t-SNE perplexity. If \code{NULL}, uses the largest safe value
 up to 30 that is available for the input and selected affinity support.}
 
 \item{affinity_support}{Affinity candidate-neighborhood policy. The default
-`"standard"` uses `ceiling(3 * perplexity)` non-self neighbors so the
+\code{"standard"} uses \code{ceiling(3 * perplexity)} non-self neighbors so the
 Gaussian bandwidth search can produce non-uniform conditional
-probabilities. `"compact"` retains the older
-`ceiling(perplexity)`-neighbor approximation for explicit speed/memory
+probabilities. \code{"compact"} retains the older
+\code{ceiling(perplexity)}-neighbor approximation for explicit speed/memory
 experiments; it is not equivalent to conventional sparse t-SNE.}
 
 \item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
 than two use CPU exact repulsion; the current Metal and CUDA
-interpolation/FFT optimizers support only `2L`.}
+interpolation/FFT optimizers support only \code{2L}.}
 
 \item{init_data}{Optional original high-dimensional data matrix used only to
-compute PCA initialization with [tsne_pca_init()]. It is not used for
+compute PCA initialization with \code{\link[=tsne_pca_init]{tsne_pca_init()}}.
+It is not used for
 neighbor search or optimization.}
 
-\item{Y_init}{Optional explicit initial layout. Use [tsne_pca_init()] to
+\item{Y_init}{Optional explicit initial layout. Use
+    \code{\link[=tsne_pca_init]{tsne_pca_init()}} to
 precompute and reuse a PCA initialization.}
 
-\item{standardize}{Center and scale columns before KNN. Defaults to `FALSE`
+\item{standardize}{Center and scale columns before KNN. Defaults to \code{FALSE}
 so one-call results match a KNN object computed from the supplied matrix.}
 
 \item{pca_dims}{Optional PCA dimension before KNN.}
 
-\item{metric}{KNN distance metric for one-call matrix input: `"euclidean"`,
-`"cosine"`, `"correlation"`, or `"inner_product"`.}
+\item{metric}{KNN distance metric for one-call matrix input: \code{"euclidean"},
+\code{"cosine"}, \code{"correlation"}, or \code{"inner_product"}.}
 
-\item{nn}{Optional precomputed KNN output when `data` is a data matrix.}
+\item{nn}{Optional precomputed KNN output when \code{data} is a data matrix.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`. CPU KNN
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
+    \code{"metal"}. CPU KNN
 uses package-native HNSW. Metal uses package-native exact or recall-tuned
 IVF-Flat search. CUDA uses direct FAISS GPU exact search below 100,000
 rows and direct RAPIDS cuVS IVF-Flat above that threshold, then passes the
 device pointers directly to native CUDA t-SNE.
 Unsupported GPU requests fail clearly and are not relabelled CPU runs.}
 
-\item{keep_knn}{If `TRUE`, retain KNN matrices in the returned object.}
+\item{keep_knn}{If \code{TRUE}, retain KNN matrices in the returned object.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{n.cores}{Number of CPU cores used by CPU KNN and CPU
-t-SNE optimization. Native GPU optimizers ignore this argument.}
+\item{n.cores}{Number of CPU cores used by CPU KNN and CPU t-SNE
+optimization. \code{NULL} uses one CPU KNN worker and the package t-SNE thread
+option, which defaults to four. Native GPU optimizers ignore this
+argument.}
 
-\item{learning_rate}{Positive number or `"auto"`. With `"auto"`, the native
-optimizer uses `n / exaggeration` separately for each phase.}
+\item{learning_rate}{Positive number or \code{"auto"}. With \code{"auto"}, the
+    native
+optimizer uses \code{n / exaggeration} separately for each phase.}
 
 \item{early_exaggeration_iter}{Number of early-exaggeration iterations.}
 
-\item{early_exaggeration}{Early-exaggeration multiplier, or `"auto"` for
+\item{early_exaggeration}{Early-exaggeration multiplier, or \code{"auto"} for
 the default t-SNE rule.}
 
 \item{n_iter}{Number of normal optimization iterations after early
 exaggeration.}
 
-\item{exaggeration}{Normal-phase exaggeration. `NULL` means 1.}
+\item{exaggeration}{Normal-phase exaggeration. \code{NULL} means 1.}
 
 \item{initial_momentum}{Momentum during early exaggeration.}
 
 \item{final_momentum}{Momentum during normal optimization.}
 
-\item{max_step_norm}{Maximum per-point update norm. `"auto"` uses the
+\item{max_step_norm}{Maximum per-point update norm. \code{"auto"} uses the
 standard CPU limit and a tighter native Metal FFT-grid limit to avoid
-float32 outlier steps. Use `NULL` or `NA` to disable clipping.}
+float32 outlier steps. Use \code{NULL} or \code{NA} to disable clipping.}
 
-\item{negative_gradient_method}{`"auto"`, `"exact"`, or
-`"fft"`. On CPU, `"auto"` resolves to the native grid-FFT
+\item{negative_gradient_method}{\code{"auto"}, \code{"exact"}, or
+\code{"fft"}. On CPU, \code{"auto"} resolves to the native grid-FFT
 FIt-SNE-style negative-gradient approximation. Native GPU FFT/exact paths
 are used only when the corresponding compiled symbols are available;
 otherwise GPU requests fail clearly rather than falling back to CPU.}
 
-\item{record_costs}{If `TRUE`, compute diagnostic KL/cost traces.}
+\item{record_costs}{If \code{TRUE}, compute diagnostic KL/cost traces.}
 
-\item{auto_config}{If `TRUE`, choose missing t-SNE settings with a native
-C++ opt-SNE-inspired policy. The policy uses `n / early_exaggeration` for
-`"auto"` learning rate, chooses missing iteration limits, and enables
+\item{auto_config}{If \code{TRUE}, choose missing t-SNE settings with a native
+C++ opt-SNE-inspired policy. The policy uses \code{n / early_exaggeration} for
+\code{"auto"} learning rate, chooses missing iteration limits, and enables
 KLD-based early stopping only on CPU/small exact runs where the monitor is
 not prohibitively expensive. Explicit user-supplied values are respected.}
 
-\item{...}{Additional low-level parameters passed to [tsne_knn()].}
+\item{...}{Additional low-level parameters passed to
+    \code{\link[=tsne_knn]{tsne_knn()}}.}
 }
 \value{
-A `fastEmbedR_embedding` object.
+A \code{fastEmbedR_embedding} object.
 }
 \description{
-`tsne()` computes or reuses a KNN graph, then runs the package-native
+\code{tsne()} computes or reuses a KNN graph, then runs the package-native
 two-phase t-SNE optimizer. The default optimizer is CPU-native.
-Explicit `backend = "metal"` and `backend = "cuda"` requests use the
+Explicit \code{backend = "metal"} and \code{backend = "cuda"} requests use the
 matching package-native GPU optimizer when compiled and fail clearly if the
 requested backend is unavailable.
 The implementation follows published sparse-affinity and interpolation-based
@@ -139,17 +146,19 @@ The t-SNE API exposes the principal
 scientifically consequential optimizer controls: perplexity and candidate
 support, initialization, iteration counts, early and normal exaggeration,
 learning rate, momentum, clipping, and exact-versus-FFT repulsion. Setting
-`auto_config = FALSE` disables automatic iteration and stopping choices;
+\code{auto_config = FALSE} disables automatic iteration and stopping choices;
 explicit values always override automatic values. The matrix-input function
 deliberately does not expose a nearest-neighbor index type or tuning
 parameters: it uses the backend router with target recall 0.99. Supply an
-externally generated KNN object to [tsne_knn()] when search policy or
+externally generated KNN object to \code{\link[=tsne_knn]{tsne_knn()}} when
+search policy or
 affinity support must be controlled independently. The resolved settings
-are returned in `fit$parameters`.
+are returned in \code{fit$parameters}.
 }
 \examples{
 fit <- tsne(
-    as.matrix(iris[, 1:4]), perplexity = 5,
+    as.matrix(iris[, 1:4]),
+    perplexity = 5,
     early_exaggeration_iter = 5, n_iter = 10, seed = 1
 )
 plot(fit, labels = iris$Species)

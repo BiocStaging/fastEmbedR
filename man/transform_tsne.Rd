@@ -32,27 +32,28 @@ transform_tsne(
 }
 \arguments{
 \item{reference_layout}{Numeric reference embedding matrix, or a
-`fastEmbedR_embedding` object.}
+\code{fastEmbedR_embedding} object.}
 
-\item{knn}{Optional query-to-reference KNN list with `indices` and
-`distances`.}
+\item{knn}{Optional query-to-reference KNN list with \code{indices} and
+\code{distances}.}
 
 \item{reference_data}{Reference observations in the same preprocessing space
-used to fit `reference_layout`. Required only when `knn` is `NULL`.}
+used to fit \code{reference_layout}. Required only when \code{knn} is
+\code{NULL}.}
 
 \item{new_data}{Query observations in the same preprocessing space as
-`reference_data`. Required only when `knn` is `NULL`.}
+\code{reference_data}. Required only when \code{knn} is \code{NULL}.}
 
-\item{k}{Number of reference neighbors used for transform KNN. If `NULL`,
-uses at least `3 * perplexity`, matching the usual t-SNE affinity width.}
+\item{k}{Number of reference neighbors used for transform KNN. If \code{NULL},
+uses at least \code{3 * perplexity}, matching the usual t-SNE affinity width.}
 
 \item{perplexity}{Transform perplexity. The default is 5.}
 
-\item{initialization}{Initial query placement: `"median"` from reference
-neighbors, inverse-distance `"weighted"`, or `"random"`.}
+\item{initialization}{Initial query placement: \code{"median"} from reference
+neighbors, inverse-distance \code{"weighted"}, or \code{"random"}.}
 
 \item{Y_init}{Optional initial query embedding matrix. When supplied, it
-overrides `initialization`.}
+overrides \code{initialization}.}
 
 \item{n_iter}{Number of normal transform optimization iterations.}
 
@@ -68,12 +69,13 @@ overrides `initialization`.}
 
 \item{final_momentum}{Momentum used during normal optimization.}
 
-\item{max_grad_norm}{Maximum per-query gradient norm. Use `Inf` to disable.}
+\item{max_grad_norm}{Maximum per-query gradient norm. Use \code{Inf} to
+    disable.}
 
-\item{max_step_norm}{Maximum per-query step norm. Use `Inf` to disable.}
+\item{max_step_norm}{Maximum per-query step norm. Use \code{Inf} to disable.}
 
 \item{n_negatives}{Number of sampled reference points for repulsion when
-the reference set is larger than `exact_repulsion_threshold`. GPU sampled
+the reference set is larger than \code{exact_repulsion_threshold}. GPU sampled
 repulsion is native and experimental for large reference sets.}
 
 \item{exact_repulsion_threshold}{Use exact query-reference repulsion at or
@@ -83,8 +85,9 @@ below this reference count.}
 
 \item{seed}{Random seed.}
 
-\item{backend}{Backend used for query KNN when `knn` is `NULL`; `"metal"`
-and `"cuda"` run their native fixed-reference transform optimizers when
+\item{backend}{Backend used for query KNN when \code{knn} is \code{NULL};
+    \code{"metal"}
+and \code{"cuda"} run their native fixed-reference transform optimizers when
 those backends were compiled. Explicit unavailable GPU requests fail; CPU
 work is never reported as Metal or CUDA.}
 
@@ -94,7 +97,7 @@ work is never reported as Metal or CUDA.}
 A numeric matrix with one row per query observation.
 }
 \description{
-`transform_tsne()` places query observations into a fixed reference t-SNE
+\code{transform_tsne()} places query observations into a fixed reference t-SNE
 embedding. It follows a fixed-reference t-SNE transform design:
 query-to-reference affinities are computed from KNN distances, query points
 are initialized from nearby reference points, and optimization moves only the
@@ -107,7 +110,8 @@ query_knn <- list(
     distances = matrix(c(0.1, 0.2, 0.15, 0.25), 2L, 2L, byrow = TRUE)
 )
 query_layout <- transform_tsne(
-    reference, knn = query_knn, perplexity = 0.5,
+    reference,
+    knn = query_knn, perplexity = 0.5,
     n_iter = 2, exact_repulsion_threshold = 10, seed = 1
 )
 }

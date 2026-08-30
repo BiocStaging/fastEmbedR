@@ -1227,6 +1227,26 @@ sampled_score_indices <- function(x,
     out
 }
 
+#' Print or plot an embedding result
+#'
+#' These methods summarize a `fastEmbedR_embedding` object or plot its first
+#' two layout dimensions.
+#'
+#' @param x A `fastEmbedR_embedding` object.
+#' @param labels Optional labels used to color plotted observations.
+#' @param pch Plotting symbol passed to [graphics::plot()].
+#' @param bg Point background colors. When `NULL`, integer colors are derived
+#'   from `labels`, or white is used when labels are absent.
+#' @param col Point border or foreground color.
+#' @param xlab,ylab Axis labels.
+#' @param main Plot title. `NULL` derives a title from the fitted method.
+#' @param ... Additional arguments passed to [graphics::plot()] by the plot
+#'   method. The print method ignores them.
+#' @return The input object, invisibly.
+#' @name fastEmbedR_embedding_methods
+NULL
+
+#' @rdname fastEmbedR_embedding_methods
 #' @export
 print.fastEmbedR_embedding <- function(x, ...) {
     cat("fastEmbedR embedding\n")
@@ -1268,6 +1288,7 @@ print.fastEmbedR_embedding <- function(x, ...) {
     invisible(x)
 }
 
+#' @rdname fastEmbedR_embedding_methods
 #' @export
 plot.fastEmbedR_embedding <- function(x,
                                         labels = x$labels,

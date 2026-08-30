@@ -13,25 +13,27 @@ prepare_tsne_knn(
 )
 }
 \arguments{
-\item{indices}{A list containing KNN `indices` and `distances`, or an integer
+\item{indices}{A list containing KNN \code{indices} and \code{distances}, or an
+    integer
 KNN index matrix.}
 
-\item{distances}{Numeric KNN distance matrix matching `indices`. Leave
-`NULL` when `indices` is a KNN list.}
+\item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave
+\code{NULL} when \code{indices} is a KNN list.}
 
 \item{n_neighbors}{Optional number of non-self neighbor columns to use from
 the supplied KNN graph. This lets you compute a wide KNN once and reuse
-its first columns for comparable tests. If omitted, `affinity_support`
+its first columns for comparable tests. If omitted, \code{affinity_support}
 determines the width. An explicit value must be at least the width implied
-by `affinity_support`.}
+by \code{affinity_support}.}
 
-\item{perplexity}{t-SNE perplexity. If `NULL`, the optimizer chooses a safe
+\item{perplexity}{t-SNE perplexity. If \code{NULL}, the optimizer chooses a safe
 value from the supplied KNN width and sample size.}
 
-\item{affinity_support}{Affinity candidate-neighborhood policy. `"standard"`
-(default) uses `ceiling(3 * perplexity)` non-self neighbors, matching the
-conventional sparse t-SNE support rule. `"compact"` uses only
-`ceiling(perplexity)` neighbors and is an explicit approximation with
+\item{affinity_support}{Affinity candidate-neighborhood policy.
+    \code{"standard"}
+(default) uses \code{ceiling(3 * perplexity)} non-self neighbors, matching the
+conventional sparse t-SNE support rule. \code{"compact"} uses only
+\code{ceiling(perplexity)} neighbors and is an explicit approximation with
 nearly uniform conditional probabilities when the support equals the
 target perplexity.}
 }
@@ -39,9 +41,10 @@ target perplexity.}
 A prepared t-SNE KNN object.
 }
 \description{
-`prepare_tsne_knn()` strips self-neighbors, trims to the requested
+\code{prepare_tsne_knn()} strips self-neighbors, trims to the requested
 non-self width, and stores compact KNN matrices once. Pass the returned
-object to [tsne_knn()] for repeated seeds or backend comparisons without
+object to \code{\link[=tsne_knn]{tsne_knn()}} for repeated seeds or backend
+comparisons without
 repeating KNN normalization/materialization.
 }
 \examples{
@@ -51,7 +54,8 @@ diag(d) <- Inf
 k <- 15L
 idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
 dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
-    nrow = nrow(d), byrow = TRUE)
+    nrow = nrow(d), byrow = TRUE
+)
 prep <- prepare_tsne_knn(idx, dst, perplexity = 5)
 y1 <- tsne_knn(prep, seed = 1, early_exaggeration_iter = 5, n_iter = 10)
 y2 <- tsne_knn(prep, seed = 2, early_exaggeration_iter = 5, n_iter = 10)

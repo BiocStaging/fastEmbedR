@@ -37,7 +37,7 @@ evaluate_embedding(
 
 \item{primary_k}{Neighbor size used for scalar trustworthiness, continuity,
 label accuracy, rare-class recall, density summaries, and rank-error
-metrics. The default `NULL` preserves the historical k = 15 behavior when
+metrics. The default \code{NULL} preserves the historical k = 15 behavior when
 possible.}
 
 \item{reference_nn}{Optional precomputed high-dimensional nearest-neighbor
@@ -69,7 +69,7 @@ nearest-neighbor searches. Ignored by native GPU metric backends.}
 }
 \value{
 A one-row data frame with local, global, label-aware, batch-aware,
-    and metadata columns. Per-class recall is also attached as an attribute.
+and metadata columns. Per-class recall is also attached as an attribute.
 }
 \description{
 Trustworthiness and continuity use their standard rank-penalty definitions.
@@ -80,7 +80,8 @@ Float32 inputs are sampled before conversion to a dense double matrix.
 \examples{
 x <- scale(as.matrix(iris[, 1:4]))
 metrics <- evaluate_embedding(
-    x, x[, 1:2], labels = iris$Species, k = 5,
+    x, x[, 1:2],
+    labels = iris$Species, k = 5,
     sample_size_for_local_metrics = 100,
     sample_size_for_global_metrics = 100,
     seed = 1

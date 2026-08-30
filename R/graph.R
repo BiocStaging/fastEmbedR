@@ -415,6 +415,15 @@ graph_backend_name <- function(primary, fallback) {
     if (valid(primary)) as.character(primary) else as.character(fallback)
 }
 
+#' Print graph and graph-clustering results
+#'
+#' @param x A `fastEmbedR_graph` or `fastEmbedR_graph_cluster` object.
+#' @param ... Unused.
+#' @return `x`, invisibly.
+#' @name fastEmbedR_graph_methods
+NULL
+
+#' @rdname fastEmbedR_graph_methods
 #' @export
 print.fastEmbedR_graph <- function(x, ...) {
     cat("fastEmbedR KNN graph\n")
@@ -428,6 +437,7 @@ print.fastEmbedR_graph <- function(x, ...) {
     invisible(x)
 }
 
+#' @rdname fastEmbedR_graph_methods
 #' @export
 print.fastEmbedR_graph_cluster <- function(x, ...) {
     cat("fastEmbedR graph clustering\n")

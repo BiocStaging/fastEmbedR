@@ -1,7 +1,7 @@
 Package: fastEmbedR
 Type: Package
 Title: Native UMAP and Interpolation-Based t-SNE Embeddings
-Version: 0.99.16
+Version: 0.99.17
 Authors@R: person(
     given = "Stefano",
     family = "Cacciatore",
@@ -65,5 +65,6 @@ SystemRequirements: C++17; optional Metal backend: Apple Silicon with macOS
     RAPIDS cuVS for CUDA nearest-neighbor search; RAPIDS RAFT and RMM only when
     CUDA TSVD initialization is enabled.
 VignetteBuilder: knitr
-Config/roxygen2/version: 8.0.0
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.0
 Config/testthat/edition: 3

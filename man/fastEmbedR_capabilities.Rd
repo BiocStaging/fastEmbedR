@@ -8,22 +8,23 @@ fastEmbedR_capabilities()
 }
 \value{
 A data frame with one row per backend or backend component. In
-    addition to logical availability columns, the result records the public
-    backend name, detected device, native KNN engine, internal precision,
-    linked runtime families, and an explanation when a component is
-    unavailable. Device-name queries are best effort and do not change the
-    capability decision made by the compiled native probes.
+addition to logical availability columns, the result records the public
+backend name, detected device, native KNN engine, internal precision,
+linked runtime families, and an explanation when a component is
+unavailable. Device-name queries are best effort and do not change the
+capability decision made by the compiled native probes.
 }
 \description{
 Reports whether the installed fastEmbedR build can provide nearest-neighbor
 search, embedding optimization, and graph clustering through each native
 execution backend. This function performs capability checks only; it does
-not change the backend selected by [fastEmbedR_backend()].
+not change the backend selected by
+\code{\link[=fastEmbedR_backend]{fastEmbedR_backend()}}.
 }
 \details{
-The `cuvs` row describes the RAPIDS cuVS nearest-neighbor component used by
+The \code{cuvs} row describes the RAPIDS cuVS nearest-neighbor component used by
 the CUDA backend. It is diagnostic information and is not itself a value
-accepted by public `backend` arguments.
+accepted by public \code{backend} arguments.
 }
 \examples{
 fastEmbedR_capabilities()

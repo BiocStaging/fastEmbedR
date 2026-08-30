@@ -1,3 +1,14 @@
+# fastEmbedR 0.99.17
+
+- Regenerate the complete reference manual from authoritative roxygen source
+  and restore the public help topics for `fastEmbedR_api()`, `umap()`,
+  `prepare_umap_knn()`, and `tsne_knn()` after the R-source refactor.
+- Document S3 print and plot methods, float32 return behavior, landmark
+  preprocessing defaults, and stage-specific CPU thread handling.
+- Retain `Biobase` as the package's explicit Bioconductor dependency and use
+  its bundled expression example in the vignette. Fix vignette navigation and
+  backend guidance.
+
 # fastEmbedR 0.99.16
 
 - Add `Biobase` as a genuine Bioconductor dependency and exercise

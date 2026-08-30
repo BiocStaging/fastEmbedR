@@ -454,6 +454,11 @@ precompute_query_knn <- function(reference,
     out
 }
 
+#' Print a precomputed nearest-neighbor object
+#'
+#' @param x A `fastEmbedR_knn` object.
+#' @param ... Unused.
+#' @return `x`, invisibly.
 #' @export
 print.fastEmbedR_knn <- function(x, ...) {
     cat("<fastEmbedR_knn>\n")

@@ -17,27 +17,29 @@ precompute_query_knn(
 \item{reference}{Reference observations in rows.}
 
 \item{query}{Query observations in rows and the same feature space as
-`reference`.}
+\code{reference}.}
 
 \item{k}{Number of non-self nearest neighbors to return.}
 
-\item{metric}{Distance metric: `"euclidean"`, `"cosine"`,
-`"correlation"`, or `"inner_product"`. Raw inner product is available only
+\item{metric}{Distance metric: \code{"euclidean"}, \code{"cosine"},
+\code{"correlation"}, or \code{"inner_product"}. Raw inner product is available
+only
 in CUDA builds that support it.}
 
-\item{backend}{Search backend: `"cpu"`, `"cuda"`, or `"metal"`.}
+\item{backend}{Search backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.}
 
 \item{n.cores}{Number of CPU cores. Native GPU backends ignore
 this argument.}
 }
 \value{
-A `fastEmbedR_knn` object with one row per query observation and
-    one-based indices into `reference`.
+A \code{fastEmbedR_knn} object with one row per query observation and
+one-based indices into \code{reference}.
 }
 \description{
-`precompute_query_knn()` searches a fixed reference matrix for every row of
+\code{precompute_query_knn()} searches a fixed reference matrix for every row of
 a query matrix. It uses the same package-native backend family and routing
-policy as [precompute_knn()], but does not compute unnecessary
+policy as \code{\link[=precompute_knn]{precompute_knn()}}, but does not compute
+unnecessary
 reference-to-reference or query-to-query neighbors.
 }
 \details{

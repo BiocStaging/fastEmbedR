@@ -262,7 +262,9 @@ fast_knn_umap_cuda_gpu_core <- function(
 #' prep <- prepare_umap_knn(idx, dst)
 #' y1 <- umap_knn(prep, seed = 1)
 #' y2 <- umap_knn(prep, seed = 2)
-#' @export
+#' @name prepare_umap_knn
+NULL
+
 prepared_umap_auto_policy <- function(knn, cfg) {
     distances <- if (knn$col_start != 0L ||
         knn$n_neighbors != ncol(knn$distances)) {
@@ -357,6 +359,8 @@ build_prepared_umap_graph <- function(knn, cfg, graph_mode) {
     list(graph = graph, config = cfg)
 }
 
+#' @rdname prepare_umap_knn
+#' @export
 prepare_umap_knn <- function(indices,
                                 distances = NULL,
                                 backend = NULL,
@@ -1403,8 +1407,10 @@ spectral_knn_init <- function(
 #' @param seed Integer random seed.
 #' @param verbose Print native optimizer progress.
 #' @param backend Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.
-#' @param n.cores Number of CPU cores used by CPU UMAP. Native GPU backends
-#'   ignore this argument.
+#' @param n.cores Requested CPU core count. CPU UMAP currently uses at most
+#'   four workers and records both requested and effective values. `NULL`
+#'   selects a size-aware default from one to four workers. Native GPU
+#'   backends ignore this argument.
 #' @param graph_mode Graph weighting mode. `"fuzzy"` (the default) uses
 #'   standard UMAP fuzzy graph weights. `"binary"` uses a symmetric
 #'   unit-weight sensitivity graph.
@@ -1418,8 +1424,22 @@ spectral_knn_init <- function(
 #' reuse both the prepared graph and package-native initialization. This API is
 #' intended for fixed-boundary comparisons and repeated seeds, not arbitrary
 #' UMAP hyperparameter sweeps.
-#' @return A numeric embedding matrix with `nrow(indices)` rows and
-#'   `n_components` columns.
+#' @return An embedding matrix with `nrow(indices)` rows and `n_components`
+#'   columns. Float32 KNN input returns a `float::float32` layout; ordinary R
+#'   input returns a numeric matrix. Resolved settings are stored in
+#'   `attr(layout, "fastEmbedR_config")`.
+#' @examples
+#' x <- scale(as.matrix(iris[, 1:4]))
+#' d <- as.matrix(stats::dist(x))
+#' diag(d) <- Inf
+#' k <- 10L
+#' idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
+#' dst <- matrix(
+#'     d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
+#'     nrow = nrow(d), byrow = TRUE
+#' )
+#' layout <- umap_knn(idx, dst, seed = 1)
+#' plot(layout, pch = 21, bg = iris$Species)
 #' @export
 umap_knn <- function(indices,
                         distances = NULL,

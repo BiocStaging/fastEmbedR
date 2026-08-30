@@ -40,8 +40,9 @@
 #'   only by the CUDA backend. Unavailable GPU requests fail without CPU
 #'   fallback.
 #' @param n.cores Number of CPU cores used for CPU affinity construction and
-#'   t-SNE optimization. No KNN search is performed. Metal and CUDA
-#'   optimizers ignore this argument.
+#'   t-SNE optimization. `NULL` uses the package t-SNE thread option, which
+#'   defaults to four. No KNN search is performed. Metal and CUDA optimizers
+#'   ignore this argument.
 #' @param ... Additional low-level optimizer controls, including `theta` and
 #'   `min_gain`.
 #' @return An embedding matrix with settings stored in
@@ -63,7 +64,9 @@
 #'     init_data = x, perplexity = 5,
 #'     early_exaggeration_iter = 5, n_iter = 10
 #' )
-#' @export
+#' @name tsne_knn
+NULL
+
 validate_gpu_tsne_knn <- function(info, n_neighbors, perplexity, support) {
     if (isTRUE(info$has_self)) {
         stop(
@@ -208,6 +211,8 @@ run_host_tsne_knn <- function(resolved, init_data, settings, extra) {
     )
 }
 
+#' @rdname tsne_knn
+#' @export
 tsne_knn <- function(
     indices, distances = NULL, n_neighbors = NULL, perplexity = NULL,
     affinity_support = c("standard", "compact"), n_components = 2L,
@@ -664,8 +669,10 @@ run_matrix_input_tsne <- function(data, nn, settings, extra, input_float) {
 #'   Unsupported GPU requests fail clearly and are not relabelled CPU runs.
 #' @param keep_knn If `TRUE`, retain KNN matrices in the returned object.
 #' @param verbose Print optimizer progress.
-#' @param n.cores Number of CPU cores used by CPU KNN and CPU
-#'   t-SNE optimization. Native GPU optimizers ignore this argument.
+#' @param n.cores Number of CPU cores used by CPU KNN and CPU t-SNE
+#'   optimization. `NULL` uses one CPU KNN worker and the package t-SNE thread
+#'   option, which defaults to four. Native GPU optimizers ignore this
+#'   argument.
 #' @param learning_rate Positive number or `"auto"`. With `"auto"`, the native
 #'   optimizer uses `n / exaggeration` separately for each phase.
 #' @param early_exaggeration_iter Number of early-exaggeration iterations.

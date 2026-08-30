@@ -32,44 +32,48 @@ tsne_knn(
 )
 }
 \arguments{
-\item{indices}{A list containing KNN `indices` and `distances`, or an integer
+\item{indices}{A list containing KNN \code{indices} and \code{distances}, or an
+    integer
 KNN index matrix.}
 
-\item{distances}{Numeric KNN distance matrix matching `indices`. Leave
-`NULL` when `indices` is a KNN list.}
+\item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave
+\code{NULL} when \code{indices} is a KNN list.}
 
 \item{n_neighbors}{Optional number of non-self neighbor columns to use from
 the supplied KNN graph. This lets you compute a wide KNN once and reuse
-its first columns for comparable tests. If omitted, `affinity_support`
+its first columns for comparable tests. If omitted, \code{affinity_support}
 determines the width. An explicit value must be at least the width implied
-by `affinity_support`.}
+by \code{affinity_support}.}
 
-\item{perplexity}{t-SNE perplexity. If `NULL`, the optimizer chooses a safe
+\item{perplexity}{t-SNE perplexity. If \code{NULL}, the optimizer chooses a safe
 value from the supplied KNN width and sample size.}
 
-\item{affinity_support}{Affinity candidate-neighborhood policy. `"standard"`
-(default) uses `ceiling(3 * perplexity)` non-self neighbors, matching the
-conventional sparse t-SNE support rule. `"compact"` uses only
-`ceiling(perplexity)` neighbors and is an explicit approximation with
+\item{affinity_support}{Affinity candidate-neighborhood policy.
+    \code{"standard"}
+(default) uses \code{ceiling(3 * perplexity)} non-self neighbors, matching the
+conventional sparse t-SNE support rule. \code{"compact"} uses only
+\code{ceiling(perplexity)} neighbors and is an explicit approximation with
 nearly uniform conditional probabilities when the support equals the
 target perplexity.}
 
 \item{n_components}{Output dimensionality, from 1 to 3. Dimensions other
 than two use CPU exact repulsion; the current Metal and CUDA
-interpolation/FFT optimizers support only `2L`.}
+interpolation/FFT optimizers support only \code{2L}.}
 
 \item{init_data}{Optional original high-dimensional data matrix used only to
 compute PCA initialization for KNN-input runs. It is not used for neighbor
 search or optimization.}
 
-\item{Y_init}{Optional explicit initial layout. Use [tsne_pca_init()] to
+\item{Y_init}{Optional explicit initial layout. Use
+    \code{\link[=tsne_pca_init]{tsne_pca_init()}} to
 precompute and reuse a PCA initialization.}
 
 \item{seed}{Random seed.}
 
 \item{verbose}{Print optimizer progress.}
 
-\item{backend}{Optimizer backend: `"cpu"`, `"cuda"`, or `"metal"`. This
+\item{backend}{Optimizer backend: \code{"cpu"}, \code{"cuda"}, or
+    \code{"metal"}. This
 selects affinity construction and layout optimization only; it does not
 trigger a nearest-neighbor search. Host KNN matrices can be consumed by
 any compiled backend. A CUDA-resident KNN object can be consumed directly
@@ -77,63 +81,66 @@ only by the CUDA backend. Unavailable GPU requests fail without CPU
 fallback.}
 
 \item{n.cores}{Number of CPU cores used for CPU affinity construction and
-t-SNE optimization. No KNN search is performed. Metal and CUDA
-optimizers ignore this argument.}
+t-SNE optimization. \code{NULL} uses the package t-SNE thread option, which
+defaults to four. No KNN search is performed. Metal and CUDA optimizers
+ignore this argument.}
 
-\item{learning_rate}{Positive number or `"auto"`. With `"auto"`, the native
-optimizer uses `n / exaggeration` separately for each phase.}
+\item{learning_rate}{Positive number or \code{"auto"}. With \code{"auto"}, the
+    native
+optimizer uses \code{n / exaggeration} separately for each phase.}
 
 \item{early_exaggeration_iter}{Number of early-exaggeration iterations.}
 
-\item{early_exaggeration}{Early-exaggeration multiplier, or `"auto"` for
+\item{early_exaggeration}{Early-exaggeration multiplier, or \code{"auto"} for
 the default t-SNE rule.}
 
 \item{n_iter}{Number of normal optimization iterations after early
 exaggeration.}
 
-\item{exaggeration}{Normal-phase exaggeration. `NULL` means 1.}
+\item{exaggeration}{Normal-phase exaggeration. \code{NULL} means 1.}
 
 \item{initial_momentum}{Momentum during early exaggeration.}
 
 \item{final_momentum}{Momentum during normal optimization.}
 
-\item{max_step_norm}{Maximum per-point update norm. `"auto"` uses the
+\item{max_step_norm}{Maximum per-point update norm. \code{"auto"} uses the
 standard CPU limit and a tighter native Metal FFT-grid limit to avoid
-float32 outlier steps. Use `NULL` or `NA` to disable clipping.}
+float32 outlier steps. Use \code{NULL} or \code{NA} to disable clipping.}
 
-\item{negative_gradient_method}{`"auto"`, `"exact"`, or
-`"fft"`. On CPU, `"auto"` resolves to the native grid-FFT
+\item{negative_gradient_method}{\code{"auto"}, \code{"exact"}, or
+\code{"fft"}. On CPU, \code{"auto"} resolves to the native grid-FFT
 FIt-SNE-style negative-gradient approximation. Native GPU FFT/exact paths
 are used only when the corresponding compiled symbols are available;
 otherwise GPU requests fail clearly rather than falling back to CPU.}
 
-\item{record_costs}{If `TRUE`, compute diagnostic KL/cost traces.}
+\item{record_costs}{If \code{TRUE}, compute diagnostic KL/cost traces.}
 
-\item{auto_config}{If `TRUE`, choose missing t-SNE settings with a native
-C++ opt-SNE-inspired policy. The policy uses `n / early_exaggeration` for
-`"auto"` learning rate, chooses missing iteration limits, and enables
+\item{auto_config}{If \code{TRUE}, choose missing t-SNE settings with a native
+C++ opt-SNE-inspired policy. The policy uses \code{n / early_exaggeration} for
+\code{"auto"} learning rate, chooses missing iteration limits, and enables
 KLD-based early stopping only on CPU/small exact runs where the monitor is
 not prohibitively expensive. Explicit user-supplied values are respected.}
 
-\item{...}{Additional low-level optimizer controls, including `theta` and
-`min_gain`.}
+\item{...}{Additional low-level optimizer controls, including \code{theta} and
+\code{min_gain}.}
 }
 \value{
 An embedding matrix with settings stored in
-    `attr(layout, "fastEmbedR_config")`. Float32 KNN distances, including a
-    CUDA-resident KNN object, produce a `float::float32` layout; host double
-    distances produce a standard R double matrix. Native optimization uses
-    float32 in both cases. The exact returned representation is recorded in
-    `attr(layout, "precision")` and in `fastEmbedR_config$output_precision`.
+\code{attr(layout, "fastEmbedR_config")}. Float32 KNN distances, including a
+CUDA-resident KNN object, produce a \code{float::float32} layout; host double
+distances produce a standard R double matrix. Native optimization uses
+float32 in both cases. The exact returned representation is recorded in
+\code{attr(layout, "precision")} and in
+\code{fastEmbedR_config$output_precision}.
 }
 \description{
-`tsne_knn()` is the direct KNN-input entry point for the native
+\code{tsne_knn()} is the direct KNN-input entry point for the native
 interpolation-based optimizer. It accepts either a list containing KNN
-`indices`
-and `distances` or separate KNN index and distance matrices. The supplied
+\code{indices}
+and \code{distances} or separate KNN index and distance matrices. The supplied
 neighbors are used directly: this function performs no neighbor search or
-input scaling. PCA is computed only when `init_data` is supplied and
-`Y_init` is absent.
+input scaling. PCA is computed only when \code{init_data} is supplied and
+\code{Y_init} is absent.
 The optimizer follows the sparse-affinity and interpolation-based t-SNE
 literature while using fastEmbedR's own R API and native kernels.
 }
@@ -144,7 +151,10 @@ diag(d) <- Inf
 k <- 15L
 idx <- t(apply(d, 1L, order))[, seq_len(k), drop = FALSE]
 dst <- matrix(d[cbind(rep(seq_len(nrow(d)), each = k), as.vector(t(idx)))],
-    nrow = nrow(d), byrow = TRUE)
-layout <- tsne_knn(idx, dst, init_data = x, perplexity = 5,
-    early_exaggeration_iter = 5, n_iter = 10)
+    nrow = nrow(d), byrow = TRUE
+)
+layout <- tsne_knn(idx, dst,
+    init_data = x, perplexity = 5,
+    early_exaggeration_iter = 5, n_iter = 10
+)
 }

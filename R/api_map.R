@@ -20,7 +20,9 @@
 #' @examples
 #' api <- fastEmbedR_api()
 #' api[api$tier == "canonical", c("function", "purpose", "return_class")]
-#' @export
+#' @name fastEmbedR_api
+NULL
+
 fastembedr_api_row <- function(
     function_name, tier, purpose, input_classes, return_class,
     cpu, metal, cuda, operation, device_residency,
@@ -272,6 +274,8 @@ fastembedr_api_secondary_rows <- function() {
     )
 }
 
+#' @rdname fastEmbedR_api
+#' @export
 fastEmbedR_api <- function() {
     row_groups <- list(
         fastembedr_api_configuration_rows(),

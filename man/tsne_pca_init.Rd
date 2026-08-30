@@ -15,41 +15,44 @@ tsne_pca_init(
 )
 }
 \arguments{
-\item{data}{Numeric matrix/data frame or `float::float32` matrix with
+\item{data}{Numeric matrix/data frame or \code{float::float32} matrix with
 observations in rows.}
 
-\item{n_components}{Output dimensionality, usually `2`.}
+\item{n_components}{Output dimensionality, usually \code{2}.}
 
 \item{seed}{Random seed used by the truncated PCA subspace sketch.}
 
-\item{backend}{Backend used for PCA when available: `"cpu"`, `"metal"`,
-or `"cuda"`.}
+\item{backend}{Backend used for PCA when available: \code{"cpu"},
+    \code{"metal"},
+or \code{"cuda"}.}
 
 \item{n.cores}{Number of CPU cores used for CPU PCA initialization. Metal
 and CUDA ignore this argument.}
 
-\item{cache_file}{Optional `.rds` file path. If it exists and
-`force_recompute = FALSE`, the saved initialization is loaded and
+\item{cache_file}{Optional \code{.rds} file path. If it exists and
+\code{force_recompute = FALSE}, the saved initialization is loaded and
 validated.}
 
-\item{force_recompute}{If `TRUE`, ignore any existing cache and recompute.}
+\item{force_recompute}{If \code{TRUE}, ignore any existing cache and recompute.}
 }
 \value{
-An initialization matrix suitable for `Y_init`. Float32 input is
-    returned as `float::float32` when the selected PCA backend preserves it.
+An initialization matrix suitable for \code{Y_init}. Float32 input is
+returned as \code{float::float32} when the selected PCA backend preserves it.
 }
 \description{
-`tsne_pca_init()` creates the small-scale PCA initialization used by
-[tsne()] and [tsne_knn()]. Supplying `cache_file` stores the result
+\code{tsne_pca_init()} creates the small-scale PCA initialization used by
+\code{\link[=tsne]{tsne()}} and \code{\link[=tsne_knn]{tsne_knn()}}. Supplying
+\code{cache_file} stores the result
 as an RDS file; later calls with the same path reuse the saved matrix instead
 of recomputing PCA. This is useful when comparing several KNN backends with
-exactly the same initialization. For `backend = "cuda"`, fastEmbedR requires
+exactly the same initialization. For \code{backend = "cuda"}, fastEmbedR
+requires
 native RAPIDS RAFT TSVD support compiled into the CUDA backend and fails
 loudly if that backend is unavailable. Metal uses fastEmbedR's native
 float32 block-subspace TSVD with native Metal centering/scaling, Metal
 Performance Shaders matrix products, and one resident GPU workspace. CPU
 uses fastEmbedR's native float32 blocked RSVD implementation. The package
-does not call Python or `reticulate` for PCA initialization.
+does not call Python or \code{reticulate} for PCA initialization.
 }
 \examples{
 init <- tsne_pca_init(as.matrix(iris[, 1:4]), seed = 1)

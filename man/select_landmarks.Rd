@@ -7,9 +7,10 @@
 select_landmarks(data, landmarks = TRUE, seed = 4L, n.cores = NULL)
 }
 \arguments{
-\item{data}{Numeric matrix, data frame, or `float::float32` matrix.}
+\item{data}{Numeric matrix, data frame, or \code{float::float32} matrix.}
 
-\item{landmarks}{`TRUE` for an automatic count, a fraction in `(0, 1)`, a
+\item{landmarks}{\code{TRUE} for an automatic count, a fraction in \verb{(0,
+    1)}, a
 landmark count, or explicit row indices.}
 
 \item{seed}{Random seed used by projection-based landmark selection.}
@@ -17,11 +18,11 @@ landmark count, or explicit row indices.}
 \item{n.cores}{Number of CPU cores used for float32 selection features.}
 }
 \value{
-A `fastEmbedR_landmark_selection` object containing `indices` and
-    `query_indices`.
+A \code{fastEmbedR_landmark_selection} object containing \code{indices} and
+\code{query_indices}.
 }
 \description{
-`select_landmarks()` separates row indices into a representative landmark
+\code{select_landmarks()} separates row indices into a representative landmark
 reference and its complementary query set. It does not embed or project the
 data.
 }

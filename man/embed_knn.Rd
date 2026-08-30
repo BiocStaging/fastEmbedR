@@ -17,14 +17,15 @@ embed_knn(
 )
 }
 \arguments{
-\item{indices}{A list containing KNN `indices` and `distances`, or an integer
+\item{indices}{A list containing KNN \code{indices} and \code{distances}, or an
+    integer
 KNN index matrix. If a self-neighbor first column is present it is removed
 automatically.}
 
-\item{distances}{Numeric KNN distance matrix matching `indices`. Leave as
-`NULL` when `indices` is a KNN list.}
+\item{distances}{Numeric KNN distance matrix matching \code{indices}. Leave as
+\code{NULL} when \code{indices} is a KNN list.}
 
-\item{method}{Embedding method: `"tsne"` or `"umap"`.}
+\item{method}{Embedding method: \code{"tsne"} or \code{"umap"}.}
 
 \item{n_components}{Output dimensionality.}
 
@@ -32,18 +33,19 @@ automatically.}
 
 \item{verbose}{Print native optimizer progress.}
 
-\item{backend}{Execution backend: `"cpu"`, `"cuda"`, or `"metal"`.}
+\item{backend}{Execution backend: \code{"cpu"}, \code{"cuda"}, or
+    \code{"metal"}.}
 
 \item{n.cores}{Number of CPU cores used by the CPU optimizer.
 Native GPU optimizers ignore this argument.}
 
-\item{...}{Additional t-SNE-specific parameters such as `perplexity`,
-iteration controls, `Y_init`, learning-rate controls, and exaggeration
+\item{...}{Additional t-SNE-specific parameters such as \code{perplexity},
+iteration controls, \code{Y_init}, learning-rate controls, and exaggeration
 controls.}
 }
 \value{
 A numeric embedding matrix with resolved settings stored in
-    `attr(layout, "fastEmbedR_config")`.
+\code{attr(layout, "fastEmbedR_config")}.
 }
 \description{
 Embed from precomputed KNN

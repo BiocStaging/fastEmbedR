@@ -10,7 +10,7 @@ fastEmbedR_api()
 A data frame with one row per exported function.
 }
 \description{
-`fastEmbedR_api()` returns the package's machine-readable public API map.
+\code{fastEmbedR_api()} returns the package's machine-readable public API map.
 The map distinguishes canonical workflows from advanced reusable-state
 interfaces, diagnostics, secondary graph utilities, and compatibility
 helpers. It also records accepted input classes, returned classes, backend
@@ -20,11 +20,13 @@ status.
 \details{
 The inventory describes the public contract of the installed package. A
 backend marked as supported still requires that backend to have been
-compiled and to be available at runtime; use [fastEmbedR_capabilities()] to
+compiled and to be available at runtime; use
+\code{\link[=fastEmbedR_capabilities]{fastEmbedR_capabilities()}} to
 inspect the current installation.
 
 UMAP rows describe fastEmbedR's fixed optimizer policy, not a general-purpose
-parameter-sweep interface. See [umap()] for the public/internal control
+parameter-sweep interface. See \code{\link[=umap]{umap()}} for the
+public/internal control
 boundary and the resolved values recorded by each fit.
 }
 \examples{

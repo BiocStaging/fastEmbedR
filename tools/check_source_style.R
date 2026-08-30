@@ -6,6 +6,7 @@ max_line_width <- 80L
 source_files <- function() {
     paths <- c(
         list.files("R", "[.][Rr]$", full.names = TRUE),
+        list.files("man", "[.]Rd$", full.names = TRUE),
         list.files("tests/testthat", "[.][Rr]$", full.names = TRUE),
         list.files("vignettes", "[.](Rmd|Rmarkdown)$", full.names = TRUE)
     )
@@ -98,7 +99,7 @@ tab_failures <- function(paths) {
 
 indentation_failures <- function(paths) {
     failures <- character()
-    paths <- paths[grepl("[.][Rr]$", paths)]
+    paths <- paths[grepl("[.](R|r|Rd)$", paths)]
     for (path in paths) {
         lines <- readLines(path, warn = FALSE)
         indentation <- nchar(sub("^( *)[^ ].*$", "\\1", lines))
